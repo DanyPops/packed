@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { filterRows, formatUpdateNotice, mergeRows, nextMode, visibleRows } from "../extension/src/model.ts";
-import { createNatives, type PackageDaemonPort } from "../extension/src/packed.ts";
+import { createNatives, type PackageDaemonPort, type PackageInfo } from "../extension/src/packed.ts";
 
 const installed = [
 	{ name: "pi-extension-manager", pinned: "0.8.2" },
@@ -120,6 +120,46 @@ describe("packed extension seam", () => {
 			"search", "search", "info", "installed", "updates", "security", "setMutationApproval", "install", "remove", "update",
 		]);
 		expect(daemon.calls[1]?.input).toEqual({ query: "lsp", limit: 5, offline: true });
+	});
+
+	it("retries once and succeeds when the cached client's connection is stale, matching the connection-loss shape every other daemon consumer already retries", async () => {
+		const daemon = new FakePackageDaemon();
+		class DeadDaemon extends FakePackageDaemon {
+			override async info(_name: string): Promise<PackageInfo> {
+				throw new TypeError("fetch failed");
+			}
+		}
+		const deadDaemon: PackageDaemonPort = new DeadDaemon();
+		let connectCalls = 0;
+		const natives = await createNatives(async () => {
+			connectCalls++;
+			return connectCalls === 1 ? deadDaemon : daemon;
+		});
+
+		const result = await natives.info("pi-lsp");
+
+		expect(result.version).toBe("1.0.0");
+		expect(connectCalls).toBe(2);
+	});
+
+	it("does not retry a genuine domain-level rejection from the daemon itself -- the actual behavior fix this migration makes", async () => {
+		let operationCalls = 0;
+		class FailingDaemon extends FakePackageDaemon {
+			override async info(name: string): Promise<PackageInfo> {
+				operationCalls++;
+				throw new Error("ValidationError: package name is required");
+			}
+		}
+		const failingDaemon: PackageDaemonPort = new FailingDaemon();
+		let connectCalls = 0;
+		const natives = await createNatives(async () => {
+			connectCalls++;
+			return failingDaemon;
+		});
+
+		await expect(natives.info("")).rejects.toThrow(/ValidationError/);
+		expect(operationCalls).toBe(1);
+		expect(connectCalls).toBe(1);
 	});
 
 	it("contains no Bun-only installer or direct SQLite access", () => {

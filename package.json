@@ -20,6 +20,9 @@
       "extension/src/index.ts"
     ]
   },
+  "dependencies": {
+    "@danypops/daemon-kit": "^0.4.0"
+  },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",

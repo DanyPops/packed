@@ -3,9 +3,13 @@
  *
  * Pi's extension runtime is Node-compatible and does not guarantee a global
  * `Bun`. All registry reads, SQLite access, and package mutations therefore
- * stay inside the supervised Bun daemon. The seam reconnects for every call so
- * a restarted daemon cannot leave a stale port/token client cached in Pi.
+ * stay inside the supervised Bun daemon. A restarted daemon binds a new
+ * port/token, which would otherwise leave a stale cached client behind for
+ * the rest of the Pi session -- daemon-kit's createRetryingClient detects
+ * that on the failing call itself and reconnects, so the happy path reuses
+ * one connected client instead of reconnecting on every single operation.
  */
+import { createRetryingClient } from "@danypops/daemon-kit/pi-client";
 import type { PackageDaemonPort as ClientPackageDaemonPort } from "../../src/client.ts";
 import type { InstalledPkg, Pkg, PkgInfo, UpdateEntry, UpdateOutcome } from "../../src/ports.ts";
 import type { MutationApproval, SecuritySettings } from "../../src/security.ts";
@@ -44,28 +48,18 @@ async function connectDefaultDaemon(): Promise<PackageDaemonPort> {
 }
 
 export async function createNatives(connect: PackageDaemonConnector = connectDefaultDaemon): Promise<Natives> {
-	async function call<T>(operation: (daemon: PackageDaemonPort) => Promise<T>): Promise<T> {
-		let lastError: unknown;
-		for (let attempt = 0; attempt < 2; attempt += 1) {
-			try {
-				return await operation(await connect());
-			} catch (error) {
-				lastError = error;
-			}
-		}
-		throw lastError instanceof Error ? lastError : new Error(String(lastError));
-	}
+	const client = createRetryingClient(connect, { label: "pi-packed" });
 
 	return {
-		search: (query, limit) => call((daemon) => daemon.search(query, limit)),
-		searchOffline: (query, limit) => call((daemon) => daemon.search(query, limit, true)),
-		info: (name) => call((daemon) => daemon.info(name)),
-		installed: () => call((daemon) => daemon.installed()),
-		updates: () => call((daemon) => daemon.updates()),
-		security: () => call((daemon) => daemon.security()),
-		setMutationApproval: (value, approved) => call((daemon) => daemon.setMutationApproval(value, approved)),
-		install: (source, approved) => call((daemon) => daemon.install(source, approved)),
-		remove: (name, approved) => call((daemon) => daemon.remove(name, approved)),
-		update: (source, approved) => call((daemon) => daemon.update(source, approved)),
+		search: (query, limit) => client.call((daemon) => daemon.search(query, limit)),
+		searchOffline: (query, limit) => client.call((daemon) => daemon.search(query, limit, true)),
+		info: (name) => client.call((daemon) => daemon.info(name)),
+		installed: () => client.call((daemon) => daemon.installed()),
+		updates: () => client.call((daemon) => daemon.updates()),
+		security: () => client.call((daemon) => daemon.security()),
+		setMutationApproval: (value, approved) => client.call((daemon) => daemon.setMutationApproval(value, approved)),
+		install: (source, approved) => client.call((daemon) => daemon.install(source, approved)),
+		remove: (name, approved) => client.call((daemon) => daemon.remove(name, approved)),
+		update: (source, approved) => client.call((daemon) => daemon.update(source, approved)),
 	};
 }

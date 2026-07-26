@@ -1,6 +1,6 @@
 {
   "name": "@danypops/pi-packed",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Package service for the Pi agent: search/info/install/updates + /packages TUI, backed by a long-running Bun service",
   "type": "module",
   "bin": {

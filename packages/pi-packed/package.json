@@ -1,0 +1,29 @@
+{
+  "name": "@danypops/pi-packed",
+  "version": "0.6.0",
+  "description": "Pi package tools, commands, profiles, and TUI for the Packed daemon",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["extension/src/index.ts"]
+  },
+  "scripts": {
+    "test": "bun test test",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "dependencies": {
+    "@danypops/packed": "^0.1.0",
+    "@danypops/daemon-kit": "^0.4.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DanyPops/pi-packed.git",
+    "directory": "packages/pi-packed"
+  },
+  "files": ["extension", "README.md"]
+}

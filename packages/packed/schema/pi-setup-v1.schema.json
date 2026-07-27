@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pi setup manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schemaVersion", "packages", "profiles"],
+  "properties": {
+    "$schema": { "const": "./schema/pi-setup-v1.schema.json" },
+    "schemaVersion": { "const": 1 },
+    "packages": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "scope", "source", "resolved", "integrity"],
+            "properties": {
+              "kind": { "const": "npm" }, "scope": { "enum": ["global", "project"] },
+              "source": { "type": "string", "minLength": 5, "maxLength": 512, "pattern": "^npm:" },
+              "resolved": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "integrity": { "type": "string", "minLength": 8, "maxLength": 512, "pattern": "^sha(256|384|512)-[A-Za-z0-9+/=_-]+$" }
+            }
+          },
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "scope", "requested", "source", "resolved"],
+            "properties": {
+              "kind": { "enum": ["git", "https"] }, "scope": { "enum": ["global", "project"] },
+              "requested": { "type": "string", "minLength": 8, "maxLength": 1024 },
+              "source": { "type": "string", "minLength": 8, "maxLength": 1024 },
+              "resolved": { "type": "string", "pattern": "^[a-fA-F0-9]{40}$" }
+            }
+          },
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "scope", "source", "resolved", "machineLocal"],
+            "properties": {
+              "kind": { "const": "local" }, "scope": { "enum": ["global", "project"] },
+              "source": { "type": "string", "minLength": 1, "maxLength": 1024 },
+              "resolved": { "type": "string", "minLength": 1, "maxLength": 1024 },
+              "machineLocal": { "const": true }
+            }
+          }
+        ]
+      }
+    },
+    "profiles": {
+      "type": "object", "maxProperties": 100,
+      "propertyNames": { "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+      "additionalProperties": { "$ref": "#/$defs/profile" }
+    },
+    "defaultProfile": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" }
+  },
+  "$defs": {
+    "profile": {
+      "type": "object", "additionalProperties": false, "required": ["scope"],
+      "properties": {
+        "scope": { "enum": ["global", "project"] },
+        "provider": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "model": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "thinkingLevel": { "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max"] },
+        "tools": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "instructions": { "type": "string", "minLength": 1, "maxLength": 16384 },
+        "theme": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "allowedModels": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 256 } }
+      }
+    }
+  }
+}

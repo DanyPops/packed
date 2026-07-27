@@ -1,14 +1,8 @@
 {
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ESNext"],
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "target": "ESNext",
     "types": ["bun-types"],
-    "strict": true,
-    "allowImportingTsExtensions": true,
-    "noUncheckedIndexedAccess": true,
-    "skipLibCheck": true,
     "noEmit": true
-  }
+  },
+  "include": ["packages/pi-packed/extension/**/*.ts", "packages/pi-packed/test/**/*.ts"]
 }

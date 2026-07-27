@@ -24,7 +24,7 @@
         "packed": "src/cli.ts",
       },
       "dependencies": {
-        "@danypops/daemon-kit": "^0.4.0",
+        "@danypops/daemon-kit": "^0.12.0",
         "jiti": "2.6.1",
         "publint": "0.3.22",
         "typebox": "^1.3.6",
@@ -34,7 +34,7 @@
       "name": "@danypops/pi-packed",
       "version": "0.6.0",
       "dependencies": {
-        "@danypops/daemon-kit": "^0.4.0",
+        "@danypops/daemon-kit": "^0.12.0",
         "@danypops/packed": "^0.1.0",
       },
       "peerDependencies": {
@@ -404,6 +404,10 @@
     "@aws-sdk/credential-provider-sso/@aws-sdk/token-providers": ["@aws-sdk/token-providers@3.1088.0", "", { "dependencies": { "@aws-sdk/core": "^3.975.3", "@aws-sdk/nested-clients": "^3.997.33", "@aws-sdk/types": "^3.974.2", "@smithy/core": "^3.29.4", "@smithy/types": "^4.16.1", "tslib": "^2.6.2" } }, "sha512-4ObatWt2qpJg5FBk4LOOKrTQYzaqeewAtdO3r9ZO8lH9YqLtpTzLyIdy0mJ+nVdfYOnqISkKNfmzP22bNDhwyw=="],
 
     "@aws-sdk/nested-clients/@smithy/node-http-handler": ["@smithy/node-http-handler@4.9.7", "", { "dependencies": { "@smithy/core": "^3.29.5", "@smithy/types": "^4.16.1", "tslib": "^2.6.2" } }, "sha512-wCU8HCLjAtAVqxxe0j2xff9LcEPw3yjBbg5IdQDIYFnxnPxbxcSLc7rgex7kqm9L/WYOnJEgaWQlfDkZleozMA=="],
+
+    "@danypops/packed/@danypops/daemon-kit": ["@danypops/daemon-kit@0.12.0", "", { "dependencies": { "pino": "^10.3.1" }, "peerDependencies": { "@earendil-works/pi-coding-agent": "*", "typescript": "^5" }, "optionalPeers": ["@earendil-works/pi-coding-agent"] }, "sha512-nx9SDdgdMdCIDfa/IIkf6Klk+F/pyhX7JrhDiCoyxEN5w7mzPe1dJ1okcU3JkjXhBztvf/sMxwVMwTNdYxdEsw=="],
+
+    "@danypops/pi-packed/@danypops/daemon-kit": ["@danypops/daemon-kit@0.12.0", "", { "dependencies": { "pino": "^10.3.1" }, "peerDependencies": { "@earendil-works/pi-coding-agent": "*", "typescript": "^5" }, "optionalPeers": ["@earendil-works/pi-coding-agent"] }, "sha512-nx9SDdgdMdCIDfa/IIkf6Klk+F/pyhX7JrhDiCoyxEN5w7mzPe1dJ1okcU3JkjXhBztvf/sMxwVMwTNdYxdEsw=="],
 
     "@earendil-works/pi-agent-core/typebox": ["typebox@1.1.38", "", {}, "sha512-pZ0aQPmMmXoUvSbeuWf/Hzsc+avNw/Zd6VeE8CFgkVGWyuHPJvqeJJDeJqLve+K70LvjYIoleGcoJHPT17cWoA=="],
 

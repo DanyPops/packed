@@ -75,7 +75,7 @@ function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOptions {
 	};
 }
 
-export function startPackedDaemon(options: StartPackedDaemonOptions = {}): RunningDaemon {
+export function startPackedDaemon(options: StartPackedDaemonOptions = {}): Promise<RunningDaemon> {
 	return startDaemon(daemonOptions(options));
 }
 

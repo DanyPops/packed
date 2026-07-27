@@ -125,7 +125,7 @@ describe("daemon-kit migration", () => {
 	it("starts and stops through daemon-kit with an atomic authenticated handle", async () => {
 		const root = tempRoot("packed-daemon");
 		const paths = testPaths(root);
-		const running = startPackedDaemon({ paths, reg: registry, inst: installer, piHome: root, maintenanceTasks: [] });
+		const running = await startPackedDaemon({ paths, reg: registry, inst: installer, piHome: root, maintenanceTasks: [] });
 		try {
 			const handle = readDaemonHandle(paths.handle);
 			expect(handle).toMatchObject({ host: "127.0.0.1", port: running.port, pid: process.pid });

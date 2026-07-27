@@ -25,7 +25,7 @@ export function resolvePackedPaths(options: PathEnvironment = {}): PackedPaths {
 			database: join(directory, DB_FILE),
 			token: join(directory, PATH_NAMES.tokenFilename),
 			handle: join(directory, PATH_NAMES.handleFilename),
-			systemdUnit: join(directory, PATH_NAMES.systemdUnitName),
+			serviceDescriptor: join(directory, PATH_NAMES.systemdUnitName),
 			stateDirectory: directory,
 		};
 	}

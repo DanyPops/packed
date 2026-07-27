@@ -110,7 +110,7 @@ describe("daemon-kit migration", () => {
 		expect(await client.operations()).toEqual([
 			"package.search", "package.info", "package.installed", "package.catalog", "package.catalog.sync", "package.updates", "package.check", "package.pack", "package.score",
 			"setup.export", "setup.update", "setup.plan", "setup.apply",
-			"package.security.get", "package.security.set", "package.install", "package.remove", "package.update",
+			"package.security.get", "package.security.set", "package.install", "package.install_service", "package.remove", "package.update",
 		]);
 		expect(await client.call("package.search", { query: "test", limit: 10, offline: false })).toMatchObject({ total: 1 });
 		expect(await client.call("package.info", { name: "pi-test" })).toEqual({ name: "pi-test", version: "1.0.0" });

@@ -66,11 +66,33 @@ Packages execute arbitrary code and mutate Pi settings/install roots. One daemon
 | `packed setup plan [manifest] [--prune] [--json]` | Validate and show an additive or exact setup diff without mutation |
 | `packed setup apply [manifest] [--prune] [--approve] [--json]` | Apply locked packages/profiles; optionally remove undeclared state last |
 | `packed install <source> [--approve] [--json]` | Authenticated daemon install for `npm:`, `git:`, or `https://` sources |
+| `packed install-service <source> --approve [--json]` | Registers an installed npm package's own daemon as a persistent login/boot service, via its `packed.daemonService` manifest |
 | `packed remove <name> [--approve] [--json]` | Authenticated daemon removal by bare npm name |
 | `packed security [always\|never] [--approve] [--json]` | Read or set the package mutation approval policy |
 | `packed serve` | Run the loopback daemon |
 | `packed service` | Print the systemd user unit |
 | `packed version` | Print the package/service version |
+
+### Persistent daemon services
+
+Every daemon-backed pi package already auto-spawns its own daemon lazily on first use (see each package's own `connectWithPolicy`/`ensure*Client` wiring) -- no install step is required for basic function. Surviving a reboot, however, has always meant separately discovering and running that package's own `<bin> service install` command by hand (`web-spider service install`, `papyrus service install`, `packed service` + manual `systemctl`).
+
+`packed install-service <source>` closes that gap for any package that opts in. A package declares its daemon entry point once, in its own `package.json`:
+
+```json
+{
+  "packed": {
+    "daemonService": {
+      "binPath": "dist/cli.js",
+      "args": ["serve"],
+      "name": "web-spider",
+      "displayName": "Web Spider"
+    }
+  }
+}
+```
+
+`packed install-service` reads that manifest from the already-installed npm package and calls daemon-kit's `installUserService()` -- the exact same systemd `--user` / launchd / Windows Run-key mechanism that package's own `service install` command would use, so the two are fully interchangeable. `binPath` is required; `name`/`displayName` default to the package's own (unscoped) npm name. git:/local sources aren't supported yet -- only `npm:`. Classified as a `code-execution` mutation, same tier as `install`/`update`, so it requires `--approve` under the secure default like everything else that runs code or touches system state.
 
 Guarded CLI mutations require `--approve` under the secure default. This is pi-packed mutation authorization, distinct from Pi's project-trust `--approve` semantics. Install/remove JSON results are stable objects:
 
@@ -137,6 +159,7 @@ The daemon listens on loopback only.
 | `GET` | `/updates` |
 | `GET` | `/catalog` |
 | `POST` | `/install` with `{ "source": "...", "approved": true }` |
+| `POST` | `/install-service` with `{ "source": "...", "approved": true }` |
 | `POST` | `/update` with `{ "source": "...", "approved": true }` |
 | `POST` | `/remove` with `{ "name": "...", "approved": true }` |
 

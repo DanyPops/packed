@@ -33,6 +33,7 @@ export interface PackageDaemonPort {
 	security(): Promise<SecuritySettings>;
 	setMutationApproval(value: MutationApproval, approved?: boolean): Promise<SecuritySettings>;
 	install(source: string, approved?: boolean): Promise<string>;
+	installService(source: string, approved?: boolean): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }>;
 	remove(name: string, approved?: boolean): Promise<string>;
 	update(source: string, approved?: boolean): Promise<UpdateOutcome>;
 }
@@ -137,6 +138,12 @@ export class PackageDaemonClient implements PackageDaemonPort {
 		return result.output;
 	}
 
+	async installService(source: string, approved = false): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }> {
+		const result = await this.call("package.install_service", { source, approved });
+		if (!result.ok) throw new PackageDaemonError(result.output || `failed to install a persistent service for ${source}`, "package.install_service");
+		return { output: result.output, spec: result.spec };
+	}
+
 	async remove(name: string, approved = false): Promise<string> {
 		const result = await this.call("package.remove", { name, approved });
 		if (!result.ok) throw new PackageDaemonError(result.output || `failed to remove ${name}`, "package.remove");
@@ -180,6 +187,17 @@ export class DaemonBackedInstaller implements Installer {
 	async install(source: string, options?: { approved?: boolean }): Promise<string> { return (await connectPackageDaemon(this.paths)).install(source, options?.approved); }
 	async remove(source: string, options?: { approved?: boolean }): Promise<string> { return new PackageDaemonInstaller(await connectPackageDaemon(this.paths)).remove(source, options); }
 	async update(source: string, options?: { approved?: boolean }): Promise<UpdateOutcome> { return (await connectPackageDaemon(this.paths)).update(source, options?.approved); }
+}
+
+export interface DaemonServiceInstallerPort {
+	install(source: string, approved?: boolean): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }>;
+}
+
+export class DaemonBackedDaemonServiceInstaller implements DaemonServiceInstallerPort {
+	constructor(private readonly paths: PackedPaths = resolvePackedPaths()) {}
+	async install(source: string, approved?: boolean): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }> {
+		return (await connectPackageDaemon(this.paths)).installService(source, approved);
+	}
 }
 
 export class DaemonRegistry implements Registry {

@@ -58,6 +58,7 @@ usage:
   packed setup plan [manifest] [--prune] [--json] show an additive or exact setup diff without mutation
   packed setup apply [manifest] [--prune] [--approve] [--json] apply an approved setup plan
   packed install <source> [--approve] [--json] pi install npm:|git:|https://… via daemon
+  packed install-service <source> --approve [--json] register a package's own daemon as a persistent login/boot service
   packed remove <name> [--approve] [--json]    remove by bare npm name via daemon
   packed security [always|never] [--approve] [--json] read or set mutation approval policy
   packed serve                                 run the long-running daemon
@@ -88,6 +89,7 @@ export interface CliDeps {
 		plan(manifestPath: string, options?: { prune?: boolean }): Promise<SetupPlan>;
 		apply(manifestPath: string, options?: { prune?: boolean }): Promise<SetupApplyResult>;
 	};
+	daemonService?: { install(source: string, approved?: boolean): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }> };
 }
 
 export interface CliResult {
@@ -151,6 +153,7 @@ const PACKAGE_COMMAND_OPERATIONS: Record<string, PackageOperation | undefined> =
 	update: "update",
 	mirror: "mirror",
 	install: "install",
+	"install-service": "install_service",
 	remove: "remove",
 };
 
@@ -347,6 +350,22 @@ const commands: Record<string, { usage: string; run: Command }> = {
 		},
 	},
 
+	"install-service": {
+		usage: "packed install-service npm:<pkg>[@ver] --approve [--json]  (registers the package's own daemon as a persistent login/boot service; see its packed.daemonService manifest)",
+		async run(_rest, d, flags, pos) {
+			const source = pos[0] ?? "";
+			if (!SOURCE_RE.test(source)) return usageErr(`usage: ${commands["install-service"]!.usage}\n`);
+			if (!d.daemonService) return fail("install-service requires a running packed daemon\n");
+			try {
+				const { output, spec } = await d.daemonService.install(source, flags.approved);
+				return flags.json ? ok(`${JSON.stringify({ ok: true, source, output, spec })}\n`) : ok(`${output}\n`);
+			} catch (e) {
+				const error = e instanceof Error ? e.message : String(e);
+				return flags.json ? fail(`${JSON.stringify({ ok: false, source, error })}\n`) : fail(`${error}\n`);
+			}
+		},
+	},
+
 	security: {
 		usage: "packed security [always|never] [--json]",
 		async run(_rest, d, flags, pos) {
@@ -452,7 +471,7 @@ export async function cliRun(args: string[], d: CliDeps): Promise<CliResult> {
 	if (!cmd) return usageErr(`unknown command "${name}"\n${USAGE}`);
 	const { flags, pos } = parseFlags(rest);
 	try {
-		const validMutationInput = name === "install" || name === "update"
+		const validMutationInput = name === "install" || name === "update" || name === "install-service"
 			? SOURCE_RE.test(pos[0] ?? "")
 			: name === "remove" ? NAME_RE.test(pos[0] ?? "")
 				: name === "security" ? (pos[0] === undefined || pos[0] === "always" || pos[0] === "never")
@@ -483,7 +502,7 @@ if (import.meta.main) {
 		const { migrateLegacyPackedState, resolvePackedPaths } = await import("./paths.ts");
 		const { dirname } = await import("node:path");
 		const { defaultPiHome } = await import("./installed.ts");
-		const { connectPackageDaemon, DaemonBackedSecurity, DaemonBackedInstaller, resolveRegistry } = await import("./client.ts");
+		const { connectPackageDaemon, DaemonBackedSecurity, DaemonBackedInstaller, DaemonBackedDaemonServiceInstaller, resolveRegistry } = await import("./client.ts");
 		const paths = resolvePackedPaths();
 		migrateLegacyPackedState(paths);
 		const dir = paths.stateDirectory;
@@ -497,6 +516,7 @@ if (import.meta.main) {
 			reg,
 			daemon,
 			inst: new DaemonBackedInstaller(paths),
+			daemonService: new DaemonBackedDaemonServiceInstaller(paths),
 			security: new DaemonBackedSecurity(paths),
 			stateDir: dir,
 			dataDir: dirname(paths.database),

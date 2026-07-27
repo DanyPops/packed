@@ -18,6 +18,8 @@ import { StaticPackageChecker, type CheckReport, type PackageChecker } from "./c
 import { NpmPackVerifier, type PackReport } from "./pack.ts";
 import { scoreTarget, type AdoptionReport } from "./score.ts";
 import { SetupManager, type SetupApplyResult, type SetupExportReport, type SetupPlan, type SetupUpdateReport } from "./setup.ts";
+import { RealDaemonServiceInstaller, type DaemonServiceInstaller } from "./daemon-service.ts";
+import type { ServiceInstallResult, ServiceSpec } from "@danypops/daemon-kit/service";
 import {
 	assertPackagePermission,
 	PackageApprovalRequiredError,
@@ -46,6 +48,7 @@ export interface Deps {
 		plan(manifestPath: string, options?: { prune?: boolean }): Promise<SetupPlan>;
 		apply(manifestPath: string, options?: { prune?: boolean }): Promise<SetupApplyResult>;
 	};
+	daemonServiceInstaller?: DaemonServiceInstaller;
 }
 
 export type OperationName =
@@ -65,6 +68,7 @@ export type OperationName =
 	| "package.security.get"
 	| "package.security.set"
 	| "package.install"
+	| "package.install_service"
 	| "package.remove"
 	| "package.update";
 
@@ -85,12 +89,14 @@ export interface OperationInputs {
 	"package.security.get": Record<string, never>;
 	"package.security.set": { mutationApproval: MutationApproval; approved?: boolean };
 	"package.install": { source: string; approved?: boolean };
+	"package.install_service": { source: string; approved?: boolean };
 	"package.remove": { name: string; approved?: boolean };
 	"package.update": { source: string; approved?: boolean };
 }
 
 interface MutationResponse { ok: boolean; output: string }
 interface UpdateMutationResponse extends MutationResponse, Partial<Omit<UpdateOutcome, "output">> {}
+interface InstallServiceResponse { ok: boolean; output: string; spec?: Pick<ServiceSpec, "name" | "binPath" | "descriptorPath"> }
 
 export interface OperationOutputs {
 	"package.search": { query: string; total: number; results: SearchPage["results"]; offline?: boolean };
@@ -109,6 +115,7 @@ export interface OperationOutputs {
 	"package.security.get": { mutationApproval: MutationApproval };
 	"package.security.set": { mutationApproval: MutationApproval };
 	"package.install": MutationResponse;
+	"package.install_service": InstallServiceResponse;
 	"package.remove": MutationResponse;
 	"package.update": UpdateMutationResponse;
 }
@@ -116,7 +123,7 @@ export interface OperationOutputs {
 export const OPERATION_NAMES: readonly OperationName[] = [
 	"package.search", "package.info", "package.installed", "package.catalog", "package.catalog.sync", "package.updates", "package.check", "package.pack", "package.score",
 	"setup.export", "setup.update", "setup.plan", "setup.apply",
-	"package.security.get", "package.security.set", "package.install", "package.remove", "package.update",
+	"package.security.get", "package.security.set", "package.install", "package.install_service", "package.remove", "package.update",
 ];
 
 class PackageOperationError extends Error {
@@ -136,12 +143,18 @@ function err(status: number, msg: string, details: Record<string, unknown> = {})
 	return jsonResponse({ error: msg, ...details }, { status });
 }
 
+function pickSpec(spec: ServiceSpec): Pick<ServiceSpec, "name" | "binPath" | "descriptorPath"> {
+	return { name: spec.name, binPath: spec.binPath, descriptorPath: spec.descriptorPath };
+}
+
 export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Response> } {
 	const cache = deps.cache ?? new TTLCache();
 	const dataDir = deps.dataDir ?? deps.stateDir;
 	const checker = deps.checker ?? new StaticPackageChecker();
 	const packer = deps.packer ?? new NpmPackVerifier();
 	const setup = deps.setup ?? new SetupManager(deps.reg, deps.inst, deps.piHome ?? defaultPiHome());
+	const daemonServiceInstaller = deps.daemonServiceInstaller ?? new RealDaemonServiceInstaller();
+	const piHomeForServiceInstall = deps.piHome ?? defaultPiHome();
 
 	function authorize(operation: PackageOperation, approved: boolean): Response | undefined {
 		try {
@@ -262,6 +275,27 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			}
 		}
 
+		if (path === "/install-service" && req.method === "POST") {
+			let source = "";
+			let approved = false;
+			try {
+				const body = (await req.json()) as { source?: unknown; approved?: unknown };
+				source = String(body.source ?? "");
+				approved = body.approved === true;
+			} catch {
+				/* fall through to validation */
+			}
+			if (!SOURCE_RE.test(source)) {
+				return err(400, "invalid source; want npm:<pkg>[@ver] -- daemon-service installation only supports npm sources today");
+			}
+			const denied = authorize("install_service", approved);
+			if (denied) return denied;
+			const resolved = daemonServiceInstaller.install(piHomeForServiceInstall, source);
+			if (!resolved.ok) return json({ ok: false, output: resolved.reason });
+			if (!resolved.result.installed) return json({ ok: false, output: resolved.result.reason, spec: pickSpec(resolved.spec) });
+			return json({ ok: true, output: `installed a persistent service for ${resolved.spec.name}`, spec: pickSpec(resolved.spec) });
+		}
+
 		if (path === "/update" && req.method === "POST") {
 			let source = "";
 			let approved = false;
@@ -350,6 +384,7 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			case "package.security.get": path = "/security"; break;
 			case "package.security.set": path = "/security"; init = { method: "POST", body: JSON.stringify(input) }; break;
 			case "package.install": path = "/install"; init = { method: "POST", body: JSON.stringify(input) }; break;
+			case "package.install_service": path = "/install-service"; init = { method: "POST", body: JSON.stringify(input) }; break;
 			case "package.remove": path = "/remove"; init = { method: "POST", body: JSON.stringify(input) }; break;
 			case "package.update": path = "/update"; init = { method: "POST", body: JSON.stringify(input) }; break;
 			default: throw new PackageOperationError(`unknown operation: ${String(op)}`, 404);

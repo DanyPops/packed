@@ -3,6 +3,8 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, type Deps } from "../src/service.ts";
+import type { DaemonServiceInstaller } from "../src/daemon-service.ts";
+import type { ServiceSpec } from "@danypops/daemon-kit/service";
 import { saveUpdates } from "../src/watcher.ts";
 import { openDb, replaceAll, dbPath } from "../src/db.ts";
 import type { Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/ports.ts";
@@ -53,6 +55,21 @@ class FakeInstaller implements Installer {
 	async update(source: string): Promise<UpdateOutcome> {
 		this.updated = source;
 		return { output: this.output, reloadRequired: true, alreadyUpToDate: false, pinned: false, ...this.updateOutcome };
+	}
+}
+
+class FakeDaemonServiceInstaller implements DaemonServiceInstaller {
+	gotPiHome = "";
+	gotSource = "";
+	resolveFailure: string | undefined;
+	installFailure: string | undefined;
+	spec: ServiceSpec = { name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/tmp/probe.service" };
+	install(piHome: string, source: string): { ok: true; result: { installed: true } | { installed: false; reason: string }; spec: ServiceSpec } | { ok: false; reason: string } {
+		this.gotPiHome = piHome;
+		this.gotSource = source;
+		if (this.resolveFailure) return { ok: false, reason: this.resolveFailure };
+		if (this.installFailure) return { ok: true, result: { installed: false, reason: this.installFailure }, spec: this.spec };
+		return { ok: true, result: { installed: true }, spec: this.spec };
 	}
 }
 
@@ -205,6 +222,85 @@ describe("service app", () => {
 		const body = await res.json() as any;
 		expect(body.ok).toBe(false);
 		expect(body.output).toContain("npm ERR! 404");
+	});
+
+	it("POST /install-service rejects invalid sources and requires approval, matching /install's own guard", async () => {
+		const svc = new FakeDaemonServiceInstaller();
+		const app = createApp(deps({ daemonServiceInstaller: svc }));
+
+		const invalid = await app.fetch(new Request("http://x/install-service", {
+			method: "POST",
+			headers: { ...auth, "content-type": "application/json" },
+			body: JSON.stringify({ source: "npm:foo && curl x|sh" }),
+		}));
+		expect(invalid.status).toBe(400);
+		expect(svc.gotSource).toBe("");
+
+		const unapproved = await app.fetch(new Request("http://x/install-service", {
+			method: "POST",
+			headers: { ...auth, "content-type": "application/json" },
+			body: JSON.stringify({ source: "npm:web-spider-daemon" }),
+		}));
+		expect(unapproved.status).toBe(403);
+		expect(await unapproved.json()).toMatchObject({ code: "approval_required" });
+		expect(svc.gotSource).toBe("");
+
+		// A structurally valid but non-npm source is approval-gated the same as
+		// any other source -- it fails closed only once the resolver itself runs
+		// (a resolveDaemonServiceSpec responsibility, not this route's own regex).
+		const gitApproved = await app.fetch(new Request("http://x/install-service", {
+			method: "POST",
+			headers: { ...auth, "content-type": "application/json" },
+			body: JSON.stringify({ source: "git:github.com/u/r@v1", approved: true }),
+		}));
+		expect(gitApproved.status).toBe(200);
+		expect((await gitApproved.json() as any).ok).toBe(true); // FakeDaemonServiceInstaller doesn't itself enforce the npm-only rule; resolveDaemonServiceSpec's own unit tests cover that.
+	});
+
+	it("POST /install-service installs a real service once approved, reporting the resolved spec", async () => {
+		const svc = new FakeDaemonServiceInstaller();
+		const piHome = mkdtempSync(join(tmpdir(), "packed-pi-"));
+		const app = createApp(deps({ daemonServiceInstaller: svc, piHome }));
+
+		const res = await app.fetch(new Request("http://x/install-service", {
+			method: "POST",
+			headers: { ...auth, "content-type": "application/json" },
+			body: JSON.stringify({ source: "npm:web-spider-daemon", approved: true }),
+		}));
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as any;
+		expect(body.ok).toBe(true);
+		expect(body.output).toContain("probe");
+		expect(body.spec).toEqual({ name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/tmp/probe.service" });
+		expect(svc.gotPiHome).toBe(piHome);
+		expect(svc.gotSource).toBe("npm:web-spider-daemon");
+	});
+
+	it("POST /install-service reports a resolution failure (no manifest) or an install failure (e.g. unsupported init system) in-band, not as an HTTP error", async () => {
+		const svc = new FakeDaemonServiceInstaller();
+		svc.resolveFailure = "web-spider-daemon does not declare a packed.daemonService manifest";
+		const app = createApp(deps({ daemonServiceInstaller: svc }));
+
+		const resolutionFailure = await app.fetch(new Request("http://x/install-service", {
+			method: "POST",
+			headers: { ...auth, "content-type": "application/json" },
+			body: JSON.stringify({ source: "npm:web-spider-daemon", approved: true }),
+		}));
+		expect(resolutionFailure.status).toBe(200);
+		expect((await resolutionFailure.json() as any).ok).toBe(false);
+
+		svc.resolveFailure = undefined;
+		svc.installFailure = "no supported Linux init system was detected";
+		const installFailure = await app.fetch(new Request("http://x/install-service", {
+			method: "POST",
+			headers: { ...auth, "content-type": "application/json" },
+			body: JSON.stringify({ source: "npm:web-spider-daemon", approved: true }),
+		}));
+		expect(installFailure.status).toBe(200);
+		const body = (await installFailure.json()) as any;
+		expect(body.ok).toBe(false);
+		expect(body.output).toContain("no supported Linux init system");
+		expect(body.spec).toEqual({ name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/tmp/probe.service" });
 	});
 
 	it("POST /update validates, authorizes, and delegates one Pi package source", async () => {

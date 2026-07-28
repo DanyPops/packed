@@ -11,9 +11,9 @@
  */
 import { createRetryingClient } from "@danypops/daemon-kit/pi-client";
 import { ensurePackedClient, type PackedExtensionClient } from "@danypops/packed/client";
-import type { InstalledPackage, PackageInfo, PackageSummary, SecuritySettings, SetupApplyResult, SetupPlan, UpdateEntry, UpdateOutcome } from "@danypops/packed/protocol";
+import type { InstalledPackage, PackageInfo, PackageResources, PackageSummary, ResourceField, SecuritySettings, SetupApplyResult, SetupPlan, UpdateEntry, UpdateOutcome } from "@danypops/packed/protocol";
 
-export type { PackageInfo, UpdateEntry, UpdateOutcome };
+export type { PackageInfo, PackageResources, ResourceField, UpdateEntry, UpdateOutcome };
 export type InstalledPkg = InstalledPackage;
 export type PackageDaemonPort = PackedExtensionClient;
 type MutationApproval = SecuritySettings["mutationApproval"];
@@ -37,6 +37,8 @@ export interface Natives {
 	update(source: string, approved?: boolean): Promise<UpdateOutcome>;
 	setupPlan(manifestPath: string, prune?: boolean): Promise<SetupPlan>;
 	setupApply(manifestPath: string, approved?: boolean, prune?: boolean): Promise<SetupApplyResult>;
+	listResources(projectRoot?: string): Promise<{ global: PackageResources[]; project: PackageResources[] }>;
+	toggleResource(source: string, field: ResourceField, path: string, enabled: boolean, projectRoot?: string, approved?: boolean): Promise<string>;
 }
 
 export type PackageDaemonConnector = () => Promise<PackageDaemonPort>;
@@ -61,5 +63,7 @@ export async function createNatives(connect: PackageDaemonConnector = connectDef
 		update: (source, approved) => client.call((daemon) => daemon.update(source, approved)),
 		setupPlan: (manifestPath, prune) => client.call((daemon) => daemon.setupPlan(manifestPath, prune)),
 		setupApply: (manifestPath, approved, prune) => client.call((daemon) => daemon.setupApply(manifestPath, approved, prune)),
+		listResources: (projectRoot) => client.call((daemon) => daemon.listResources(projectRoot)),
+		toggleResource: (source, field, path, enabled, projectRoot, approved) => client.call((daemon) => daemon.toggleResource(source, field, path, enabled, projectRoot, approved)),
 	};
 }

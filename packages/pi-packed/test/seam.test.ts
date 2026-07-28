@@ -79,6 +79,8 @@ class FakePackageDaemon implements PackageDaemonPort {
 
 	async setupPlan(manifestPath: string, prune = false): Promise<SetupPlan> { this.calls.push({ operation: "setupPlan", input: { manifestPath, prune } }); return { ok: true, manifestPath, operations: [], diagnostics: [] }; }
 	async setupApply(manifestPath: string, approved = false, prune = false): Promise<SetupApplyResult> { this.calls.push({ operation: "setupApply", input: { manifestPath, approved, prune } }); return { ok: true, manifestPath, operations: [], reloadRequired: false, diagnostics: [] }; }
+	async listResources(projectRoot?: string) { this.calls.push({ operation: "listResources", input: { projectRoot } }); return { global: [], project: [] }; }
+	async toggleResource(source: string, field: "extensions" | "skills" | "prompts" | "themes", path: string, enabled: boolean, projectRoot?: string, approved = false) { this.calls.push({ operation: "toggleResource", input: { source, field, path, enabled, projectRoot, approved } }); return "ok"; }
 
 	async security() {
 		this.calls.push({ operation: "security" });

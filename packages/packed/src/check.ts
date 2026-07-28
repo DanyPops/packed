@@ -90,7 +90,7 @@ function declaredBundledRoots(pkg: Record<string, unknown>): string[] {
 	return [...roots];
 }
 
-function walk(root: string, maxFiles: number, bundledRoots: string[]): { files: string[]; truncated: boolean } {
+export function walk(root: string, maxFiles: number, bundledRoots: string[]): { files: string[]; truncated: boolean } {
 	const files: string[] = [];
 	const queue = [root];
 	const maxEntries = maxFiles * 4;
@@ -152,7 +152,7 @@ function isValidGlob(pattern: string): boolean {
 	try { new Bun.Glob(pattern); return true; } catch { return false; }
 }
 
-function matchesPattern(file: string, pattern: string): boolean {
+export function matchesPattern(file: string, pattern: string): boolean {
 	const normalized = normalizePattern(pattern);
 	if (!hasMagic(normalized)) return file === normalized || file.startsWith(`${normalized.replace(/\/$/, "")}/`);
 	return new Bun.Glob(normalized).match(file);
@@ -208,6 +208,46 @@ function manifestCheck(context: Context): void {
 	if (!context.files.some((file) => /^(?:licen[cs]e|copying)(?:\.|$)/i.test(basename(file)))) add({ code: "PACKAGE_LICENSE_FILE_MISSING", severity: "warning", path: "LICENSE", message: "the package has no license file" });
 }
 
+/** Resolves a resource field's configured or default patterns without
+ * validating or diagnosing them -- undefined means "this field does not
+ * apply" (an explicit pi manifest exists but omits the field). */
+function resourceFieldPatterns(pi: unknown, field: (typeof RESOURCE_FIELDS)[number]): string[] | undefined {
+	const configured = isRecord(pi) ? pi[field] : undefined;
+	if (configured !== undefined) return patternsFor(configured);
+	if (pi === undefined) return [`${field}/`];
+	return undefined;
+}
+
+/** Matches a resource field's patterns against the file list and applies
+ * the extension filter -- containment is the caller's call (diagnosed as
+ * an error in resourcesCheck, silently dropped in discoverPackageResources). */
+function matchResourceFiles(files: string[], field: (typeof RESOURCE_FIELDS)[number], patterns: string[]): string[] {
+	let matched: string[] = [];
+	try { matched = resolvePatterns(files, patterns.filter((pattern) => !pattern.includes("..") && !isAbsolute(pattern) && isValidGlob(normalizePattern(pattern.replace(/^!/, ""))))); } catch { /* invalid glob already reported */ }
+	return matched.filter((file) => RESOURCE_EXTENSIONS[field].test(file));
+}
+
+export type ResourceField = (typeof RESOURCE_FIELDS)[number];
+
+/** Pure discovery: which shipped files a package's own manifest (or
+ * conventional-directory fallback) declares as extensions/skills/prompts/
+ * themes, after the same extension-type and containment filtering
+ * resourcesCheck diagnoses -- without the diagnostics. Used by the
+ * package-resource overlay to know what there is to enable or disable. */
+export function discoverPackageResources(root: string, pkg: Record<string, unknown>, files: string[]): Record<ResourceField, string[]> {
+	const pi = pkg.pi;
+	const result = {} as Record<ResourceField, string[]>;
+	if (pi !== undefined && !isRecord(pi)) {
+		for (const field of RESOURCE_FIELDS) result[field] = [];
+		return result;
+	}
+	for (const field of RESOURCE_FIELDS) {
+		const patterns = resourceFieldPatterns(pi, field);
+		result[field] = patterns ? matchResourceFiles(files, field, patterns).filter((file) => isContainedFile(root, file)) : [];
+	}
+	return result;
+}
+
 function resourcesCheck(context: Context): void {
 	const pi = context.pkg.pi;
 	let resourceCount = 0;
@@ -239,10 +279,7 @@ function resourcesCheck(context: Context): void {
 			}
 			if (!isValidGlob(normalized)) context.add({ code: "PI_RESOURCE_GLOB_INVALID", severity: "error", path: `package.json#pi.${field}`, message: `invalid resource glob: ${raw}` });
 		}
-		let matched: string[] = [];
-		try { matched = resolvePatterns(context.files, patterns.filter((pattern) => !pattern.includes("..") && !isAbsolute(pattern) && isValidGlob(normalizePattern(pattern.replace(/^!/, ""))))); } catch { /* invalid glob already reported */ }
-		matched = matched.filter((file) => RESOURCE_EXTENSIONS[field].test(file));
-		matched = matched.filter((file) => {
+		const matched = matchResourceFiles(context.files, field, patterns).filter((file) => {
 			if (isContainedFile(context.root, file)) return true;
 			context.add({ code: "PI_RESOURCE_OUTSIDE_PACKAGE", severity: "error", path: file, message: `resource resolves outside the package: ${file}` });
 			return false;

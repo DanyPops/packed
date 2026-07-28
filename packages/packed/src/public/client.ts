@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AuthenticatedRpcClient } from "@danypops/daemon-kit/rpc-client";
 import { readDaemonHandle, resolveDaemonPaths } from "@danypops/daemon-kit/paths";
-import type { ExtensionOperationInputs, ExtensionOperationName, ExtensionOperationOutputs, PackageInfo, PackageSummary, SecuritySettings, SetupApplyResult, SetupPlan, UpdateEntry, UpdateOutcome } from "./protocol.js";
+import type { ExtensionOperationInputs, ExtensionOperationName, ExtensionOperationOutputs, PackageInfo, PackageResources, PackageSummary, ResourceField, SecuritySettings, SetupApplyResult, SetupPlan, UpdateEntry, UpdateOutcome } from "./protocol.js";
 
 export interface PackedClientPaths { token: string; handle: string; }
 export interface PackedPathOptions { env?: Record<string, string | undefined>; home?: string; platform?: NodeJS.Platform; }
@@ -20,6 +20,8 @@ export interface PackedExtensionClient {
 	update(source: string, approved?: boolean): Promise<UpdateOutcome>;
 	setupPlan(manifestPath: string, prune?: boolean): Promise<SetupPlan>;
 	setupApply(manifestPath: string, approved?: boolean, prune?: boolean): Promise<SetupApplyResult>;
+	listResources(projectRoot?: string): Promise<{ global: PackageResources[]; project: PackageResources[] }>;
+	toggleResource(source: string, field: ResourceField, path: string, enabled: boolean, projectRoot?: string, approved?: boolean): Promise<string>;
 }
 
 export function resolvePackedClientPaths(options: PackedPathOptions = {}): PackedClientPaths {
@@ -56,6 +58,8 @@ export class PackedClient implements PackedExtensionClient {
 	async update(source: string, approved = false): Promise<UpdateOutcome> { const result = await this.call("package.update", { source, approved }); if (!result.ok) throw new Error(result.output); return { output: result.output, reloadRequired: result.reloadRequired ?? true, alreadyUpToDate: result.alreadyUpToDate ?? false, pinned: result.pinned ?? false, previousVersion: result.previousVersion, currentVersion: result.currentVersion }; }
 	setupPlan(manifestPath: string, prune = false) { return this.call("setup.plan", { manifestPath, prune }); }
 	setupApply(manifestPath: string, approved = false, prune = false) { return this.call("setup.apply", { manifestPath, approved, prune }); }
+	listResources(projectRoot?: string) { return this.call("resources.list", { projectRoot }); }
+	async toggleResource(source: string, field: ResourceField, path: string, enabled: boolean, projectRoot?: string, approved = false) { const result = await this.call("resources.toggle", { source, field, path, enabled, projectRoot, approved }); if (!result.ok) throw new Error(result.output); return result.output; }
 }
 
 export async function connectPackedClient(paths = resolvePackedClientPaths(), transport: FetchTransport = fetch): Promise<PackedClient> {

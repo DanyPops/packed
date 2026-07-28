@@ -16,6 +16,7 @@ import { formatUpdateNotice } from "./model.js";
 import { showPackedSettings } from "./security-tui.js";
 import { registerProfiles } from "./profile.js";
 import { handleSetupCommand } from "./setup-command.js";
+import { handleResourceConfigCommand } from "./resource-config.js";
 
 // Async factory (pi awaits it): the seam creates authenticated daemon
 // clients lazily. It never executes Bun-only adapters or opens SQLite.
@@ -25,9 +26,10 @@ export default async function (pi: ExtensionAPI) {
 	registerTools(pi, natives);
 
 	pi.registerCommand("packed", {
-		description: "Configure pi-packed security settings",
+		description: "Configure pi-packed security settings, run setup plan/apply, or manage resources with config",
 		handler: async (args, ctx) => {
 			if (await handleSetupCommand(args, ctx, natives)) return;
+			if (await handleResourceConfigCommand(args, ctx, natives)) return;
 			await showPackedSettings(ctx, natives);
 		},
 	});

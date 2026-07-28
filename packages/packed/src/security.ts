@@ -22,6 +22,8 @@ export const PACKAGE_OPERATIONS = [
 	"setup.apply",
 	"update",
 	"remove",
+	"resources.list",
+	"resources.toggle",
 	"security.write",
 ] as const;
 export type PackageOperation = typeof PACKAGE_OPERATIONS[number];
@@ -58,6 +60,8 @@ const CLASSIFICATIONS: Record<PackageOperation, PackageOperationClassification> 
 	"setup.apply": "code-execution",
 	update: "code-execution",
 	remove: "settings-mutation",
+	"resources.list": "read",
+	"resources.toggle": "settings-mutation",
 	"security.write": "security-mutation",
 };
 

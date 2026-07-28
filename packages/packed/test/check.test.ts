@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { checkPackage, formatCheckReport, type Diagnostic } from "../src/check.ts";
+import { checkPackage, discoverPackageResources, formatCheckReport, type Diagnostic } from "../src/check.ts";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -35,6 +35,35 @@ const base = {
 function codes(diagnostics: Diagnostic[]): string[] {
 	return diagnostics.map((diagnostic) => diagnostic.code);
 }
+
+describe("discoverPackageResources (pure resource discovery for the config overlay)", () => {
+	it("matches declared manifest patterns per field, filtered by extension and containment", () => {
+		const pkg = { pi: { extensions: ["extensions/*.ts"], skills: ["skills/*/SKILL.md"], themes: [] } };
+		const root = fixture(pkg, { "extensions/index.ts": "", "extensions/README.md": "", "skills/review/SKILL.md": "", "prompts/x.md": "" });
+		const files = ["extensions/index.ts", "extensions/README.md", "skills/review/SKILL.md", "prompts/x.md"];
+		const resources = discoverPackageResources(root, pkg, files);
+		expect(resources.extensions).toEqual(["extensions/index.ts"]);
+		expect(resources.skills).toEqual(["skills/review/SKILL.md"]);
+		expect(resources.themes).toEqual([]);
+		expect(resources.prompts).toEqual([]); // omitted from a present pi manifest -> not discovered
+	});
+
+	it("falls back to conventional directories when no pi manifest is present", () => {
+		const root = fixture({}, { "extensions/foo.ts": "", "skills/bar/SKILL.md": "", "prompts/baz.md": "", "themes/dark.json": "{}" });
+		const files = ["extensions/foo.ts", "skills/bar/SKILL.md", "prompts/baz.md", "themes/dark.json"];
+		const resources = discoverPackageResources(root, {}, files);
+		expect(resources.extensions).toEqual(["extensions/foo.ts"]);
+		expect(resources.skills).toEqual(["skills/bar/SKILL.md"]);
+		expect(resources.prompts).toEqual(["prompts/baz.md"]);
+		expect(resources.themes).toEqual(["themes/dark.json"]);
+	});
+
+	it("never throws on an invalid pi manifest shape and reports zero resources instead", () => {
+		const root = fixture({ pi: "not-an-object" }, { "extensions/foo.ts": "" });
+		const resources = discoverPackageResources(root, { pi: "not-an-object" }, ["extensions/foo.ts"]);
+		expect(resources).toEqual({ extensions: [], skills: [], prompts: [], themes: [] });
+	});
+});
 
 describe("packed check", () => {
 	it("accepts a complete static Pi package without executing it", async () => {

@@ -18,6 +18,9 @@ import { StaticPackageChecker, type CheckReport, type PackageChecker } from "./c
 import { NpmPackVerifier, type PackReport } from "./pack.ts";
 import { scoreTarget, type AdoptionReport } from "./score.ts";
 import { SetupManager, type SetupApplyResult, type SetupExportReport, type SetupPlan, type SetupUpdateReport } from "./setup.ts";
+import { listPackageResources, toggleResource, RESOURCE_FIELDS, type PackageResources, type ResourceField } from "./resources.ts";
+import { join as joinPath } from "node:path";
+import { existsSync as fileExistsSync } from "node:fs";
 import { RealDaemonServiceInstaller, type DaemonServiceInstaller } from "./daemon-service.ts";
 import type { ServiceInstallResult, ServiceSpec } from "@danypops/daemon-kit/service";
 import {
@@ -70,7 +73,9 @@ export type OperationName =
 	| "package.install"
 	| "package.install_service"
 	| "package.remove"
-	| "package.update";
+	| "package.update"
+	| "resources.list"
+	| "resources.toggle";
 
 export interface OperationInputs {
 	"package.search": { query: string; limit: number; offline?: boolean };
@@ -92,6 +97,8 @@ export interface OperationInputs {
 	"package.install_service": { source: string; approved?: boolean };
 	"package.remove": { name: string; approved?: boolean };
 	"package.update": { source: string; approved?: boolean };
+	"resources.list": { projectRoot?: string };
+	"resources.toggle": { source: string; field: ResourceField; path: string; enabled: boolean; projectRoot?: string; approved?: boolean };
 }
 
 interface MutationResponse { ok: boolean; output: string }
@@ -118,12 +125,15 @@ export interface OperationOutputs {
 	"package.install_service": InstallServiceResponse;
 	"package.remove": MutationResponse;
 	"package.update": UpdateMutationResponse;
+	"resources.list": { global: PackageResources[]; project: PackageResources[] };
+	"resources.toggle": MutationResponse;
 }
 
 export const OPERATION_NAMES: readonly OperationName[] = [
 	"package.search", "package.info", "package.installed", "package.catalog", "package.catalog.sync", "package.updates", "package.check", "package.pack", "package.score",
 	"setup.export", "setup.update", "setup.plan", "setup.apply",
 	"package.security.get", "package.security.set", "package.install", "package.install_service", "package.remove", "package.update",
+	"resources.list", "resources.toggle",
 ];
 
 class PackageOperationError extends Error {
@@ -366,6 +376,24 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 				return await setup.apply(value.manifestPath, { prune: applyInput.prune === true }) as OperationOutputs[Name];
 			}
 			return await setup.plan(value.manifestPath, { prune: (input as OperationInputs["setup.plan"]).prune === true }) as OperationOutputs[Name];
+		}
+		if (op === "resources.list") {
+			const value = input as OperationInputs["resources.list"];
+			if (value.projectRoot !== undefined && (typeof value.projectRoot !== "string" || value.projectRoot.length > 4_096)) throw new PackageOperationError("projectRoot must be a string up to 4096 characters", 400);
+			return listPackageResources(deps.piHome ?? defaultPiHome(), value.projectRoot) as OperationOutputs[Name];
+		}
+		if (op === "resources.toggle") {
+			const value = input as OperationInputs["resources.toggle"];
+			if (typeof value.source !== "string" || value.source.length === 0 || value.source.length > 4_096) throw new PackageOperationError("source must be a non-empty string up to 4096 characters", 400);
+			if (!RESOURCE_FIELDS.includes(value.field)) throw new PackageOperationError("field must be one of extensions, skills, prompts, themes", 400);
+			if (typeof value.path !== "string" || value.path.length === 0 || value.path.length > 4_096 || value.path.includes("..")) throw new PackageOperationError("path must be a non-empty, non-escaping relative path up to 4096 characters", 400);
+			const denied = authorize("resources.toggle", value.approved === true);
+			if (denied) throw new PackageOperationError((await denied.json() as { error: string }).error, denied.status);
+			const piHome = deps.piHome ?? defaultPiHome();
+			const settingsPath = value.projectRoot ? joinPath(value.projectRoot, ".pi", "settings.json") : joinPath(piHome, "settings.json");
+			if (value.projectRoot && !fileExistsSync(settingsPath)) throw new PackageOperationError("no project settings file to toggle", 404);
+			const result = toggleResource({ settingsPath, source: value.source, field: value.field, path: value.path, enabled: value.enabled });
+			return { ok: result.ok, output: result.ok ? `${value.enabled ? "enabled" : "disabled"} ${value.path}` : (result.error ?? "toggle failed") } as OperationOutputs[Name];
 		}
 		let path: string;
 		let init: RequestInit = {};

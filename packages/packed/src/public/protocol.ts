@@ -10,8 +10,11 @@ export interface SetupOperation { kind: "install-package" | "update-package" | "
 export interface SetupPlan { ok: boolean; manifestPath: string; operations: SetupOperation[]; manifestSha256?: string; prune?: boolean; diagnostics: Diagnostic[]; }
 export interface SetupApplyResult { ok: boolean; manifestPath: string; operations: Array<{ kind: SetupOperation["kind"]; target: string; status: "succeeded" | "failed"; output?: string }>; reloadRequired: boolean; diagnostics: Diagnostic[]; }
 export interface SecuritySettings { mutationApproval: "always" | "never"; }
+export type ResourceField = "extensions" | "skills" | "prompts" | "themes";
+export interface ResourceItem { path: string; enabled: boolean; }
+export type PackageResources = { source: string; name: string; scope: "global" | "project" } & Record<ResourceField, ResourceItem[]>;
 
-export type ExtensionOperationName = "package.search" | "package.info" | "package.installed" | "package.updates" | "package.security.get" | "package.security.set" | "package.install" | "package.remove" | "package.update" | "setup.plan" | "setup.apply";
+export type ExtensionOperationName = "package.search" | "package.info" | "package.installed" | "package.updates" | "package.security.get" | "package.security.set" | "package.install" | "package.remove" | "package.update" | "setup.plan" | "setup.apply" | "resources.list" | "resources.toggle";
 export interface ExtensionOperationInputs {
 	"package.search": { query: string; limit: number; offline?: boolean };
 	"package.info": { name: string };
@@ -24,6 +27,8 @@ export interface ExtensionOperationInputs {
 	"package.update": { source: string; approved?: boolean };
 	"setup.plan": { manifestPath: string; prune?: boolean };
 	"setup.apply": { manifestPath: string; approved?: boolean; prune?: boolean };
+	"resources.list": { projectRoot?: string };
+	"resources.toggle": { source: string; field: ResourceField; path: string; enabled: boolean; projectRoot?: string; approved?: boolean };
 }
 export interface ExtensionOperationOutputs {
 	"package.search": { query: string; total: number; results: PackageSummary[]; offline?: boolean };
@@ -37,4 +42,6 @@ export interface ExtensionOperationOutputs {
 	"package.update": { ok: boolean; output: string; reloadRequired?: boolean; alreadyUpToDate?: boolean; pinned?: boolean; previousVersion?: string; currentVersion?: string };
 	"setup.plan": SetupPlan;
 	"setup.apply": SetupApplyResult;
+	"resources.list": { global: PackageResources[]; project: PackageResources[] };
+	"resources.toggle": { ok: boolean; output: string };
 }

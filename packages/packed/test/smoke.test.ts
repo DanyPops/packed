@@ -2,11 +2,29 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import { runExtensionSmoke } from "../src/smoke.ts";
 import { checkPackage } from "../src/check.ts";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+
+/**
+ * Binary presence alone doesn't prove bwrap actually works -- some container
+ * runtimes (seen live in GitHub's hosted ubuntu-latest runner) ship the
+ * bubblewrap package but block the unprivileged user namespaces it needs,
+ * so every real invocation fails at runtime with no way to tell from just
+ * `existsSync`. Probing for real is the only way to know, and it mirrors
+ * src/smoke.ts's own fail-closed philosophy: skip the suite rather than
+ * assert against a sandbox this host can't actually provide.
+ */
+function bwrapUsable(): boolean {
+	if (!existsSync("/usr/bin/bwrap")) return false;
+	const probe = spawnSync("/usr/bin/bwrap", ["--ro-bind", "/", "/", "--unshare-all", "--", "/bin/true"], { timeout: 5_000 });
+	return probe.status === 0;
+}
+
+const describeIfSandboxed = bwrapUsable() ? describe : describe.skip;
 
 function extension(source: string): { root: string; path: string } {
 	const root = mkdtempSync(join(tmpdir(), "packed-smoke-"));
@@ -18,7 +36,7 @@ function extension(source: string): { root: string; path: string } {
 	return { root, path };
 }
 
-describe("isolated extension smoke runner", () => {
+describeIfSandboxed("isolated extension smoke runner", () => {
 	it("captures bounded registrations without a model", async () => {
 		const fixture = extension(`export default function (pi: any) {
 			pi.registerTool({ name: "hello", description: "hello" });

@@ -139,7 +139,7 @@ describe("CLI", () => {
 		const calls: string[] = [];
 		const d = deps({ publisher: {
 			async setup(path, options) { calls.push(`setup:${path}:${options?.force}`); return { root: path, ok: true, wrote: true, workflowPath: `${path}/.github/workflows/packed-stage-publish.yml`, packageName: "pi-demo", repository: "example/pi-demo", diagnostics: [] }; },
-			async status(path) { calls.push(`status:${path}`); return { root: path, ready: true, workflowPath: `${path}/.github/workflows/packed-stage-publish.yml`, checks: { packageExists: true, repository: true, workflow: true, lockfile: true, node: true, npm: true, trustedPublisher: "unknown", coreFirst: true }, diagnostics: [], nextSteps: [] }; },
+			async status(path) { calls.push(`status:${path}`); return { root: path, ready: true, workflowPath: `${path}/.github/workflows/packed-stage-publish.yml`, checks: { packageExists: true, repository: true, workflow: true, lockfile: true, node: true, npm: true, trustedPublisher: "unknown", coreFirst: true, loggedIn: true }, diagnostics: [], nextSteps: [] }; },
 		} });
 		const root = resolve(".");
 		expect(JSON.parse((await cliRun(["publish", "setup", ".", "--force", "--json"], d)).out).wrote).toBe(true);

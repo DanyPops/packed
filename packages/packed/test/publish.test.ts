@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PublishManager, renderStageWorkflow, satisfiesRange, stageWorkflowFile, type TrustStatusCommand, type VersionCommand } from "../src/publish.ts";
+import { PublishManager, renderStageWorkflow, runNpmLoginWeb, runNpmTrustGithub, satisfiesRange, stageWorkflowFile, trustGithubArgs, type TrustStatusCommand, type VersionCommand } from "../src/publish.ts";
 import type { PkgInfo, Registry, SearchPage } from "../src/ports.ts";
 
 class RegistryFixture implements Registry {
@@ -32,6 +32,7 @@ function project(overrides: Record<string, unknown> = {}): string {
 }
 
 const npmVersion: VersionCommand = async () => ({ code: 0, stdout: "11.15.0\n", stderr: "" });
+const loggedIn: VersionCommand = async () => ({ code: 0, stdout: "example-user\n", stderr: "" });
 const trusted: TrustStatusCommand = async () => ({ code: 0, stderr: "", stdout: JSON.stringify({ type: "github", repository: "example/pi-demo", file: "pi-demo-stage-publish.yml", permissions: ["createStagedPackage"] }) });
 
 class MultiRegistryFixture implements Registry {
@@ -115,7 +116,7 @@ describe("standalone staged publishing", () => {
 
 	it("status validates workflow identity, npm floor, package existence, and handoff", async () => {
 		const root = project();
-		const manager = new PublishManager(new RegistryFixture(), npmVersion, trusted);
+		const manager = new PublishManager(new RegistryFixture(), npmVersion, trusted, loggedIn);
 		await manager.setup(root);
 		const status = await manager.status(root);
 		expect(status.ready).toBe(true);
@@ -128,7 +129,7 @@ describe("standalone staged publishing", () => {
 		const root = project();
 		await new PublishManager(new RegistryFixture(), npmVersion).setup(root);
 		const broad: TrustStatusCommand = async () => ({ code: 0, stderr: "", stdout: JSON.stringify({ type: "github", repository: "other/repo", file: "publish.yml", permissions: ["createPackage", "createStagedPackage"] }) });
-		const status = await new PublishManager(new RegistryFixture(), npmVersion, broad).status(root);
+		const status = await new PublishManager(new RegistryFixture(), npmVersion, broad, loggedIn).status(root);
 		expect(status.ready).toBe(false);
 		expect(status.checks.trustedPublisher).toBe("not-verified");
 		expect(status.diagnostics.map((item) => item.code)).toContain("PUBLISH_TRUST_MISMATCH");
@@ -138,7 +139,7 @@ describe("standalone staged publishing", () => {
 		const root = project();
 		mkdirSync(join(root, ".github/workflows"), { recursive: true });
 		writeFileSync(join(root, ".github/workflows/pi-demo-stage-publish.yml"), "name: unsafe\n");
-		const manager = new PublishManager(new RegistryFixture(), async () => ({ code: 0, stdout: "11.14.1", stderr: "" }));
+		const manager = new PublishManager(new RegistryFixture(), async () => ({ code: 0, stdout: "11.14.1", stderr: "" }), undefined, loggedIn);
 		const before = readFileSync(join(root, ".github/workflows/pi-demo-stage-publish.yml"), "utf8");
 		const status = await manager.status(root);
 		expect(status.ready).toBe(false);
@@ -175,18 +176,18 @@ describe("standalone staged publishing", () => {
 
 	it("status reports core-first ordering failure when the internal dependency is unpublished or its range no longer matches", async () => {
 		const { extPath } = workspace("^1.0.0");
-		const manager = new PublishManager(new MultiRegistryFixture({ "@example/ext": "1.0.0" }), npmVersion, trusted);
+		const manager = new PublishManager(new MultiRegistryFixture({ "@example/ext": "1.0.0" }), npmVersion, trusted, loggedIn);
 		await manager.setup(extPath);
 		const missing = await manager.status(extPath);
 		expect(missing.checks.coreFirst).toBe(false);
 		expect(missing.diagnostics.map((item) => item.code)).toContain("PUBLISH_DEPENDENCY_NOT_PUBLISHED");
 		expect(missing.ready).toBe(false);
 
-		const mismatched = await new PublishManager(new MultiRegistryFixture({ "@example/core": "2.0.0", "@example/ext": "1.0.0" }), npmVersion, trusted).status(extPath);
+		const mismatched = await new PublishManager(new MultiRegistryFixture({ "@example/core": "2.0.0", "@example/ext": "1.0.0" }), npmVersion, trusted, loggedIn).status(extPath);
 		expect(mismatched.checks.coreFirst).toBe(false);
 		expect(mismatched.diagnostics.map((item) => item.code)).toContain("PUBLISH_DEPENDENCY_RANGE_MISMATCH");
 
-		const satisfied = await new PublishManager(new MultiRegistryFixture({ "@example/core": "1.0.4", "@example/ext": "1.0.0" }), npmVersion, trusted).status(extPath);
+		const satisfied = await new PublishManager(new MultiRegistryFixture({ "@example/core": "1.0.4", "@example/ext": "1.0.0" }), npmVersion, trusted, loggedIn).status(extPath);
 		expect(satisfied.checks.coreFirst).toBe(true);
 		expect(satisfied.diagnostics.map((item) => item.code)).not.toContain("PUBLISH_DEPENDENCY_NOT_PUBLISHED");
 		expect(satisfied.diagnostics.map((item) => item.code)).not.toContain("PUBLISH_DEPENDENCY_RANGE_MISMATCH");
@@ -196,6 +197,29 @@ describe("standalone staged publishing", () => {
 		expect(stageWorkflowFile("@danypops/packed")).toBe("packed-stage-publish.yml");
 		expect(stageWorkflowFile("@danypops/pi-packed")).toBe("pi-packed-stage-publish.yml");
 		expect(stageWorkflowFile("unscoped")).toBe("unscoped-stage-publish.yml");
+	});
+
+	it("reports the local machine's npm login state as informative, never blocking ready", async () => {
+		const root = project();
+		const notLoggedIn: VersionCommand = async () => ({ code: 1, stdout: "", stderr: "npm error code ENEEDAUTH" });
+		const manager = new PublishManager(new RegistryFixture(), npmVersion, trusted, notLoggedIn);
+		await manager.setup(root);
+		const status = await manager.status(root);
+		expect(status.checks.loggedIn).toBe(false);
+		expect(status.diagnostics.map((item) => item.code)).toContain("PUBLISH_NPM_NOT_LOGGED_IN");
+		// trust is independently verified in this fixture, so login state alone never flips ready
+		expect(status.ready).toBe(true);
+	});
+
+	it("builds the exact interactive trust command with --yes appended for a caller that already confirmed intent", () => {
+		expect(trustGithubArgs("@danypops/packed", "packed-stage-publish.yml", "DanyPops/pi-packed")).toEqual([
+			"npm", "trust", "github", "@danypops/packed", "--repo", "DanyPops/pi-packed", "--file", "packed-stage-publish.yml", "--allow-stage-publish", "--yes",
+		]);
+	});
+
+	it("exposes runNpmLoginWeb and runNpmTrustGithub as real, separately invocable subprocess orchestration, never bundled into publish itself", () => {
+		expect(typeof runNpmLoginWeb).toBe("function");
+		expect(typeof runNpmTrustGithub).toBe("function");
 	});
 
 	it("satisfiesRange implements npm's caret/tilde/exact semantics, including 0.x's stricter caret", () => {

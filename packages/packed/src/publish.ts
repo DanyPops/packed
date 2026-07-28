@@ -77,6 +77,10 @@ export interface PublishStatusReport {
 		/** true when every internal (workspace-sibling) dependency this package
 		 * declares is already published on npm at a satisfying version. */
 		coreFirst: boolean;
+		/** Local machine login state (npm whoami) -- informative only, never
+		 * blocks ready: CI publishes over OIDC trusted-publisher config, not
+		 * local login. Surfaced so an interactive caller knows what to offer. */
+		loggedIn: boolean;
 	};
 	diagnostics: Diagnostic[];
 	nextSteps: string[];
@@ -250,6 +254,38 @@ async function runBounded(command: string[]): Promise<VersionCommandResult> {
 
 export const readNpmVersion: VersionCommand = () => runBounded(["npm", "--version"]);
 export const readTrustStatus: TrustStatusCommand = (packageName) => runBounded(["npm", "trust", "list", packageName, "--json"]);
+export const readNpmWhoami: VersionCommand = () => runBounded(["npm", "whoami"]);
+
+export interface InteractiveRunResult { ok: boolean; code: number }
+
+async function runInherited(command: string[]): Promise<InteractiveRunResult> {
+	const proc = Bun.spawn(command, { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+	const code = await proc.exited;
+	return { ok: code === 0, code };
+}
+
+/** Runs the real, interactive `npm login --auth-type=web` -- opens the
+ * user's browser, npm's own process polls for completion and writes
+ * ~/.npmrc itself. No token ever passes through Packed. Only ever invoked
+ * after the caller's own explicit confirmation; never from a non-TTY or
+ * scripted context. */
+export function runNpmLoginWeb(): Promise<InteractiveRunResult> {
+	return runInherited(["npm", "login", "--auth-type=web"]);
+}
+
+/** Pure argv construction, kept separate from the actual spawn so the exact
+ * command shape is directly testable without invoking a real subprocess. */
+export function trustGithubArgs(packageName: string, workflowFile: string, repository: string): string[] {
+	return ["npm", "trust", "github", packageName, "--repo", repository, "--file", workflowFile, "--allow-stage-publish", "--yes"];
+}
+
+/** Runs the exact npm trust command status() already computed, with --yes
+ * appended since the caller (packed publish status) already confirmed
+ * intent interactively -- OTP/2FA still happens inline through npm's own
+ * inherited stdio and is never bypassed. */
+export function runNpmTrustGithub(packageName: string, workflowFile: string, repository: string): Promise<InteractiveRunResult> {
+	return runInherited(trustGithubArgs(packageName, workflowFile, repository));
+}
 
 function readManifest(root: string): PackageManifest {
 	const path = join(root, "package.json");
@@ -406,6 +442,7 @@ export class PublishManager {
 		private readonly registry: Registry,
 		private readonly versionCommand: VersionCommand = readNpmVersion,
 		private readonly trustStatusCommand: TrustStatusCommand = readTrustStatus,
+		private readonly whoamiCommand: VersionCommand = readNpmWhoami,
 	) {}
 
 	async setup(projectPath: string, options: { force?: boolean } = {}): Promise<PublishSetupReport> {
@@ -458,7 +495,7 @@ export class PublishManager {
 		let manifest: PackageManifest;
 		try { manifest = readManifest(root); }
 		catch (error) {
-			return { root, ready: false, workflowPath: join(ws.workspaceRoot, ".github/workflows/stage-publish.yml"), checks: { packageExists: false, repository: false, workflow: false, lockfile: false, node: false, npm: false, trustedPublisher: "unknown", coreFirst: false }, diagnostics: [diagnostic("PUBLISH_MANIFEST_INVALID", "error", "package.json", error instanceof Error ? error.message : String(error))], nextSteps: [] };
+			return { root, ready: false, workflowPath: join(ws.workspaceRoot, ".github/workflows/stage-publish.yml"), checks: { packageExists: false, repository: false, workflow: false, lockfile: false, node: false, npm: false, trustedPublisher: "unknown", coreFirst: false, loggedIn: false }, diagnostics: [diagnostic("PUBLISH_MANIFEST_INVALID", "error", "package.json", error instanceof Error ? error.message : String(error))], nextSteps: [] };
 		}
 		const packageName = typeof manifest.name === "string" && PACKAGE_NAME.test(manifest.name) ? manifest.name : undefined;
 		const workflowFile = stageWorkflowFile(packageName ?? basename(root));
@@ -479,6 +516,8 @@ export class PublishManager {
 			? await this.trustedPublisherStatus(packageName, workflowFile, repository)
 			: "unknown";
 		const coreFirst = await this.coreFirstStatus(internal, diagnostics);
+		const loggedIn = (await this.whoamiCommand().catch(() => ({ code: 1, stdout: "", stderr: "" }))).code === 0;
+		if (!loggedIn) diagnostics.push(diagnostic("PUBLISH_NPM_NOT_LOGGED_IN", "warning", "npm", "not logged in to npm on this machine; trust configuration requires an authenticated npm session", "npm login --auth-type=web"));
 		if (!packageName) diagnostics.push(diagnostic("PUBLISH_PACKAGE_NAME_INVALID", "error", "package.json", "package name is missing or invalid"));
 		if (!exists) diagnostics.push(diagnostic("PUBLISH_PACKAGE_NOT_FOUND", "error", "package.json", "package does not exist on npm"));
 		if (!repository) diagnostics.push(diagnostic("PUBLISH_GITHUB_REPOSITORY_REQUIRED", "error", "package.json", "valid GitHub repository metadata is required"));
@@ -497,7 +536,7 @@ export class PublishManager {
 		];
 		return {
 			root, ready: Boolean(packageName && exists && repository && workflow && lockfile && node && npm && trustedPublisher === "verified" && coreFirst), packageName, repository, workflowPath,
-			checks: { packageExists: exists, repository: Boolean(repository), workflow, lockfile, node, npm, trustedPublisher, coreFirst }, diagnostics, nextSteps,
+			checks: { packageExists: exists, repository: Boolean(repository), workflow, lockfile, node, npm, trustedPublisher, coreFirst, loggedIn }, diagnostics, nextSteps,
 		};
 	}
 

@@ -3,11 +3,15 @@ name: Publish Package
 # Trusted publishing (OIDC): no long-lived npm tokens. npm CLI detects the
 # OIDC environment automatically (requires npm >= 11.5.1). Configure the
 # trusted publisher on npmjs.com: org=DanyPops repo=pi-packed workflow=publish.yml
+#
+# Targets packages/packed (the core package) on packed-v* tags -- distinct
+# from pi-packed-v*, which pi-packed-stage-publish.yml already owns, so the
+# two packages' tags can never race on the same trigger.
 
 on:
   push:
     tags:
-      - "v*"
+      - "packed-v*"
 
 permissions:
   id-token: write # Required for OIDC
@@ -22,7 +26,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       - run: bun install
-      - run: bun test
+      - run: bun run --cwd packages/packed typecheck
+      - run: bun run --cwd packages/packed test
 
       # npm CLI only for the publish step (trusted publishing needs >= 11.5.1).
       # NO registry-url here: it makes setup-node write an .npmrc with an empty
@@ -37,3 +42,4 @@ jobs:
       - run: npm install -g npm@latest && npm --version
 
       - run: npm publish --access public
+        working-directory: packages/packed

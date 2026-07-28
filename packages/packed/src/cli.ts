@@ -16,6 +16,7 @@ import { formatSetupReport, SetupManager, type SetupApplyResult, type SetupExpor
 import { resolve } from "node:path";
 import { npmPackageName, readInstalledPackages } from "./installed.ts";
 import { checkUpdates } from "./watcher.ts";
+import { checkPiVersion, type PiVersionReport } from "./pi-version.ts";
 import { syncCatalog } from "./catalog.ts";
 import { openDb, searchLocal, catalogList, getSyncMeta, latestVersion, dbPath } from "./db.ts";
 import { NAME_RE, defaultPiBin } from "./install.ts";
@@ -90,6 +91,7 @@ export interface CliDeps {
 		apply(manifestPath: string, options?: { prune?: boolean }): Promise<SetupApplyResult>;
 	};
 	daemonService?: { install(source: string, approved?: boolean): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }> };
+	piVersion?: { check(): Promise<PiVersionReport> };
 }
 
 export interface CliResult {
@@ -155,7 +157,20 @@ const PACKAGE_COMMAND_OPERATIONS: Record<string, PackageOperation | undefined> =
 	install: "install",
 	"install-service": "install_service",
 	remove: "remove",
+	pi: "pi.status",
 };
+
+function formatPiVersionReport(report: PiVersionReport): string {
+	if (!report.current && !report.latest) return "pi version unknown (pi not found on PATH, and the latest-version check failed or was skipped)\n";
+	let out = `pi ${report.current ?? "unknown"}`;
+	if (report.latest) out += ` (latest ${report.latest})`;
+	out += "\n";
+	if (report.upToDate === true) out += "up to date\n";
+	else if (report.upToDate === false) out += "update available -- run: pi update --self\n";
+	if (report.packageName) out += `note: pi has moved to package "${report.packageName}"\n`;
+	if (report.note) out += `${report.note}\n`;
+	return out;
+}
 
 const commands: Record<string, { usage: string; run: Command }> = {
 	setup: {
@@ -301,6 +316,16 @@ const commands: Record<string, { usage: string; run: Command }> = {
 			let out = `${updates.length} update(s) available:\n\n`;
 			for (const u of updates) out += `  ${u.name}  ${u.installed} → ${u.latest}\n`;
 			return ok(out + "\nrun: pi update --extensions\n");
+		},
+	},
+
+	pi: {
+		usage: "packed pi status [--json]",
+		async run(_rest, d, flags, pos) {
+			if (pos[0] !== "status") return usageErr(`usage: ${commands["pi"]!.usage}\n`);
+			const report = d.daemon ? await d.daemon.piStatus() : await (d.piVersion ?? { check: checkPiVersion }).check();
+			if (flags.json) return ok(JSON.stringify(report) + "\n");
+			return ok(formatPiVersionReport(report));
 		},
 	},
 

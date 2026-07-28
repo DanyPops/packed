@@ -375,6 +375,7 @@ describe("CLI", () => {
 			async installService(source) { calls.push(`installService:${source}`); return { output: source, spec: { name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/tmp/probe.service" } }; },
 			async remove(name) { return name; },
 			async update(source) { return { output: source, reloadRequired: false, alreadyUpToDate: true, pinned: false }; },
+			async piStatus() { calls.push("piStatus"); return { current: "0.82.1", latest: "0.83.0", upToDate: false }; },
 		};
 		const d = deps({ daemon });
 		expect(JSON.parse((await cliRun(["search", "daemon", "--offline", "--json"], d)).out).results[0].name).toBe("pi-daemon");
@@ -389,7 +390,19 @@ describe("CLI", () => {
 		expect((await cliRun(["setup", "update", "/tmp/project/pi-setup.json", "--json"], d)).code).toBe(0);
 		expect((await cliRun(["setup", "plan", "/tmp/project/pi-setup.json", "--json"], d)).code).toBe(0);
 		expect((await cliRun(["setup", "apply", "/tmp/project/pi-setup.json", "--approve", "--json"], d)).code).toBe(0);
-		expect(calls).toEqual(["search:true", "installed", "updates", "catalog", "mirror", "check:/tmp/package:true", "pack:/tmp/package", "score:pi-daemon", "setupExport:/tmp/project:true", "setupUpdate:/tmp/project/pi-setup.json", "setupPlan:/tmp/project/pi-setup.json", "setupApply:/tmp/project/pi-setup.json:true"]);
+		expect(JSON.parse((await cliRun(["pi", "status", "--json"], d)).out)).toEqual({ current: "0.82.1", latest: "0.83.0", upToDate: false });
+		expect(calls).toEqual(["search:true", "installed", "updates", "catalog", "mirror", "check:/tmp/package:true", "pack:/tmp/package", "score:pi-daemon", "setupExport:/tmp/project:true", "setupUpdate:/tmp/project/pi-setup.json", "setupPlan:/tmp/project/pi-setup.json", "setupApply:/tmp/project/pi-setup.json:true", "piStatus"]);
+	});
+
+	it("pi status runs standalone without a daemon, through an injectable check -- never a real subprocess/network call in tests", async () => {
+		const d = deps({ piVersion: { check: async () => ({ current: "0.82.1", latest: "0.83.0", upToDate: false }) } });
+		const { code, out } = await cliRun(["pi", "status", "--json"], d);
+		expect(code).toBe(0);
+		expect(JSON.parse(out)).toEqual({ current: "0.82.1", latest: "0.83.0", upToDate: false });
+		const human = await cliRun(["pi", "status"], d);
+		expect(human.out).toContain("pi 0.82.1 (latest 0.83.0)");
+		expect(human.out).toContain("pi update --self");
+		expect((await cliRun(["pi", "bogus"], d)).code).toBe(2);
 	});
 
 	it("unknown command → usage, code 2", async () => {
@@ -428,6 +441,7 @@ describe("daemon client", () => {
 				async plan(manifestPath) { return { ok: true, manifestPath, operations: [], diagnostics: [] }; },
 				async apply(manifestPath) { return { ok: true, manifestPath, operations: [], reloadRequired: false, diagnostics: [] }; },
 			},
+			piVersion: { async check() { return { current: "0.82.1", latest: "0.83.0", upToDate: false }; } },
 		});
 		server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => app.fetch(req) });
 		writeDaemonHandle(daemonPaths.handle, { host: "127.0.0.1", port: server.port!, pid: process.pid });
@@ -481,6 +495,7 @@ describe("daemon client", () => {
 			spec: { name: "pi-lsp", binPath: "/opt/pi-lsp/cli.js", descriptorPath: "/tmp/pi-lsp.service" },
 		});
 		expect(await client.remove("pi-lsp", true)).toBe("Removed npm:pi-lsp");
+		expect(await client.piStatus()).toEqual({ current: "0.82.1", latest: "0.83.0", upToDate: false });
 		expect(await client.update("npm:pi-lsp", true)).toEqual({
 			output: "Updated npm:pi-lsp",
 			reloadRequired: true,

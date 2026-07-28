@@ -25,6 +25,7 @@ export const PACKAGE_OPERATIONS = [
 	"resources.list",
 	"resources.toggle",
 	"security.write",
+	"pi.status",
 ] as const;
 export type PackageOperation = typeof PACKAGE_OPERATIONS[number];
 export type PackageOperationClassification = "read" | "maintenance" | "code-execution" | "settings-mutation" | "security-mutation";
@@ -63,6 +64,7 @@ const CLASSIFICATIONS: Record<PackageOperation, PackageOperationClassification> 
 	"resources.list": "read",
 	"resources.toggle": "settings-mutation",
 	"security.write": "security-mutation",
+	"pi.status": "read",
 };
 
 export class PackageApprovalRequiredError extends Error {

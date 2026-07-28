@@ -208,7 +208,7 @@ function parseVersion(value: string): [number, number, number] | undefined {
 	return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : undefined;
 }
 
-function versionAtLeast(actual: string, minimum: string): boolean {
+export function versionAtLeast(actual: string, minimum: string): boolean {
 	const left = parseVersion(actual);
 	const right = parseVersion(minimum);
 	if (!left || !right) return false;
@@ -242,7 +242,7 @@ export function satisfiesRange(version: string, range: string): boolean | undefi
 	return undefined;
 }
 
-async function runBounded(command: string[]): Promise<VersionCommandResult> {
+export async function runBounded(command: string[]): Promise<VersionCommandResult> {
 	const proc = Bun.spawn(command, { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
 	const timer = setTimeout(() => proc.kill(), VERSION_TIMEOUT_MS);
 	const [stdout, stderr, code] = await Promise.all([

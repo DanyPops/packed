@@ -12,6 +12,7 @@ import type { CheckReport } from "./check.ts";
 import type { PackReport } from "./pack.ts";
 import type { AdoptionReport } from "./score.ts";
 import type { SetupApplyResult, SetupExportReport, SetupPlan, SetupUpdateReport } from "./setup.ts";
+import type { PiVersionReport } from "./pi-version.ts";
 
 export type FetchTransport = (request: Request) => Promise<Response>;
 type RpcClient = AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>;
@@ -36,6 +37,7 @@ export interface PackageDaemonPort {
 	installService(source: string, approved?: boolean): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }>;
 	remove(name: string, approved?: boolean): Promise<string>;
 	update(source: string, approved?: boolean): Promise<UpdateOutcome>;
+	piStatus(): Promise<PiVersionReport>;
 }
 
 export class PackageDaemonError extends Error {
@@ -94,6 +96,10 @@ export class PackageDaemonClient implements PackageDaemonPort {
 
 	async updates(): Promise<UpdateEntry[]> {
 		return (await this.call("package.updates", {})).updates;
+	}
+
+	piStatus(): Promise<PiVersionReport> {
+		return this.call("pi.status", {});
 	}
 
 	check(path: string, smoke = false): Promise<CheckReport> {

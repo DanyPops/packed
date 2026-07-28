@@ -19,6 +19,7 @@ import { NpmPackVerifier, type PackReport } from "./pack.ts";
 import { scoreTarget, type AdoptionReport } from "./score.ts";
 import { SetupManager, type SetupApplyResult, type SetupExportReport, type SetupPlan, type SetupUpdateReport } from "./setup.ts";
 import { listPackageResources, toggleResource, RESOURCE_FIELDS, type PackageResources, type ResourceField } from "./resources.ts";
+import { checkPiVersion, type PiVersionReport } from "./pi-version.ts";
 import { join as joinPath } from "node:path";
 import { existsSync as fileExistsSync } from "node:fs";
 import { RealDaemonServiceInstaller, type DaemonServiceInstaller } from "./daemon-service.ts";
@@ -52,6 +53,7 @@ export interface Deps {
 		apply(manifestPath: string, options?: { prune?: boolean }): Promise<SetupApplyResult>;
 	};
 	daemonServiceInstaller?: DaemonServiceInstaller;
+	piVersion?: { check(options?: { timeoutMs?: number }): Promise<PiVersionReport> };
 }
 
 export type OperationName =
@@ -75,7 +77,8 @@ export type OperationName =
 	| "package.remove"
 	| "package.update"
 	| "resources.list"
-	| "resources.toggle";
+	| "resources.toggle"
+	| "pi.status";
 
 export interface OperationInputs {
 	"package.search": { query: string; limit: number; offline?: boolean };
@@ -99,6 +102,7 @@ export interface OperationInputs {
 	"package.update": { source: string; approved?: boolean };
 	"resources.list": { projectRoot?: string };
 	"resources.toggle": { source: string; field: ResourceField; path: string; enabled: boolean; projectRoot?: string; approved?: boolean };
+	"pi.status": Record<string, never>;
 }
 
 interface MutationResponse { ok: boolean; output: string }
@@ -127,6 +131,7 @@ export interface OperationOutputs {
 	"package.update": UpdateMutationResponse;
 	"resources.list": { global: PackageResources[]; project: PackageResources[] };
 	"resources.toggle": MutationResponse;
+	"pi.status": PiVersionReport;
 }
 
 export const OPERATION_NAMES: readonly OperationName[] = [
@@ -134,6 +139,7 @@ export const OPERATION_NAMES: readonly OperationName[] = [
 	"setup.export", "setup.update", "setup.plan", "setup.apply",
 	"package.security.get", "package.security.set", "package.install", "package.install_service", "package.remove", "package.update",
 	"resources.list", "resources.toggle",
+	"pi.status",
 ];
 
 class PackageOperationError extends Error {
@@ -376,6 +382,9 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 				return await setup.apply(value.manifestPath, { prune: applyInput.prune === true }) as OperationOutputs[Name];
 			}
 			return await setup.plan(value.manifestPath, { prune: (input as OperationInputs["setup.plan"]).prune === true }) as OperationOutputs[Name];
+		}
+		if (op === "pi.status") {
+			return (deps.piVersion ? await deps.piVersion.check() : await checkPiVersion()) as OperationOutputs[Name];
 		}
 		if (op === "resources.list") {
 			const value = input as OperationInputs["resources.list"];

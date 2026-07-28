@@ -17,6 +17,63 @@ interface PanelAction {
 	row?: Row;
 }
 
+/** Outcome of a confirmed row action, resolved after any real mutation and
+ * reload decision -- "changed" means the daemon state changed and Pi has
+ * already been reloaded (the caller should stop showing the stale panel);
+ * "unchanged"/"cancelled" mean the panel keeps running as-is. */
+export type PackageChoiceOutcome = "changed" | "unchanged" | "cancelled";
+
+export async function applyPackageChoice(
+	choice: string | undefined,
+	row: Row,
+	natives: Natives,
+	ctx: ExtensionCommandContext,
+): Promise<PackageChoiceOutcome> {
+	if (choice?.startsWith("Update")) {
+		try {
+			const approval = await approvePackageOperation("update", `pi update --extension npm:${row.name}`, natives, ctx);
+			if (!approval.allowed) {
+				ctx.ui.notify(approval.message ?? "update denied", "warning");
+				return "cancelled";
+			}
+			ctx.ui.notify(`Updating ${row.name}…`, "info");
+			const outcome = await natives.update(`npm:${row.name}`, approval.approved);
+			if (!outcome.reloadRequired) {
+				const version = outcome.currentVersion ?? outcome.previousVersion;
+				const reason = outcome.pinned
+					? `pinned to ${version ?? "an exact version"} -- pi update intentionally leaves pinned packages unchanged`
+					: `already up to date${version ? ` at ${version}` : ""}`;
+				ctx.ui.notify(`${row.name} is ${reason}.`, "info");
+				return "unchanged";
+			}
+			const transition = outcome.previousVersion && outcome.currentVersion ? ` (${outcome.previousVersion} → ${outcome.currentVersion})` : "";
+			ctx.ui.notify(`Updated ${row.name}${transition}; reloading Pi resources.`, "info");
+			await ctx.reload();
+			return "changed";
+		} catch (e) {
+			ctx.ui.notify(`update failed: ${e instanceof Error ? e.message : e}`, "error");
+			return "cancelled";
+		}
+	}
+	if (choice === "Remove") {
+		try {
+			const approval = await approvePackageOperation("remove", `pi remove npm:${row.name}`, natives, ctx);
+			if (!approval.allowed) {
+				ctx.ui.notify(approval.message ?? "remove denied", "warning");
+				return "cancelled";
+			}
+			await natives.remove(row.name, approval.approved);
+			ctx.ui.notify(`Removed ${row.name}; reloading Pi resources.`, "info");
+			await ctx.reload();
+			return "changed";
+		} catch (e) {
+			ctx.ui.notify(`remove failed: ${e instanceof Error ? e.message : e}`, "error");
+			return "cancelled";
+		}
+	}
+	return "cancelled";
+}
+
 async function loadRows(natives: Natives): Promise<{ rows: Row[]; error?: string }> {
 	try {
 		const [installed, updates] = await Promise.all([
@@ -64,35 +121,8 @@ export async function showPackages(ctx: ExtensionCommandContext, natives: Native
 			],
 		);
 
-		if (choice?.startsWith("Update")) {
-			try {
-				const approval = await approvePackageOperation("update", `pi update --extension npm:${row.name}`, natives, ctx);
-				if (!approval.allowed) {
-					ctx.ui.notify(approval.message ?? "update denied", "warning");
-					continue;
-				}
-				ctx.ui.notify(`Updating ${row.name}…`, "info");
-				await natives.update(`npm:${row.name}`, approval.approved);
-				ctx.ui.notify(`Updated ${row.name} to ${row.latest}; reloading Pi resources`, "info");
-				await ctx.reload();
-				return;
-			} catch (e) {
-				ctx.ui.notify(`update failed: ${e instanceof Error ? e.message : e}`, "error");
-			}
-		} else if (choice === "Remove") {
-			try {
-				const approval = await approvePackageOperation("remove", `pi remove npm:${row.name}`, natives, ctx);
-				if (approval.allowed) {
-					await natives.remove(row.name, approval.approved);
-					ctx.ui.notify(`Removed ${row.name}`, "info");
-					rows = rows.filter((r) => r.name !== row.name);
-				} else {
-					ctx.ui.notify(approval.message ?? "remove denied", "warning");
-				}
-			} catch (e) {
-				ctx.ui.notify(`remove failed: ${e instanceof Error ? e.message : e}`, "error");
-			}
-		}
+		const outcome = await applyPackageChoice(choice, row, natives, ctx);
+		if (outcome === "changed") return; // ctx.reload() already replaced the session
 	}
 }
 

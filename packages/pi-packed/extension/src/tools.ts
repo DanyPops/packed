@@ -3,6 +3,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { packagePermissionDecision, type PackageOperation } from "./permission.js";
 import type { Natives } from "./packed.js";
+import { reloadWarning } from "./reload.js";
 import {
 	createInfoDetails,
 	createModelContent,
@@ -41,7 +42,7 @@ export async function approvePackageOperation(
 	}
 	const approved = await ctx.ui.confirm(
 		`${operation[0]!.toUpperCase()}${operation.slice(1)} Pi package`,
-		`Run: ${command}\n\nThis operation can execute package code or mutate Pi settings/install roots. Continue?`,
+		`Run: ${command}\n\nThis operation can execute package code or mutate Pi settings/install roots. ${reloadWarning(operation)} Continue?`,
 	);
 	return approved ? { allowed: true, approved: true } : { allowed: false, approved: false, reason: "cancelled", message: `${operation} cancelled by user.` };
 }

@@ -3,7 +3,16 @@ import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { formatPackReport, NpmPackVerifier, type PackCommand } from "../src/pack.ts";
-import { assessLocalAdoption, assessRegistryAdoption } from "../src/score.ts";
+import { assessLocalAdoption, assessRegistryAdoption, scoreTarget } from "../src/score.ts";
+import type { PkgInfo, Registry, SearchPage } from "../src/ports.ts";
+
+class FakeRegistry implements Registry {
+	constructor(private info_: PkgInfo) {}
+	async search(): Promise<SearchPage> { return { results: [], total: 0 }; }
+	async searchPage(): Promise<SearchPage> { return { results: [], total: 0 }; }
+	async searchAll() { return []; }
+	async info(): Promise<PkgInfo> { return this.info_; }
+}
 
 function fixture(manifest: Record<string, unknown>, readme = ""): string {
 	const root = mkdtempSync(join(tmpdir(), "packed-pack-"));
@@ -87,6 +96,9 @@ describe("adoption readiness evidence", () => {
 		expect(report.dimensions.firstRun.status).toBe("ready");
 		expect(report.dimensions.traction.status).toBe("unknown");
 		expect(report.dimensions.traction.evidence.join(" ")).toContain("not a quality signal");
+		// this fixture declares the "*" wildcard Pi's own docs recommend -- carries no real signal
+		expect(report.dimensions.compatibility.status).toBe("unknown");
+		expect(report.dimensions.compatibility.evidence.join(" ")).toContain("Pi's own recommended convention");
 	});
 
 	it("shows provenance and bounded download observations while leaving trusted publisher unknown", () => {
@@ -99,5 +111,61 @@ describe("adoption readiness evidence", () => {
 		expect(report.dimensions.trust.evidence.join(" ")).toContain("provenance");
 		expect(report.dimensions.trust.actions.join(" ")).toContain("trusted publisher");
 		expect(report.dimensions.traction.evidence.join(" ")).toContain("12 weekly");
+	});
+});
+
+describe("compatibility (informal Pi peer-range signal)", () => {
+	function withPeerRange(range: string | undefined) {
+		return { name: "pi-demo", version: "1.0.0", ...(range ? { peerDependencies: { "@earendil-works/pi-coding-agent": range } } : {}) };
+	}
+
+	it("is unknown (not missing) when undeclared -- matches Pi's own recommended \"*\" convention", () => {
+		const report = assessRegistryAdoption(withPeerRange(undefined), "0.82.1");
+		expect(report.dimensions.compatibility).toEqual({ status: "unknown", met: 0, total: 0, evidence: ["no declared Pi peer range (matches Pi's own recommended \"*\" convention)"], actions: [] });
+	});
+
+	it("treats an explicit \"*\" identically to undeclared -- a wildcard carries no real signal", () => {
+		const report = assessRegistryAdoption(withPeerRange("*"), "0.82.1");
+		expect(report.dimensions.compatibility.status).toBe("unknown");
+		expect(report.dimensions.compatibility.evidence.join(" ")).toContain("carries no real signal");
+	});
+
+	it("is unknown when a real range is declared but the running Pi version could not be determined", () => {
+		const report = assessRegistryAdoption(withPeerRange("^0.75.0"), undefined);
+		expect(report.dimensions.compatibility.status).toBe("unknown");
+		expect(report.dimensions.compatibility.evidence.join(" ")).toContain("could not be determined");
+		expect(report.dimensions.compatibility.actions.join(" ")).toContain("packed pi status");
+	});
+
+	it("is unknown, never a guess, for a range shape satisfiesRange cannot evaluate", () => {
+		const report = assessRegistryAdoption(withPeerRange(">=0.75.0"), "0.82.1");
+		expect(report.dimensions.compatibility.status).toBe("unknown");
+		expect(report.dimensions.compatibility.evidence.join(" ")).toContain("could not be evaluated");
+	});
+
+	it("is ready when the declared range is satisfied by the running Pi version", () => {
+		// 0.x caret is patch-only per real npm semver (^0.82.0 excludes 0.83.x) --
+		// this fixture stays within that same 0.82.x window on purpose.
+		const report = assessRegistryAdoption(withPeerRange("^0.82.0"), "0.82.1");
+		expect(report.dimensions.compatibility).toEqual({
+			status: "ready", met: 1, total: 1,
+			evidence: ["declared Pi peer range ^0.82.0 is satisfied by the running pi 0.82.1"],
+			actions: [],
+		});
+	});
+
+	it("is missing (unsatisfied), with a disclaimer that this never blocks install, when the declared range excludes the running Pi version", () => {
+		// the real earendil-works/pi#4907 incident: pi-tool-display@0.4.0 declared ^0.75.4
+		const report = assessRegistryAdoption(withPeerRange("^0.75.4"), "0.74.2");
+		expect(report.dimensions.compatibility.status).toBe("missing");
+		expect(report.dimensions.compatibility.met).toBe(0);
+		expect(report.dimensions.compatibility.evidence.join(" ")).toContain("NOT satisfied");
+		expect(report.dimensions.compatibility.actions.join(" ")).toContain("never blocks install");
+	});
+
+	it("scoreTarget threads an injected current-Pi-version resolver through to the compatibility dimension, never invoking a real subprocess in tests", async () => {
+		const registry = new FakeRegistry({ name: "pi-demo", version: "1.0.0", peerDependencies: { "@earendil-works/pi-coding-agent": "^0.82.0" } });
+		const report = await scoreTarget("pi-demo", registry, new NpmPackVerifier(successfulPack), async () => "0.82.1");
+		expect(report.dimensions.compatibility.status).toBe("ready");
 	});
 });

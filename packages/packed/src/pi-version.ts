@@ -40,6 +40,14 @@ function parseVersionOutput(result: VersionCommandResult): string | undefined {
 	return /^\d+\.\d+\.\d+/.test(trimmed) ? trimmed : undefined;
 }
 
+/** Resolves only the locally running Pi version -- no network call, unlike
+ * checkPiVersion, which also fetches the latest release. Compatibility
+ * scoring needs the current version only, so it never pays pi.dev latency
+ * or fails closed on a network blip that has nothing to do with it. */
+export async function resolveCurrentPiVersion(versionCommand: VersionCommand = readPiVersion): Promise<string | undefined> {
+	return parseVersionOutput(await versionCommand().catch((): VersionCommandResult => ({ code: 1, stdout: "", stderr: "" })));
+}
+
 export type FetchLatestPiRelease = (options?: { timeoutMs?: number }) => Promise<PiReleaseInfo | undefined>;
 
 /**
@@ -108,9 +116,8 @@ export interface PiVersionCheckOptions {
 }
 
 export async function checkPiVersion(options: PiVersionCheckOptions = {}): Promise<PiVersionReport> {
-	const versionCommand = options.versionCommand ?? readPiVersion;
 	const fetchLatest = options.fetchLatest ?? fetchLatestPiRelease;
-	const current = parseVersionOutput(await versionCommand().catch((): VersionCommandResult => ({ code: 1, stdout: "", stderr: "" })));
+	const current = await resolveCurrentPiVersion(options.versionCommand);
 	const release = await fetchLatest({ timeoutMs: options.timeoutMs });
 	if (!release) return current ? { current } : {};
 	const upToDate = current ? versionAtLeast(current, release.version) : undefined;

@@ -129,7 +129,7 @@ describe("CLI", () => {
 		const empty = { status: "unknown" as const, met: 0, total: 0, evidence: [], actions: [] };
 		const d = deps({
 			packer: { async verify(path) { return { root: path, ok: true, command: ["npm", "pack", "--dry-run", "--json", "--ignore-scripts"], files: [], shape: { kind: "manifest", verified: true, evidence: ["pi.extensions"] }, diagnostics: [], truncated: false }; } },
-			scorer: { async score(target) { return { target, source: "registry" as const, package: { name: target, version: "1" }, dimensions: { discoverability: empty, firstRun: empty, trust: empty, maintenance: empty, traction: empty } }; } },
+			scorer: { async score(target) { return { target, source: "registry" as const, package: { name: target, version: "1" }, dimensions: { discoverability: empty, firstRun: empty, trust: empty, maintenance: empty, traction: empty, compatibility: empty } }; } },
 		});
 		expect(JSON.parse((await cliRun(["pack", ".", "--json"], d)).out).shape.verified).toBe(true);
 		expect(JSON.parse((await cliRun(["score", "pi-demo", "--json"], d)).out).target).toBe("pi-demo");
@@ -364,7 +364,7 @@ describe("CLI", () => {
 			async updates() { calls.push("updates"); return [{ name: "pi-daemon", installed: "1.0.0", latest: "1.1.0", detectedAt: "2026-01-01T00:00:00.000Z" }]; },
 			async check(path, smoke) { calls.push(`check:${path}:${smoke}`); return { root: path, ok: true, diagnostics: [], summary: { errors: 0, warnings: 0, info: 0 }, checkedFiles: 1, truncated: false }; },
 			async pack(path) { calls.push(`pack:${path}`); return { root: path, ok: true, command: ["npm", "pack"], files: [], shape: { kind: "manifest", verified: true, evidence: [] }, diagnostics: [], truncated: false }; },
-			async score(target) { calls.push(`score:${target}`); return { target, source: "registry", package: { name: target, version: "1" }, dimensions: { discoverability: { status: "ready", met: 1, total: 1, evidence: [], actions: [] }, firstRun: { status: "unknown", met: 0, total: 0, evidence: [], actions: [] }, trust: { status: "unknown", met: 0, total: 0, evidence: [], actions: [] }, maintenance: { status: "unknown", met: 0, total: 0, evidence: [], actions: [] }, traction: { status: "unknown", met: 0, total: 0, evidence: [], actions: [] } } }; },
+			async score(target) { calls.push(`score:${target}`); return { target, source: "registry", package: { name: target, version: "1" }, dimensions: { discoverability: { status: "ready", met: 1, total: 1, evidence: [], actions: [] }, firstRun: { status: "unknown", met: 0, total: 0, evidence: [], actions: [] }, trust: { status: "unknown", met: 0, total: 0, evidence: [], actions: [] }, maintenance: { status: "unknown", met: 0, total: 0, evidence: [], actions: [] }, traction: { status: "unknown", met: 0, total: 0, evidence: [], actions: [] }, compatibility: { status: "unknown", met: 0, total: 0, evidence: [], actions: [] } } }; },
 			async setupExport(projectRoot, force) { calls.push(`setupExport:${projectRoot}:${force}`); return { ok: true, path: `${projectRoot}/pi-setup.json`, manifest: { $schema: "./schema/pi-setup-v1.schema.json", schemaVersion: 1, packages: [], profiles: {} }, diagnostics: [], wrote: true }; },
 			async setupUpdate(manifestPath) { calls.push(`setupUpdate:${manifestPath}`); return { ok: true, path: manifestPath, manifest: { $schema: "./schema/pi-setup-v1.schema.json", schemaVersion: 1, packages: [], profiles: {} }, diagnostics: [], wrote: true, updated: 0 }; },
 			async setupPlan(manifestPath) { calls.push(`setupPlan:${manifestPath}`); return { ok: true, manifestPath, operations: [], diagnostics: [] }; },
@@ -434,7 +434,7 @@ describe("daemon client", () => {
 			stateDir: daemonDir,
 			piHome: mkdtempSync(join(tmpdir(), "packed-daemon-pi-")),
 			packer: { async verify(path) { return { root: path, ok: true, command: ["npm", "pack"], files: [], shape: { kind: "manifest", verified: true, evidence: ["pi.extensions"] }, diagnostics: [], truncated: false }; } },
-			scorer: { async score(target) { const empty = { status: "unknown" as const, met: 0, total: 0, evidence: [], actions: [] }; return { target, source: "registry" as const, package: { name: target, version: "1" }, dimensions: { discoverability: empty, firstRun: empty, trust: empty, maintenance: empty, traction: empty } }; } },
+			scorer: { async score(target) { const empty = { status: "unknown" as const, met: 0, total: 0, evidence: [], actions: [] }; return { target, source: "registry" as const, package: { name: target, version: "1" }, dimensions: { discoverability: empty, firstRun: empty, trust: empty, maintenance: empty, traction: empty, compatibility: empty } }; } },
 			setup: {
 				async export(projectRoot) { return { ok: true, path: `${projectRoot}/pi-setup.json`, manifest: { $schema: "./schema/pi-setup-v1.schema.json", schemaVersion: 1, packages: [], profiles: {} }, diagnostics: [], wrote: true }; },
 				async update(manifestPath) { return { ok: true, path: manifestPath, manifest: { $schema: "./schema/pi-setup-v1.schema.json", schemaVersion: 1, packages: [], profiles: {} }, diagnostics: [], wrote: true, updated: 0 }; },

@@ -58,7 +58,7 @@ Packages execute arbitrary code and mutate Pi settings/install roots. One daemon
 | `packed catalog [--json]` | Inspect the local package index |
 | `packed check [path] [--smoke] [--json]` | Diagnose Pi resources and npm packaging; optionally load extensions in an isolated child |
 | `packed pack [path] [--json]` | Inspect exact `npm pack --dry-run --json --ignore-scripts` output and verify shipped Pi resources |
-| `packed score [path\|name] [--json]` | Report discoverability, first-run, trust, maintenance, and observational traction evidence |
+| `packed score [path\|name] [--json]` | Report discoverability, first-run, trust, maintenance, observational traction, and declared Pi-version compatibility evidence |
 | `packed publish setup [path] [--force] [--json]` | Generate a least-privilege GitHub OIDC workflow for `npm stage publish` |
 | `packed publish status [path] [--json] [--open-browser]` | Validate package, repository, workflow, Node, and npm prerequisites and print trust/approval handoff |
 | `packed setup export [path] [--force] [--machine-local] [--json]` | Export immutable npm/git/HTTPS packages and scoped Pi profiles to `pi-setup.json` |

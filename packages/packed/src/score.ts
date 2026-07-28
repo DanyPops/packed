@@ -2,6 +2,13 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import type { PkgInfo, Registry } from "./ports.ts";
 import { NpmPackVerifier, type PackReport } from "./pack.ts";
+import { satisfiesRange } from "./publish.ts";
+import { resolveCurrentPiVersion } from "./pi-version.ts";
+
+/** The peer range Pi's own docs actually recommend -- carries no real
+ * compatibility signal, so it's treated identically to an absent range. */
+const WILDCARD_PI_RANGE = "*";
+const PI_PEER_DEPENDENCY = "@earendil-works/pi-coding-agent";
 
 export type ReadinessStatus = "ready" | "partial" | "missing" | "unknown" | "observed";
 
@@ -23,6 +30,7 @@ export interface AdoptionReport {
 		trust: AdoptionDimension;
 		maintenance: AdoptionDimension;
 		traction: AdoptionDimension;
+		compatibility: AdoptionDimension;
 	};
 }
 
@@ -125,14 +133,61 @@ function traction(info: PkgInfo): AdoptionDimension {
 	return { status: "observed", met: 0, total: 0, evidence, actions: [] };
 }
 
-export function assessRegistryAdoption(info: PkgInfo): AdoptionReport {
+/**
+ * Compares a candidate's declared @earendil-works/pi-coding-agent peer
+ * range against the running Pi version. This is an informal signal, not an
+ * official Pi mechanism: Pi's own docs tell authors to declare "*" (no
+ * real constraint), real published packages ignore that guidance anyway
+ * (earendil-works/pi#4907), and Pi's own installer performs zero
+ * validation of this range at install or load time. Never blocks install
+ * by itself -- Packed does not gate on this, and neither does Pi.
+ */
+function compatibility(info: PkgInfo, currentPiVersion: string | undefined): AdoptionDimension {
+	const declared = info.peerDependencies?.[PI_PEER_DEPENDENCY]?.trim();
+	if (!declared || declared === WILDCARD_PI_RANGE) {
+		return {
+			status: "unknown", met: 0, total: 0,
+			evidence: [declared ? `declared Pi peer range is "*" (Pi's own recommended convention; carries no real signal)` : "no declared Pi peer range (matches Pi's own recommended \"*\" convention)"],
+			actions: [],
+		};
+	}
+	if (!currentPiVersion) {
+		return {
+			status: "unknown", met: 0, total: 0,
+			evidence: [`declared Pi peer range ${declared}, but the running Pi version could not be determined`],
+			actions: ["run packed pi status to check pi's own version detection"],
+		};
+	}
+	const satisfied = satisfiesRange(currentPiVersion, declared);
+	if (satisfied === undefined) {
+		return {
+			status: "unknown", met: 0, total: 0,
+			evidence: [`declared Pi peer range ${declared} could not be evaluated (only exact, ^, and ~ ranges are supported)`],
+			actions: [],
+		};
+	}
+	if (satisfied) {
+		return {
+			status: "ready", met: 1, total: 1,
+			evidence: [`declared Pi peer range ${declared} is satisfied by the running pi ${currentPiVersion}`],
+			actions: [],
+		};
+	}
 	return {
-		target: info.name, source: "registry", package: { name: info.name, version: info.version },
-		dimensions: { discoverability: discoverability(info), firstRun: firstRun(info), trust: trust(info), maintenance: maintenance(info), traction: traction(info) },
+		status: "missing", met: 0, total: 1,
+		evidence: [`declared Pi peer range ${declared} is NOT satisfied by the running pi ${currentPiVersion}`],
+		actions: ["this is an informal, Pi-unenforced signal (see earendil-works/pi#4907) -- packed never blocks install on it, but this package may not work correctly on the currently running Pi version"],
 	};
 }
 
-export function assessLocalAdoption(packagePath: string, pack: PackReport): AdoptionReport {
+export function assessRegistryAdoption(info: PkgInfo, currentPiVersion?: string): AdoptionReport {
+	return {
+		target: info.name, source: "registry", package: { name: info.name, version: info.version },
+		dimensions: { discoverability: discoverability(info), firstRun: firstRun(info), trust: trust(info), maintenance: maintenance(info), traction: traction(info), compatibility: compatibility(info, currentPiVersion) },
+	};
+}
+
+export function assessLocalAdoption(packagePath: string, pack: PackReport, currentPiVersion?: string): AdoptionReport {
 	const root = realpathSync(resolve(packagePath));
 	const pkg = localManifest(root);
 	const readmeName = ["README.md", "README", "readme.md"].find((name) => existsSync(join(root, name)));
@@ -147,7 +202,7 @@ export function assessLocalAdoption(packagePath: string, pack: PackReport): Adop
 		publication: { integrity: pack.integrity, trustedPublisher: "unknown" },
 		packageEvidence: { shape: pack.shape.kind, verified: pack.shape.verified, evidence: pack.shape.evidence },
 	};
-	const report = assessRegistryAdoption(info);
+	const report = assessRegistryAdoption(info, currentPiVersion);
 	report.target = root;
 	report.source = "local";
 	if (!pack.ok) report.dimensions.trust.actions.push("resolve npm tarball verification errors");
@@ -160,16 +215,21 @@ export function assessLocalAdoption(packagePath: string, pack: PackReport): Adop
 	return report;
 }
 
-export async function scoreTarget(target: string, registry: Registry, verifier: Pick<NpmPackVerifier, "verify"> = new NpmPackVerifier()): Promise<AdoptionReport> {
+export async function scoreTarget(
+	target: string, registry: Registry,
+	verifier: Pick<NpmPackVerifier, "verify"> = new NpmPackVerifier(),
+	currentPiVersion: () => Promise<string | undefined> = resolveCurrentPiVersion,
+): Promise<AdoptionReport> {
+	const piVersion = await currentPiVersion();
 	if (existsSync(resolve(target))) {
 		const pack = await verifier.verify(target);
-		return assessLocalAdoption(target, pack);
+		return assessLocalAdoption(target, pack, piVersion);
 	}
 	const info = await registry.info(target);
 	if (registry.downloads) {
 		try { info.downloads = await registry.downloads(target); } catch { /* traction remains explicitly unknown */ }
 	}
-	return assessRegistryAdoption(info);
+	return assessRegistryAdoption(info, piVersion);
 }
 
 export function formatAdoptionReport(report: AdoptionReport, json = false): string {

@@ -70,7 +70,7 @@ function npmName(source: string): string {
 	return at > 0 ? spec.slice(0, at) : spec;
 }
 
-function resolveInstalledDir(piHome: string, source: string): string | undefined {
+export function resolveInstalledDir(piHome: string, source: string): string | undefined {
 	if (!source.startsWith("npm:")) return undefined;
 	const dir = join(piHome, "npm", "node_modules", npmName(source));
 	return existsSync(dir) ? dir : undefined;

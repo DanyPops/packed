@@ -20,6 +20,8 @@ import { scoreTarget, type AdoptionReport } from "./score.ts";
 import { SetupManager, type SetupApplyResult, type SetupExportReport, type SetupPlan, type SetupUpdateReport } from "./setup.ts";
 import { listPackageResources, toggleResource, RESOURCE_FIELDS, type PackageResources, type ResourceField } from "./resources.ts";
 import { checkPiVersion, type PiVersionReport } from "./pi-version.ts";
+import { formatCleanupSummary, runCleanup } from "./cleanup.ts";
+import { resolveInstalledDir } from "./resources.ts";
 import { join as joinPath } from "node:path";
 import { existsSync as fileExistsSync } from "node:fs";
 import { RealDaemonServiceInstaller, type DaemonServiceInstaller } from "./daemon-service.ts";
@@ -260,11 +262,17 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			}
 			const denied = authorize("remove", approved);
 			if (denied) return denied;
+			// pi.cleanup is read and applied before delegating to pi remove --
+			// once pi remove finishes, an npm-sourced package's own directory
+			// (and its manifest) may already be gone.
+			const installedDir = resolveInstalledDir(deps.piHome ?? defaultPiHome(), `npm:${name}`);
+			const cleanup = installedDir ? runCleanup(installedDir) : [];
 			try {
 				const output = await deps.inst.remove(`npm:${name}`, { approved });
-				return json({ ok: true, name, output });
+				return json({ ok: true, name, output: output + formatCleanupSummary(cleanup) });
 			} catch (e) {
-				return json({ ok: false, name, output: e instanceof Error ? e.message : String(e) });
+				const message = e instanceof Error ? e.message : String(e);
+				return json({ ok: false, name, output: message + formatCleanupSummary(cleanup) });
 			}
 		}
 

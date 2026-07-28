@@ -158,7 +158,7 @@ export function matchesPattern(file: string, pattern: string): boolean {
 	return new Bun.Glob(normalized).match(file);
 }
 
-function isContainedFile(root: string, file: string): boolean {
+export function isContainedFile(root: string, file: string): boolean {
 	try {
 		const target = realpathSync(join(root, file));
 		return target.startsWith(`${root}${sep}`);
@@ -313,6 +313,41 @@ function resourcesCheck(context: Context): void {
 	}
 }
 
+// Mirrors cleanup.ts's own MAX_CLEANUP_ENTRIES/MAX_CLEANUP_PATH_BYTES --
+// duplicated as plain literals rather than imported to avoid a circular
+// module dependency (cleanup.ts already imports isContainedFile from here).
+const MAX_CLEANUP_ENTRIES = 50;
+const MAX_CLEANUP_PATH_BYTES = 512;
+
+/** Statically validates an optional pi.cleanup declaration at authoring
+ * time, before a package is ever installed or removed -- the same
+ * escape discipline packed remove itself enforces at removal time
+ * (cleanup.ts's runCleanup), just catchable earlier via packed check. */
+function cleanupManifestCheck(context: Context): void {
+	const pi = context.pkg.pi;
+	if (!isRecord(pi) || pi.cleanup === undefined) return;
+	const declared = pi.cleanup;
+	if (!Array.isArray(declared) || !declared.every((item) => typeof item === "string")) {
+		context.add({ code: "PI_CLEANUP_INVALID", severity: "error", path: "package.json#pi.cleanup", message: "pi.cleanup must be an array of relative path strings" });
+		return;
+	}
+	if (declared.length > MAX_CLEANUP_ENTRIES) {
+		context.add({ code: "PI_CLEANUP_TOO_LARGE", severity: "warning", path: "package.json#pi.cleanup", message: `pi.cleanup declares ${declared.length} entries; only the first ${MAX_CLEANUP_ENTRIES} are honored at removal time` });
+	}
+	for (const raw of declared) {
+		if (raw.length > MAX_CLEANUP_PATH_BYTES) {
+			context.add({ code: "PI_CLEANUP_TOO_LARGE", severity: "warning", path: "package.json#pi.cleanup", message: `pi.cleanup entry exceeds ${MAX_CLEANUP_PATH_BYTES} characters and will be ignored at removal time: ${raw.slice(0, 80)}...` });
+			continue;
+		}
+		const trimmed = raw.trim();
+		if (trimmed.length === 0) {
+			context.add({ code: "PI_CLEANUP_ESCAPES_PACKAGE", severity: "error", path: "package.json#pi.cleanup", message: "pi.cleanup entries must not be empty" });
+		} else if (isAbsolute(trimmed) || trimmed.split("/").includes("..")) {
+			context.add({ code: "PI_CLEANUP_ESCAPES_PACKAGE", severity: "error", path: "package.json#pi.cleanup", message: `pi.cleanup entry escapes the package and will never be removed: ${raw}` });
+		}
+	}
+}
+
 function dependencyCheck(context: Context): void {
 	const dependencies = isRecord(context.pkg.dependencies) ? context.pkg.dependencies : {};
 	const optional = isRecord(context.pkg.optionalDependencies) ? context.pkg.optionalDependencies : {};
@@ -464,7 +499,7 @@ export async function checkPackage(packagePath: string, options: CheckOptions = 
 			else diagnosticOverflow = true;
 		},
 	};
-	const checks: Check[] = [manifestCheck, resourcesCheck, dependencyCheck, skillsCheck, extensionsCheck];
+	const checks: Check[] = [manifestCheck, resourcesCheck, cleanupManifestCheck, dependencyCheck, skillsCheck, extensionsCheck];
 	if (options.generic !== false) checks.push(genericCheck);
 	for (const check of checks) await check(context);
 	let smoke: CheckReport["smoke"];

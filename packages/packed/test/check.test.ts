@@ -65,6 +65,51 @@ describe("discoverPackageResources (pure resource discovery for the config overl
 	});
 });
 
+describe("pi.cleanup static validation (packed check)", () => {
+	function cleanupFixture(cleanup: unknown) {
+		return fixture({ ...base, pi: { ...base.pi, cleanup } }, {
+			"extensions/index.ts": "export default function () {}",
+			"skills/example/SKILL.md": "---\nname: example\ndescription: Example. Use for examples.\n---\n",
+			"README.md": "# Example\n", "LICENSE": "MIT\n",
+		});
+	}
+
+	it("is silent for a package that never declares pi.cleanup -- zero behavior change", async () => {
+		const root = fixture(base, { "extensions/index.ts": "export default function () {}", "skills/example/SKILL.md": "---\nname: example\ndescription: Example. Use for examples.\n---\n", "README.md": "# Example\n", "LICENSE": "MIT\n" });
+		const report = await checkPackage(root, { generic: false });
+		expect(codes(report.diagnostics)).not.toContain("PI_CLEANUP_INVALID");
+		expect(codes(report.diagnostics)).not.toContain("PI_CLEANUP_ESCAPES_PACKAGE");
+	});
+
+	it("accepts a well-formed pi.cleanup declaration", async () => {
+		const report = await checkPackage(cleanupFixture(["cache.json", "state/"]), { generic: false });
+		expect(codes(report.diagnostics)).not.toContain("PI_CLEANUP_INVALID");
+		expect(codes(report.diagnostics)).not.toContain("PI_CLEANUP_ESCAPES_PACKAGE");
+	});
+
+	it("flags a non-array pi.cleanup as invalid", async () => {
+		const report = await checkPackage(cleanupFixture("cache.json"), { generic: false });
+		expect(codes(report.diagnostics)).toContain("PI_CLEANUP_INVALID");
+	});
+
+	it("flags an absolute path as escaping the package", async () => {
+		const report = await checkPackage(cleanupFixture(["/etc/passwd"]), { generic: false });
+		expect(codes(report.diagnostics)).toContain("PI_CLEANUP_ESCAPES_PACKAGE");
+		expect(report.ok).toBe(false);
+	});
+
+	it("flags a \"..\"-escaping path", async () => {
+		const report = await checkPackage(cleanupFixture(["../../etc/passwd"]), { generic: false });
+		expect(codes(report.diagnostics)).toContain("PI_CLEANUP_ESCAPES_PACKAGE");
+	});
+
+	it("warns (not an error) when pi.cleanup exceeds the bounded entry count or per-entry length", async () => {
+		const report = await checkPackage(cleanupFixture([...Array(60).keys()].map((i) => `f${i}`)), { generic: false });
+		const tooLarge = report.diagnostics.find((d) => d.code === "PI_CLEANUP_TOO_LARGE");
+		expect(tooLarge?.severity).toBe("warning");
+	});
+});
+
 describe("packed check", () => {
 	it("accepts a complete static Pi package without executing it", async () => {
 		const root = fixture(base, {

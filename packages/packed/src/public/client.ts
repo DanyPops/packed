@@ -1,12 +1,15 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AuthenticatedRpcClient } from "@danypops/daemon-kit/rpc-client";
 import { readDaemonHandle, resolveDaemonPaths } from "@danypops/daemon-kit/paths";
+import { isServiceInstalled as daemonKitIsServiceInstalled } from "@danypops/daemon-kit/service";
 import type { ExtensionOperationInputs, ExtensionOperationName, ExtensionOperationOutputs, PackageInfo, PackageResources, PackageSummary, ResourceField, SecuritySettings, SetupApplyResult, SetupPlan, UpdateEntry, UpdateOutcome } from "./protocol.js";
 
-export interface PackedClientPaths { token: string; handle: string; }
+export interface PackedClientPaths { token: string; handle: string; serviceDescriptor: string; }
+const SERVICE_NAME = "pi-packed";
+const SERVICE_UNIT_NAME = "pi-packed.service";
 export interface PackedPathOptions { env?: Record<string, string | undefined>; home?: string; platform?: NodeJS.Platform; }
 export interface PackedExtensionClient {
 	search(query: string, limit: number, offline?: boolean): Promise<{ query: string; total: number; results: PackageSummary[] }>;
@@ -28,10 +31,19 @@ export function resolvePackedClientPaths(options: PackedPathOptions = {}): Packe
 	const env = options.env ?? process.env;
 	if (env.PI_PACKED_HOME) {
 		const directory = resolve(env.PI_PACKED_HOME);
-		return { token: `${directory}/token`, handle: `${directory}/handle.json` };
+		return { token: `${directory}/token`, handle: `${directory}/handle.json`, serviceDescriptor: `${directory}/${SERVICE_UNIT_NAME}` };
 	}
-	const paths = resolveDaemonPaths({ stateDirectoryName: "pi-packed", databaseFilename: "packages.db", tokenFilename: "token", handleFilename: "handle.json", systemdUnitName: "pi-packed.service" }, options);
-	return { token: paths.token, handle: paths.handle };
+	const paths = resolveDaemonPaths({ stateDirectoryName: "pi-packed", databaseFilename: "packages.db", tokenFilename: "token", handleFilename: "handle.json", systemdUnitName: SERVICE_UNIT_NAME }, options);
+	return { token: paths.token, handle: paths.handle, serviceDescriptor: paths.serviceDescriptor };
+}
+
+/** Real, file-existence-only check on Linux/macOS (Windows checks a
+ * registry Run key instead) -- cheap, synchronous, no subprocess. */
+function isPackedServiceInstalled(serviceDescriptor: string): boolean {
+	return daemonKitIsServiceInstalled(
+		{ name: SERVICE_NAME, binPath: "", descriptorPath: serviceDescriptor },
+		{ fileExists: existsSync, writeFile: () => {}, readFile: () => null, removeFile: () => {}, mkdirp: () => {}, runCommand: () => ({ ok: false, output: "" }), which: () => false },
+	);
 }
 
 export type FetchTransport = (request: Request) => Promise<Response>;
@@ -73,21 +85,69 @@ export async function connectPackedClient(paths = resolvePackedClientPaths(), tr
 	return client;
 }
 
-export async function ensurePackedClient(paths = resolvePackedClientPaths(), transport: FetchTransport = fetch): Promise<PackedClient> {
-	try { return await connectPackedClient(paths, transport); } catch {}
-	const override = process.env.PI_PACKED_BIN;
-	const command = override ?? process.env.PI_PACKED_BUN ?? "bun";
-	const args = override ? ["serve"] : [join(dirname(fileURLToPath(import.meta.url)), "../src/cli.ts"), "serve"];
-	const child = spawn(command, args, {
-		detached: true,
-		stdio: "ignore",
-		env: { ...process.env, DAEMON_KIT_LAUNCH_PROVENANCE: "auto-spawn" },
-	});
-	child.once("error", () => {});
-	child.unref();
-	for (let attempt = 0; attempt < 30; attempt++) {
-		await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
-		try { return await connectPackedClient(paths, transport); } catch {}
+export interface EnsureClientDeps {
+	connect(): Promise<PackedClient>;
+	/** Real OS check, not a guess -- does this machine have a supervised
+	 * service registered for this daemon (systemd --user unit / launchd
+	 * plist / Windows Run key)? */
+	isServiceInstalled(): boolean;
+	/** Spawns a detached, self-contained daemon for this session only.
+	 * Never called when isServiceInstalled() is true. */
+	spawn(): void;
+	sleep(ms: number): Promise<void>;
+	retryAttempts?: number;
+	retryDelayMs?: number;
+}
+
+/**
+ * Pure connect-or-provision decision, fully dependency-injected and
+ * unit-testable without a real filesystem, subprocess, or network call.
+ *
+ * A real, confirmed hazard motivates the isServiceInstalled() branch: an
+ * auto-spawned orphan gets daemon-kit's 30-minute idle budget (vs. a
+ * supervised service's own, typically much shorter, policy), so it can
+ * keep winning daemon-kit's single-instance lock race against every
+ * subsequent supervised restart, invisibly, for up to half an hour. When a
+ * service is installed, this never spawns a second, differently-supervised
+ * process -- it retries the connection instead, on the assumption the
+ * supervisor is responsible for the daemon actually being reachable, and
+ * fails with a message pointing at the service rather than silently
+ * creating a competing one.
+ */
+export async function ensureClient(deps: EnsureClientDeps): Promise<PackedClient> {
+	try { return await deps.connect(); } catch {}
+	const attempts = deps.retryAttempts ?? 30;
+	const delayMs = deps.retryDelayMs ?? 100;
+	const serviceInstalled = deps.isServiceInstalled();
+	if (!serviceInstalled) deps.spawn();
+	for (let attempt = 0; attempt < attempts; attempt++) {
+		await deps.sleep(delayMs);
+		try { return await deps.connect(); } catch {}
 	}
-	throw new Error("Packed daemon did not become ready within 3 seconds");
+	const waitedSeconds = (attempts * delayMs) / 1000;
+	throw new Error(
+		serviceInstalled
+			? `Packed daemon did not become ready within ${waitedSeconds} seconds, but a supervised service is installed -- check it directly (e.g. systemctl --user status pi-packed.service) rather than auto-spawning a second one`
+			: `Packed daemon did not become ready within ${waitedSeconds} seconds`,
+	);
+}
+
+export async function ensurePackedClient(paths = resolvePackedClientPaths(), transport: FetchTransport = fetch): Promise<PackedClient> {
+	return ensureClient({
+		connect: () => connectPackedClient(paths, transport),
+		isServiceInstalled: () => isPackedServiceInstalled(paths.serviceDescriptor),
+		spawn: () => {
+			const override = process.env.PI_PACKED_BIN;
+			const command = override ?? process.env.PI_PACKED_BUN ?? "bun";
+			const args = override ? ["serve"] : [join(dirname(fileURLToPath(import.meta.url)), "../src/cli.ts"), "serve"];
+			const child = spawn(command, args, {
+				detached: true,
+				stdio: "ignore",
+				env: { ...process.env, DAEMON_KIT_LAUNCH_PROVENANCE: "auto-spawn" },
+			});
+			child.once("error", () => {});
+			child.unref();
+		},
+		sleep: (ms) => new Promise((resolveDelay) => setTimeout(resolveDelay, ms)),
+	});
 }

@@ -81,6 +81,8 @@ Packages execute arbitrary code and mutate Pi settings/install roots. One daemon
 
 Every daemon-backed pi package already auto-spawns its own daemon lazily on first use (see each package's own `connectWithPolicy`/`ensure*Client` wiring) -- no install step is required for basic function. Surviving a reboot, however, has always meant separately discovering and running that package's own `<bin> service install` command by hand (`web-spider service install`, `papyrus service install`, `packed service` + manual `systemctl`).
 
+`ensurePackedClient()` checks for a real, installed supervised service (`isServiceInstalled`, a plain file-existence check on the systemd unit / launchd plist path) before ever auto-spawning. When one is installed, it never spawns a second, differently-supervised process -- it retries the connection and, if the service genuinely never comes up, fails with a message pointing at the service instead of silently creating a competing daemon. This closes a real, confirmed hazard: an auto-spawned orphan gets a much longer idle budget than a supervised service typically does, so it could otherwise keep winning daemon-kit's single-instance lock race against every later `systemctl restart`, invisibly, for the rest of that budget.
+
 `packed install-service <source>` closes that gap for any package that opts in. A package declares its daemon entry point once, in its own `package.json`:
 
 ```json

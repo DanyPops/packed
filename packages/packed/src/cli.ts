@@ -31,9 +31,16 @@ import {
 	type SecuritySettingsPort,
 } from "./security.ts";
 
+/** A generated unit must never trust a bare "pi" resolving under systemd's
+ * own restricted PATH just because it resolves in the shell that generated
+ * the unit -- confirmed live: it doesn't. Always pin the real resolved
+ * absolute path when one can be found; only omit the pin (bare name) when
+ * resolution genuinely fails, which the running daemon will then also
+ * fail at identically, not silently. */
 function defaultPiBinForUnit(): string | undefined {
 	const b = defaultPiBin();
-	return b === "pi" ? undefined : b; // bare name needs no pin
+	if (b !== "pi") return b; // explicit override already given
+	return Bun.which("pi") ?? undefined;
 }
 import {
 	SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT, NPM_REGISTRY_BASE, SEARCH_PAGE_SIZE, MIRROR_PAGE_DELAY_MS,

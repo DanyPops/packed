@@ -16,7 +16,7 @@ import { formatSetupReport, SetupManager, type SetupApplyResult, type SetupExpor
 import { resolve } from "node:path";
 import { npmPackageName, readInstalledPackages } from "./installed.ts";
 import { checkUpdates } from "./watcher.ts";
-import { checkPiVersion, type PiVersionReport } from "./pi-version.ts";
+import { checkPiVersion, runPiStatusInteractive, runPiUpdateSelf, type PiVersionReport } from "./pi-version.ts";
 import { syncCatalog } from "./catalog.ts";
 import { openDb, searchLocal, catalogList, getSyncMeta, latestVersion, dbPath } from "./db.ts";
 import { NAME_RE, defaultPiBin } from "./install.ts";
@@ -602,10 +602,19 @@ if (import.meta.main) {
 			dataDir: dirname(paths.database),
 			piHome: defaultPiHome(),
 		});
-		const interactivePublishStatus = args[0] === "publish" && args[1] === "status" && !args.includes("--json") && process.stdin.isTTY && process.stdout.isTTY;
-		if (interactivePublishStatus) {
+		const interactive = process.stdin.isTTY && process.stdout.isTTY && !args.includes("--json");
+		if (interactive && args[0] === "publish" && args[1] === "status") {
 			const ready = await runPublishInteractive(resolve(args[2] ?? "."), reg, args.includes("--open-browser"));
 			process.exit(ready ? 0 : 1);
+		}
+		if (interactive && args[0] === "pi" && args[1] === "status") {
+			const report = await runPiStatusInteractive({
+				check: () => (daemon ? daemon.piStatus() : checkPiVersion()),
+				confirm: confirmInteractive,
+				runUpdate: runPiUpdateSelf,
+			});
+			process.stdout.write(formatPiVersionReport(report));
+			process.exit(report.upToDate === false ? 1 : 0);
 		}
 		process.stdout.write(out);
 		process.exit(code);

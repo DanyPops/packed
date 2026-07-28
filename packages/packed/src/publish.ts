@@ -258,7 +258,7 @@ export const readNpmWhoami: VersionCommand = () => runBounded(["npm", "whoami"])
 
 export interface InteractiveRunResult { ok: boolean; code: number }
 
-async function runInherited(command: string[]): Promise<InteractiveRunResult> {
+export async function runInherited(command: string[]): Promise<InteractiveRunResult> {
 	try {
 		const proc = Bun.spawn(command, { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
 		const code = await proc.exited;

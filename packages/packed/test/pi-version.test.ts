@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Server } from "bun";
 import { AuthenticatedRpcClient } from "@danypops/daemon-kit/rpc-client";
-import { checkPiVersion, createFetchLatestPiRelease, type PiReleaseInfo } from "../src/pi-version.ts";
+import { checkPiVersion, createFetchLatestPiRelease, piUpdateSelfArgs, runPiStatusInteractive, runPiUpdateSelf, type PiReleaseInfo, type PiVersionReport } from "../src/pi-version.ts";
 import type { VersionCommand } from "../src/publish.ts";
 import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/service.ts";
 import type { Installer, PkgInfo, Registry, SearchPage } from "../src/ports.ts";
@@ -137,6 +137,92 @@ describe("createFetchLatestPiRelease", () => {
 		process.env.PI_OFFLINE = "1";
 		const fetchLatest = createFetchLatestPiRelease(`http://127.0.0.1:${server.port}`);
 		expect(await fetchLatest()).toBeUndefined();
+	});
+});
+
+describe("piUpdateSelfArgs / runPiUpdateSelf", () => {
+	const originalPiBin = process.env.PI_PACKED_PI_BIN;
+	afterEach(() => {
+		if (originalPiBin === undefined) delete process.env.PI_PACKED_PI_BIN;
+		else process.env.PI_PACKED_PI_BIN = originalPiBin;
+	});
+
+	it("builds the exact self-update argv using the same pi-binary resolution as install.ts", () => {
+		process.env.PI_PACKED_PI_BIN = "/opt/pi/bin/pi";
+		expect(piUpdateSelfArgs()).toEqual(["/opt/pi/bin/pi", "update", "--self"]);
+	});
+
+	it("exposes runPiUpdateSelf as a real, separately invocable subprocess orchestration function -- never invoked by any test", () => {
+		expect(typeof runPiUpdateSelf).toBe("function");
+	});
+});
+
+describe("runPiStatusInteractive", () => {
+	function fakeCheck(reports: PiVersionReport[]): () => Promise<PiVersionReport> {
+		const queue = [...reports];
+		return async () => queue.shift() ?? reports[reports.length - 1]!;
+	}
+
+	it("never confirms or updates when already up to date", async () => {
+		const confirms: string[] = [];
+		let updateCalls = 0;
+		const report = await runPiStatusInteractive({
+			check: fakeCheck([{ current: "0.82.1", latest: "0.82.1", upToDate: true }]),
+			confirm: async (q) => { confirms.push(q); return true; },
+			runUpdate: async () => { updateCalls++; return { ok: true }; },
+		});
+		expect(confirms).toEqual([]);
+		expect(updateCalls).toBe(0);
+		expect(report).toEqual({ current: "0.82.1", latest: "0.82.1", upToDate: true });
+	});
+
+	it("never confirms or updates when upToDate is unknown (current or latest missing)", async () => {
+		let confirmCalls = 0;
+		const report = await runPiStatusInteractive({
+			check: fakeCheck([{ latest: "0.83.0" }]),
+			confirm: async () => { confirmCalls++; return true; },
+			runUpdate: async () => ({ ok: true }),
+		});
+		expect(confirmCalls).toBe(0);
+		expect(report).toEqual({ latest: "0.83.0" });
+	});
+
+	it("asks, and never updates when the human declines", async () => {
+		let updateCalls = 0;
+		const report = await runPiStatusInteractive({
+			check: fakeCheck([{ current: "0.82.1", latest: "0.83.0", upToDate: false }]),
+			confirm: async (q) => { expect(q).toContain("0.82.1"); expect(q).toContain("0.83.0"); return false; },
+			runUpdate: async () => { updateCalls++; return { ok: true }; },
+		});
+		expect(updateCalls).toBe(0);
+		expect(report).toEqual({ current: "0.82.1", latest: "0.83.0", upToDate: false });
+	});
+
+	it("updates and re-checks exactly once after the human confirms and the update succeeds", async () => {
+		const check = fakeCheck([
+			{ current: "0.82.1", latest: "0.83.0", upToDate: false },
+			{ current: "0.83.0", latest: "0.83.0", upToDate: true },
+		]);
+		let checkCalls = 0;
+		const report = await runPiStatusInteractive({
+			check: async () => { checkCalls++; return check(); },
+			confirm: async () => true,
+			runUpdate: async () => ({ ok: true }),
+		});
+		expect(checkCalls).toBe(2);
+		expect(report).toEqual({ current: "0.83.0", latest: "0.83.0", upToDate: true });
+	});
+
+	it("reports the original stale status, never a fabricated success, when the update subprocess fails", async () => {
+		const check = fakeCheck([{ current: "0.82.1", latest: "0.83.0", upToDate: false }]);
+		let checkCalls = 0;
+		const report = await runPiStatusInteractive({
+			check: async () => { checkCalls++; return check(); },
+			confirm: async () => true,
+			runUpdate: async () => ({ ok: false }),
+		});
+		expect(checkCalls).toBe(1); // never re-checks after a failed update
+		expect(report).toEqual({ current: "0.82.1", latest: "0.83.0", upToDate: false });
 	});
 });
 

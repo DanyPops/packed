@@ -65,6 +65,80 @@ describe("discoverPackageResources (pure resource discovery for the config overl
 	});
 });
 
+describe("static capability and lifecycle-script signals (packed check)", () => {
+	function capabilityFixture(scripts: Record<string, string> | undefined, sourceFiles: Record<string, string>) {
+		return fixture({ ...base, ...(scripts ? { scripts } : {}) }, {
+			"skills/example/SKILL.md": "---\nname: example\ndescription: Example. Use for examples.\n---\n", "README.md": "# Example\n", "LICENSE": "MIT\n",
+			...sourceFiles,
+		});
+	}
+
+	it("is silent for a package with no lifecycle scripts and no capability-suggestive imports", async () => {
+		const root = capabilityFixture(undefined, { "extensions/index.ts": "export default function () {}" });
+		const report = await checkPackage(root, { generic: false });
+		expect(codes(report.diagnostics)).not.toContain("PI_LIFECYCLE_SCRIPT_DECLARED");
+		expect(codes(report.diagnostics)).not.toContain("PI_CAPABILITY_IMPORT");
+	});
+
+	it("flags each declared lifecycle script with its exact command as evidence, at warning tier", async () => {
+		const root = capabilityFixture({ postinstall: "node ./setup.js", prepare: "tsc -p ." }, { "extensions/index.ts": "export default function () {}" });
+		const report = await checkPackage(root, { generic: false });
+		const declared = report.diagnostics.filter((d) => d.code === "PI_LIFECYCLE_SCRIPT_DECLARED");
+		expect(declared).toHaveLength(2);
+		expect(declared.every((d) => d.severity === "warning")).toBe(true);
+		expect(declared.find((d) => d.path === "package.json#scripts.postinstall")?.message).toContain("node ./setup.js");
+		expect(declared.find((d) => d.path === "package.json#scripts.prepare")?.message).toContain("tsc -p .");
+	});
+
+	it("ignores non-lifecycle scripts (e.g. test, build) -- only preinstall/install/postinstall/prepare count", async () => {
+		const root = capabilityFixture({ test: "bun test", build: "tsc" }, { "extensions/index.ts": "export default function () {}" });
+		const report = await checkPackage(root, { generic: false });
+		expect(codes(report.diagnostics)).not.toContain("PI_LIFECYCLE_SCRIPT_DECLARED");
+	});
+
+	it("flags a capability-suggestive import with the exact file and module as evidence, at info tier", async () => {
+		const root = capabilityFixture(undefined, { "extensions/index.ts": 'import { spawn } from "child_process";\nexport default function () {}' });
+		const report = await checkPackage(root, { generic: false });
+		const found = report.diagnostics.filter((d) => d.code === "PI_CAPABILITY_IMPORT");
+		expect(found).toHaveLength(1);
+		expect(found[0]!.severity).toBe("info");
+		expect(found[0]!.path).toBe("extensions/index.ts");
+		expect(found[0]!.message).toContain("child_process");
+	});
+
+	it("normalizes a node:-prefixed specifier and a subpath to the same bare capability module", async () => {
+		const root = capabilityFixture(undefined, { "extensions/index.ts": 'import fs from "node:fs/promises";\nexport default function () {}' });
+		const report = await checkPackage(root, { generic: false });
+		const found = report.diagnostics.filter((d) => d.code === "PI_CAPABILITY_IMPORT");
+		expect(found).toHaveLength(1);
+		expect(found[0]!.message).toContain("fs");
+	});
+
+	it("flags bun:sqlite as a capability-suggestive import", async () => {
+		const root = capabilityFixture(undefined, { "extensions/index.ts": 'import { Database } from "bun:sqlite";\nexport default function () {}' });
+		const report = await checkPackage(root, { generic: false });
+		expect(report.diagnostics.some((d) => d.code === "PI_CAPABILITY_IMPORT" && d.message.includes("bun:sqlite"))).toBe(true);
+	});
+
+	it("reports each capability once per file, not once per occurrence", async () => {
+		const root = capabilityFixture(undefined, { "extensions/index.ts": 'import { spawn } from "child_process";\nimport { exec } from "child_process";\nexport default function () {}' });
+		const report = await checkPackage(root, { generic: false });
+		expect(report.diagnostics.filter((d) => d.code === "PI_CAPABILITY_IMPORT")).toHaveLength(1);
+	});
+
+	it("never flags an ordinary third-party or relative import as a capability signal", async () => {
+		const root = capabilityFixture(undefined, { "extensions/index.ts": 'import lodash from "lodash";\nimport { helper } from "./helper.ts";\nexport default function () {}' });
+		const report = await checkPackage(root, { generic: false });
+		expect(codes(report.diagnostics)).not.toContain("PI_CAPABILITY_IMPORT");
+	});
+
+	it("never executes the scanned source -- purely a text scan (structural guarantee on the check function itself)", async () => {
+		const source = await Bun.file(new URL("../src/check.ts", import.meta.url)).text();
+		const capabilityCheckBody = source.slice(source.indexOf("function capabilityCheck"), source.indexOf("function capabilityCheck") + 1200);
+		expect(capabilityCheckBody).not.toMatch(/\brequire\(|import\s*\(|eval\(|Bun\.spawn|child_process/);
+	});
+});
+
 describe("pi.cleanup static validation (packed check)", () => {
 	function cleanupFixture(cleanup: unknown) {
 		return fixture({ ...base, pi: { ...base.pi, cleanup } }, {

@@ -348,6 +348,23 @@ function cleanupManifestCheck(context: Context): void {
 	}
 }
 
+/** Shipped .js/.ts/.cjs/.mjs files that are actually contained within the
+ * package root (never a symlink escape) -- the same file universe every
+ * source-scanning check works over. */
+function shippedSourceFiles(context: Context): string[] {
+	return shippedFiles(context).filter((path) => /\.[cm]?[jt]s$/.test(path) && isContainedFile(context.root, path));
+}
+
+/** Every import/require specifier literal in one file, bounded by
+ * MAX_SOURCE_BYTES -- undefined when the file is too large to read (the
+ * caller's own bound, never silently truncated mid-scan). */
+function importSpecifiersIn(context: Context, file: string): string[] | undefined {
+	const absolute = join(context.root, file);
+	if (lstatSync(absolute).size > MAX_SOURCE_BYTES) return undefined;
+	const source = readFileSync(absolute, "utf8");
+	return [...source.matchAll(/(?:from\s*|import\s*\(|require\s*\()\s*["']([^"']+)["']/g)].map((match) => match[1]!);
+}
+
 function dependencyCheck(context: Context): void {
 	const dependencies = isRecord(context.pkg.dependencies) ? context.pkg.dependencies : {};
 	const optional = isRecord(context.pkg.optionalDependencies) ? context.pkg.optionalDependencies : {};
@@ -358,12 +375,8 @@ function dependencyCheck(context: Context): void {
 			context.add({ code: "PI_CORE_DEPENDENCY_PLACEMENT", severity: "error", path: `package.json#peerDependencies.${core}`, message: `${core} must be a peerDependency with range *` });
 		}
 	}
-	for (const file of shippedFiles(context).filter((path) => /\.[cm]?[jt]s$/.test(path) && isContainedFile(context.root, path))) {
-		const absolute = join(context.root, file);
-		if (lstatSync(absolute).size > MAX_SOURCE_BYTES) continue;
-		const source = readFileSync(absolute, "utf8");
-		for (const match of source.matchAll(/(?:from\s*|import\s*\(|require\s*\()\s*["']([^"']+)["']/g)) {
-			const specifier = match[1]!;
+	for (const file of shippedSourceFiles(context)) {
+		for (const specifier of importSpecifiersIn(context, file) ?? []) {
 			if (specifier.startsWith(".") || specifier.startsWith("/") || specifier.startsWith("node:") || specifier.startsWith("bun:")) continue;
 			const name = specifier.startsWith("@") ? specifier.split("/").slice(0, 2).join("/") : specifier.split("/")[0]!;
 			if (CORE_PACKAGES.has(name)) {
@@ -371,6 +384,45 @@ function dependencyCheck(context: Context): void {
 			} else if (dependencies[name] === undefined && optional[name] === undefined) {
 				const misplaced = dev[name] !== undefined ? "devDependency" : peers[name] !== undefined ? "peerDependency" : undefined;
 				context.add({ code: "RUNTIME_DEPENDENCY_MISSING", severity: "error", path: file, message: `${name} is imported by shipped code but is not in dependencies${misplaced ? `; it is only a ${misplaced}` : ""}` });
+			}
+		}
+	}
+}
+
+const LIFECYCLE_SCRIPT_NAMES = ["preinstall", "install", "postinstall", "prepare"] as const;
+const MAX_SCRIPT_TEXT = 500;
+
+/** Bare module name a capability-suggestive specifier is checked against,
+ * after stripping an optional node:/bun: prefix and any subpath
+ * ("node:fs/promises" and "fs/promises" both normalize to "fs"). */
+const CAPABILITY_MODULES = new Set((["child_process", "net", "fs", "dgram", "worker_threads"] as const).flatMap((name) => [name, `node:${name}`]).concat("bun:sqlite"));
+
+function capabilitySpecifier(specifier: string): string | undefined {
+	const bare = specifier.split("/")[0]!;
+	return CAPABILITY_MODULES.has(bare) ? bare : undefined;
+}
+
+/**
+ * Purely static, non-executing capability/lifecycle-script signals over the
+ * exact shipped tarball contents -- the shoulder.dev-style "what does this
+ * package's code actually do" question, without ever installing or running
+ * anything. Info/warning tier only; neither diagnostic blocks by itself.
+ */
+function capabilityCheck(context: Context): void {
+	const scripts = isRecord(context.pkg.scripts) ? context.pkg.scripts : {};
+	for (const name of LIFECYCLE_SCRIPT_NAMES) {
+		const command = scripts[name];
+		if (typeof command === "string" && command.trim().length > 0) {
+			context.add({ code: "PI_LIFECYCLE_SCRIPT_DECLARED", severity: "warning", path: `package.json#scripts.${name}`, message: `declares a ${name} lifecycle script that runs automatically on install: ${command.slice(0, MAX_SCRIPT_TEXT)}` });
+		}
+	}
+	for (const file of shippedSourceFiles(context)) {
+		const seen = new Set<string>();
+		for (const specifier of importSpecifiersIn(context, file) ?? []) {
+			const capability = capabilitySpecifier(specifier);
+			if (capability && !seen.has(capability)) {
+				seen.add(capability);
+				context.add({ code: "PI_CAPABILITY_IMPORT", severity: "info", path: file, message: `imports ${capability}, a capability-suggestive module` });
 			}
 		}
 	}
@@ -499,7 +551,7 @@ export async function checkPackage(packagePath: string, options: CheckOptions = 
 			else diagnosticOverflow = true;
 		},
 	};
-	const checks: Check[] = [manifestCheck, resourcesCheck, cleanupManifestCheck, dependencyCheck, skillsCheck, extensionsCheck];
+	const checks: Check[] = [manifestCheck, resourcesCheck, cleanupManifestCheck, dependencyCheck, capabilityCheck, skillsCheck, extensionsCheck];
 	if (options.generic !== false) checks.push(genericCheck);
 	for (const check of checks) await check(context);
 	let smoke: CheckReport["smoke"];

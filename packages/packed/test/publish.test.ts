@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PublishManager, renderStageWorkflow, runNpmLoginWeb, runNpmTrustGithub, satisfiesRange, stageWorkflowFile, trustGithubArgs, type TrustStatusCommand, type VersionCommand } from "../src/publish.ts";
+import { browserOpenCommand, npmWebUrl, PublishManager, renderStageWorkflow, runNpmLoginWeb, satisfiesRange, stageWorkflowFile, type TrustStatusCommand, type VersionCommand } from "../src/publish.ts";
 import type { PkgInfo, Registry, SearchPage } from "../src/ports.ts";
 
 class RegistryFixture implements Registry {
@@ -211,15 +211,20 @@ describe("standalone staged publishing", () => {
 		expect(status.ready).toBe(true);
 	});
 
-	it("builds the exact interactive trust command with --yes appended for a caller that already confirmed intent", () => {
-		expect(trustGithubArgs("@danypops/packed", "packed-stage-publish.yml", "DanyPops/pi-packed")).toEqual([
-			"npm", "trust", "github", "@danypops/packed", "--repo", "DanyPops/pi-packed", "--file", "packed-stage-publish.yml", "--allow-stage-publish", "--yes",
-		]);
+	it("points the trust web handoff at npm's own Trusted Publisher access page, not a CLI command Packed constructs", () => {
+		expect(npmWebUrl("@danypops/packed")).toBe("https://www.npmjs.com/package/@danypops/packed/access");
 	});
 
-	it("exposes runNpmLoginWeb and runNpmTrustGithub as real, separately invocable subprocess orchestration, never bundled into publish itself", () => {
+	it("exposes runNpmLoginWeb as real, separately invocable subprocess orchestration, never bundled into publish itself", () => {
 		expect(typeof runNpmLoginWeb).toBe("function");
-		expect(typeof runNpmTrustGithub).toBe("function");
+	});
+
+	it("browserOpenCommand is pure argv construction -- never spawns a real browser, tests never risk a live side effect", () => {
+		expect(browserOpenCommand("https://example.com")).toEqual(
+			process.platform === "darwin" ? ["open", "https://example.com"]
+				: process.platform === "win32" ? ["cmd", "/c", "start", "", "https://example.com"]
+					: ["xdg-open", "https://example.com"],
+		);
 	});
 
 	it("satisfiesRange implements npm's caret/tilde/exact semantics, including 0.x's stricter caret", () => {

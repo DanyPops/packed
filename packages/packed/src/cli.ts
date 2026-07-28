@@ -11,7 +11,7 @@ import type { PackageDaemonPort } from "./client.ts";
 import { checkPackage, formatCheckReport } from "./check.ts";
 import { NpmPackVerifier, formatPackReport, type PackReport } from "./pack.ts";
 import { formatAdoptionReport, scoreTarget, type AdoptionReport } from "./score.ts";
-import { formatPublishReport, PublishManager, runNpmLoginWeb, runNpmTrustGithub, type PublishSetupReport, type PublishStatusReport } from "./publish.ts";
+import { formatPublishReport, npmWebUrl, openBrowser, PublishManager, runNpmLoginWeb, type PublishSetupReport, type PublishStatusReport } from "./publish.ts";
 import { formatSetupReport, SetupManager, type SetupApplyResult, type SetupExportReport, type SetupPlan, type SetupUpdateReport } from "./setup.ts";
 import { resolve } from "node:path";
 import { npmPackageName, readInstalledPackages } from "./installed.ts";
@@ -186,7 +186,7 @@ const commands: Record<string, { usage: string; run: Command }> = {
 	},
 
 	publish: {
-		usage: "packed publish setup [path] [--force] [--json] | packed publish status [path] [--json]",
+		usage: "packed publish setup [path] [--force] [--json] | packed publish status [path] [--json] [--open-browser]",
 		async run(_rest, d, flags, pos) {
 			const action = pos[0];
 			if (action !== "setup" && action !== "status") return usageErr(`usage: ${commands["publish"]!.usage}\n`);
@@ -496,37 +496,52 @@ export async function cliRun(args: string[], d: CliDeps): Promise<CliResult> {
 /** Bounded, TTY-only y/n prompt -- never invoked non-interactively, never
  * assumes an answer. Lives outside cliRun so the pure command table never
  * touches real stdin. */
-async function confirmInteractive(question: string): Promise<boolean> {
-	if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
-	process.stdout.write(`${question} [y/N] `);
-	return new Promise((resolvePrompt) => {
-		const onData = (data: Buffer) => {
-			process.stdin.pause();
-			resolvePrompt(data.toString("utf8").trim().toLowerCase().startsWith("y"));
-		};
+function readLine(): Promise<string> {
+	return new Promise((resolveLine) => {
 		process.stdin.resume();
 		process.stdin.setEncoding("utf8");
-		process.stdin.once("data", onData);
+		process.stdin.once("data", (data: Buffer) => {
+			process.stdin.pause();
+			resolveLine(data.toString("utf8"));
+		});
 	});
 }
 
-/** Smooth, opt-in orchestration of npm's own login/trust CLI commands --
- * never publishing, never touching a token, and never run unless a human
- * is actually watching a real terminal and says yes to each step. */
-async function runPublishInteractive(path: string, reg: Registry): Promise<boolean> {
+async function confirmInteractive(question: string): Promise<boolean> {
+	if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
+	process.stdout.write(`${question} [y/N] `);
+	return (await readLine()).trim().toLowerCase().startsWith("y");
+}
+
+async function waitForEnter(prompt: string): Promise<void> {
+	if (!process.stdin.isTTY || !process.stdout.isTTY) return;
+	process.stdout.write(prompt);
+	await readLine();
+}
+
+/** Smooth, opt-in handoff to npm's own web UI for both login and trust --
+ * never publishing, never touching a token, never running an npm CLI
+ * subcommand we'd have to keep in sync with npm's own flags, and never run
+ * unless a human is actually watching a real terminal and says yes to each
+ * step. Headless by default: prints the URL and waits for Enter, exactly
+ * like npm's own `--no-browser` config -- nothing here ever launches a
+ * real browser unless the human passed --open-browser, since this runs
+ * unattended just as often as it runs on someone's own desktop. */
+async function runPublishInteractive(path: string, reg: Registry, openBrowserAuto: boolean): Promise<boolean> {
 	const manager = new PublishManager(reg);
 	let report = await manager.status(path);
 	if (!report.checks.loggedIn) {
 		if (await confirmInteractive("Not logged in to npm on this machine. Run npm login --auth-type=web now?")) {
-			const result = await runNpmLoginWeb();
+			const result = await runNpmLoginWeb(openBrowserAuto);
 			if (result.ok) report = await manager.status(path);
 		}
 	}
-	if (report.checks.trustedPublisher !== "verified" && report.packageName && report.repository) {
-		const workflowFile = report.workflowPath.split("/").pop()!;
-		if (await confirmInteractive(`Configure npm trust for ${report.packageName} now?`)) {
-			const result = await runNpmTrustGithub(report.packageName, workflowFile, report.repository);
-			if (result.ok) report = await manager.status(path);
+	if (report.checks.trustedPublisher !== "verified" && report.packageName) {
+		const accessUrl = npmWebUrl(report.packageName);
+		if (await confirmInteractive(`Configure npm Trusted Publisher for ${report.packageName} now?`)) {
+			if (openBrowserAuto) await openBrowser(accessUrl);
+			await waitForEnter(`${openBrowserAuto ? "Opened (or open manually)" : "Open this URL"}: ${accessUrl}\nConfigure "Trusted publisher" for the GitHub Actions workflow there, then press Enter to continue... `);
+			report = await manager.status(path);
 		}
 	}
 	process.stdout.write(formatPublishReport(report, false));
@@ -564,7 +579,7 @@ if (import.meta.main) {
 		});
 		const interactivePublishStatus = args[0] === "publish" && args[1] === "status" && !args.includes("--json") && process.stdin.isTTY && process.stdout.isTTY;
 		if (interactivePublishStatus) {
-			const ready = await runPublishInteractive(resolve(args[2] ?? "."), reg);
+			const ready = await runPublishInteractive(resolve(args[2] ?? "."), reg, args.includes("--open-browser"));
 			process.exit(ready ? 0 : 1);
 		}
 		process.stdout.write(out);

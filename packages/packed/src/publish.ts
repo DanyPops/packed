@@ -259,32 +259,44 @@ export const readNpmWhoami: VersionCommand = () => runBounded(["npm", "whoami"])
 export interface InteractiveRunResult { ok: boolean; code: number }
 
 async function runInherited(command: string[]): Promise<InteractiveRunResult> {
-	const proc = Bun.spawn(command, { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
-	const code = await proc.exited;
-	return { ok: code === 0, code };
+	try {
+		const proc = Bun.spawn(command, { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+		const code = await proc.exited;
+		return { ok: code === 0, code };
+	} catch {
+		// no such binary, or the platform opener isn't installed -- the caller
+		// always has the raw URL/command to fall back to, never blocks on this.
+		return { ok: false, code: -1 };
+	}
 }
 
-/** Runs the real, interactive `npm login --auth-type=web` -- opens the
- * user's browser, npm's own process polls for completion and writes
- * ~/.npmrc itself. No token ever passes through Packed. Only ever invoked
- * after the caller's own explicit confirmation; never from a non-TTY or
- * scripted context. */
-export function runNpmLoginWeb(): Promise<InteractiveRunResult> {
-	return runInherited(["npm", "login", "--auth-type=web"]);
+/** Runs the real, interactive `npm login --auth-type=web`. npm's own
+ * process polls for completion and writes ~/.npmrc itself -- no token ever
+ * passes through Packed. Headless by default (`--no-browser`, npm's own
+ * documented config: print the URL, never auto-launch anything); pass
+ * `openBrowserAuto: true` only when a human on their own desktop terminal
+ * explicitly opted in. Only ever invoked after the caller's own explicit
+ * confirmation; never from a non-TTY or scripted context. */
+export function runNpmLoginWeb(openBrowserAuto = false): Promise<InteractiveRunResult> {
+	const args = ["npm", "login", "--auth-type=web"];
+	if (!openBrowserAuto) args.push("--no-browser");
+	return runInherited(args);
 }
 
-/** Pure argv construction, kept separate from the actual spawn so the exact
- * command shape is directly testable without invoking a real subprocess. */
-export function trustGithubArgs(packageName: string, workflowFile: string, repository: string): string[] {
-	return ["npm", "trust", "github", packageName, "--repo", repository, "--file", workflowFile, "--allow-stage-publish", "--yes"];
+/** Pure command construction, kept separate from the actual spawn so tests
+ * never risk invoking a real browser. */
+export function browserOpenCommand(url: string): string[] {
+	return process.platform === "darwin" ? ["open", url] : process.platform === "win32" ? ["cmd", "/c", "start", "", url] : ["xdg-open", url];
 }
 
-/** Runs the exact npm trust command status() already computed, with --yes
- * appended since the caller (packed publish status) already confirmed
- * intent interactively -- OTP/2FA still happens inline through npm's own
- * inherited stdio and is never bypassed. */
-export function runNpmTrustGithub(packageName: string, workflowFile: string, repository: string): Promise<InteractiveRunResult> {
-	return runInherited(trustGithubArgs(packageName, workflowFile, repository));
+/** Best-effort browser open for a human-driven web handoff (npm's own
+ * Trusted Publisher configuration UI, not a CLI command Packed constructs
+ * itself). Only ever called when a human explicitly opted in -- the default
+ * interactive path never spawns this, it only prints the URL. Failure is
+ * silent and non-fatal -- the caller always prints the URL too, so a
+ * missing/unknown opener never blocks the human. */
+export function openBrowser(url: string): Promise<InteractiveRunResult> {
+	return runInherited(browserOpenCommand(url));
 }
 
 function readManifest(root: string): PackageManifest {
@@ -405,7 +417,7 @@ function trustCommand(packageName: string, workflowFile: string, repository: str
 	return `npm trust github ${packageName} --repo ${repository} --file ${workflowFile} --allow-stage-publish`;
 }
 
-function npmWebUrl(packageName: string): string {
+export function npmWebUrl(packageName: string): string {
 	return `https://www.npmjs.com/package/${packageName}/access`;
 }
 

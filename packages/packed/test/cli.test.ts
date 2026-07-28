@@ -378,6 +378,7 @@ describe("CLI", () => {
 			async piStatus() { calls.push("piStatus"); return { current: "0.82.1", latest: "0.83.0", upToDate: false }; },
 			async resourcesList(projectRoot) { calls.push(`resourcesList:${projectRoot}`); return { global: [{ source: "npm:pi-daemon", name: "pi-daemon", scope: "global" as const, extensions: [{ path: "extensions/index.ts", enabled: true }], skills: [], prompts: [], themes: [] }], project: [] }; },
 			async resourcesToggle(source, field, path, enabled) { calls.push(`resourcesToggle:${source}:${field}:${path}:${enabled}`); return `${enabled ? "enabled" : "disabled"} ${path}`; },
+			async advisoriesScan(name) { calls.push(`advisoriesScan:${name}`); return { scanned: 1, findings: [], diagnostics: [], truncated: false }; },
 		};
 		const d = deps({ daemon });
 		expect(JSON.parse((await cliRun(["search", "daemon", "--offline", "--json"], d)).out).results[0].name).toBe("pi-daemon");
@@ -395,7 +396,15 @@ describe("CLI", () => {
 		expect(JSON.parse((await cliRun(["pi", "status", "--json"], d)).out)).toEqual({ current: "0.82.1", latest: "0.83.0", upToDate: false });
 		expect(JSON.parse((await cliRun(["resources", "list", "--json"], d)).out).global[0].name).toBe("pi-daemon");
 		expect(JSON.parse((await cliRun(["resources", "toggle", "npm:pi-daemon", "extensions", "extensions/index.ts", "off", "--approve", "--json"], d)).out)).toMatchObject({ ok: true, enabled: false });
-		expect(calls).toEqual(["search:true", "installed", "updates", "catalog", "mirror", "check:/tmp/package:true", "pack:/tmp/package", "score:pi-daemon", "setupExport:/tmp/project:true", "setupUpdate:/tmp/project/pi-setup.json", "setupPlan:/tmp/project/pi-setup.json", "setupApply:/tmp/project/pi-setup.json:true", "piStatus", "resourcesList:undefined", "resourcesToggle:npm:pi-daemon:extensions:extensions/index.ts:false"]);
+		expect(JSON.parse((await cliRun(["advisories", "--json"], d)).out)).toEqual({ scanned: 1, findings: [], diagnostics: [], truncated: false });
+		expect(calls).toEqual(["search:true", "installed", "updates", "catalog", "mirror", "check:/tmp/package:true", "pack:/tmp/package", "score:pi-daemon", "setupExport:/tmp/project:true", "setupUpdate:/tmp/project/pi-setup.json", "setupPlan:/tmp/project/pi-setup.json", "setupApply:/tmp/project/pi-setup.json:true", "piStatus", "resourcesList:undefined", "resourcesToggle:npm:pi-daemon:extensions:extensions/index.ts:false", "advisoriesScan:undefined"]);
+	});
+
+	it("advisories runs standalone without a daemon and degrades to zero findings, never a real network call, when nothing is installed", async () => {
+		const d = deps({ piHome: mkdtempSync(join(tmpdir(), "packed-advisories-cli-")) });
+		const result = await cliRun(["advisories", "--json"], d);
+		expect(result.code).toBe(0);
+		expect(JSON.parse(result.out)).toEqual({ scanned: 0, findings: [], diagnostics: [], truncated: false });
 	});
 
 	it("pi status runs standalone without a daemon, through an injectable check -- never a real subprocess/network call in tests", async () => {

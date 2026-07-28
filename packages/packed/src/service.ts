@@ -22,6 +22,7 @@ import { listPackageResources, resolveToggleSettingsPath, toggleResource, RESOUR
 import { checkPiVersion, type PiVersionReport } from "./pi-version.ts";
 import { formatCleanupSummary, runCleanup } from "./cleanup.ts";
 import { resolveInstalledDir } from "./resources.ts";
+import { scanInstalledPackages, resolveInstalledVersions, type AdvisoryReport } from "./advisories.ts";
 import { join as joinPath } from "node:path";
 import { existsSync as fileExistsSync } from "node:fs";
 import { RealDaemonServiceInstaller, type DaemonServiceInstaller } from "./daemon-service.ts";
@@ -56,6 +57,7 @@ export interface Deps {
 	};
 	daemonServiceInstaller?: DaemonServiceInstaller;
 	piVersion?: { check(options?: { timeoutMs?: number }): Promise<PiVersionReport> };
+	advisories?: { scan(installed: Record<string, string>): Promise<AdvisoryReport> };
 }
 
 export type OperationName =
@@ -80,7 +82,8 @@ export type OperationName =
 	| "package.update"
 	| "resources.list"
 	| "resources.toggle"
-	| "pi.status";
+	| "pi.status"
+	| "advisories.scan";
 
 export interface OperationInputs {
 	"package.search": { query: string; limit: number; offline?: boolean };
@@ -105,6 +108,7 @@ export interface OperationInputs {
 	"resources.list": { projectRoot?: string };
 	"resources.toggle": { source: string; field: ResourceField; path: string; enabled: boolean; projectRoot?: string; approved?: boolean };
 	"pi.status": Record<string, never>;
+	"advisories.scan": { name?: string };
 }
 
 interface MutationResponse { ok: boolean; output: string }
@@ -134,6 +138,7 @@ export interface OperationOutputs {
 	"resources.list": { global: PackageResources[]; project: PackageResources[] };
 	"resources.toggle": MutationResponse;
 	"pi.status": PiVersionReport;
+	"advisories.scan": AdvisoryReport;
 }
 
 export const OPERATION_NAMES: readonly OperationName[] = [
@@ -141,7 +146,7 @@ export const OPERATION_NAMES: readonly OperationName[] = [
 	"setup.export", "setup.update", "setup.plan", "setup.apply",
 	"package.security.get", "package.security.set", "package.install", "package.install_service", "package.remove", "package.update",
 	"resources.list", "resources.toggle",
-	"pi.status",
+	"pi.status", "advisories.scan",
 ];
 
 class PackageOperationError extends Error {
@@ -393,6 +398,13 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 		}
 		if (op === "pi.status") {
 			return (deps.piVersion ? await deps.piVersion.check() : await checkPiVersion()) as OperationOutputs[Name];
+		}
+		if (op === "advisories.scan") {
+			const value = input as OperationInputs["advisories.scan"];
+			if (value.name !== undefined && (typeof value.name !== "string" || value.name.length === 0 || value.name.length > 214)) throw new PackageOperationError("name must be a non-empty string up to 214 characters", 400);
+			const installed = resolveInstalledVersions(deps.piHome ?? defaultPiHome(), value.name);
+			const scan = deps.advisories?.scan ?? scanInstalledPackages;
+			return (await scan(installed)) as OperationOutputs[Name];
 		}
 		if (op === "resources.list") {
 			const value = input as OperationInputs["resources.list"];

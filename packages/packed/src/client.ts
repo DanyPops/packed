@@ -14,6 +14,7 @@ import type { AdoptionReport } from "./score.ts";
 import type { SetupApplyResult, SetupExportReport, SetupPlan, SetupUpdateReport } from "./setup.ts";
 import type { PiVersionReport } from "./pi-version.ts";
 import type { PackageResources, ResourceField } from "./resources.ts";
+import type { AdvisoryReport } from "./advisories.ts";
 
 export type FetchTransport = (request: Request) => Promise<Response>;
 type RpcClient = AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>;
@@ -41,6 +42,7 @@ export interface PackageDaemonPort {
 	piStatus(): Promise<PiVersionReport>;
 	resourcesList(projectRoot?: string): Promise<{ global: PackageResources[]; project: PackageResources[] }>;
 	resourcesToggle(source: string, field: ResourceField, path: string, enabled: boolean, projectRoot?: string, approved?: boolean): Promise<string>;
+	advisoriesScan(name?: string): Promise<AdvisoryReport>;
 }
 
 export class PackageDaemonError extends Error {
@@ -111,6 +113,10 @@ export class PackageDaemonClient implements PackageDaemonPort {
 
 	async resourcesToggle(source: string, field: ResourceField, path: string, enabled: boolean, projectRoot?: string, approved?: boolean): Promise<string> {
 		return (await this.call("resources.toggle", { source, field, path, enabled, projectRoot, approved })).output;
+	}
+
+	advisoriesScan(name?: string): Promise<AdvisoryReport> {
+		return this.call("advisories.scan", { name });
 	}
 
 	check(path: string, smoke = false): Promise<CheckReport> {

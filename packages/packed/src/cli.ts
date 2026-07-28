@@ -18,6 +18,7 @@ import { npmPackageName, readInstalledPackages } from "./installed.ts";
 import { checkUpdates } from "./watcher.ts";
 import { checkPiVersion, runPiStatusInteractive, runPiUpdateSelf, type PiVersionReport } from "./pi-version.ts";
 import { listPackageResources, resolveToggleSettingsPath, toggleResource, RESOURCE_FIELDS, type PackageResources, type ResourceField } from "./resources.ts";
+import { scanInstalledPackages, resolveInstalledVersions, formatAdvisoryReport } from "./advisories.ts";
 import { existsSync } from "node:fs";
 import { syncCatalog } from "./catalog.ts";
 import { openDb, searchLocal, catalogList, getSyncMeta, latestVersion, dbPath } from "./db.ts";
@@ -163,6 +164,7 @@ const PACKAGE_COMMAND_OPERATIONS: Record<string, PackageOperation | undefined> =
 	"install-service": "install_service",
 	remove: "remove",
 	pi: "pi.status",
+	advisories: "advisories.scan",
 };
 
 function formatResourcesList(result: { global: PackageResources[]; project: PackageResources[] }): string {
@@ -346,6 +348,15 @@ const commands: Record<string, { usage: string; run: Command }> = {
 			const report = d.daemon ? await d.daemon.piStatus() : await (d.piVersion ?? { check: checkPiVersion }).check();
 			if (flags.json) return ok(JSON.stringify(report) + "\n");
 			return ok(formatPiVersionReport(report));
+		},
+	},
+
+	advisories: {
+		usage: "packed advisories [name] [--json]  (no lockfile required; scans installed npm-sourced Pi packages against npm's bulk advisory endpoint)",
+		async run(_rest, d, flags, pos) {
+			const name = pos[0];
+			const report = d.daemon ? await d.daemon.advisoriesScan(name) : await scanInstalledPackages(resolveInstalledVersions(d.piHome, name));
+			return ok(formatAdvisoryReport(report, flags.json));
 		},
 	},
 

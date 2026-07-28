@@ -18,7 +18,7 @@ import { StaticPackageChecker, type CheckReport, type PackageChecker } from "./c
 import { NpmPackVerifier, type PackReport } from "./pack.ts";
 import { scoreTarget, type AdoptionReport } from "./score.ts";
 import { SetupManager, type SetupApplyResult, type SetupExportReport, type SetupPlan, type SetupUpdateReport } from "./setup.ts";
-import { listPackageResources, toggleResource, RESOURCE_FIELDS, type PackageResources, type ResourceField } from "./resources.ts";
+import { listPackageResources, resolveToggleSettingsPath, toggleResource, RESOURCE_FIELDS, type PackageResources, type ResourceField } from "./resources.ts";
 import { checkPiVersion, type PiVersionReport } from "./pi-version.ts";
 import { formatCleanupSummary, runCleanup } from "./cleanup.ts";
 import { resolveInstalledDir } from "./resources.ts";
@@ -407,7 +407,7 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			const denied = authorize("resources.toggle", value.approved === true);
 			if (denied) throw new PackageOperationError((await denied.json() as { error: string }).error, denied.status);
 			const piHome = deps.piHome ?? defaultPiHome();
-			const settingsPath = value.projectRoot ? joinPath(value.projectRoot, ".pi", "settings.json") : joinPath(piHome, "settings.json");
+			const settingsPath = resolveToggleSettingsPath(piHome, value.projectRoot);
 			if (value.projectRoot && !fileExistsSync(settingsPath)) throw new PackageOperationError("no project settings file to toggle", 404);
 			const result = toggleResource({ settingsPath, source: value.source, field: value.field, path: value.path, enabled: value.enabled });
 			return { ok: result.ok, output: result.ok ? `${value.enabled ? "enabled" : "disabled"} ${value.path}` : (result.error ?? "toggle failed") } as OperationOutputs[Name];

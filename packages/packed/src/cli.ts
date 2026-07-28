@@ -17,6 +17,8 @@ import { resolve } from "node:path";
 import { npmPackageName, readInstalledPackages } from "./installed.ts";
 import { checkUpdates } from "./watcher.ts";
 import { checkPiVersion, runPiStatusInteractive, runPiUpdateSelf, type PiVersionReport } from "./pi-version.ts";
+import { listPackageResources, resolveToggleSettingsPath, toggleResource, RESOURCE_FIELDS, type PackageResources, type ResourceField } from "./resources.ts";
+import { existsSync } from "node:fs";
 import { syncCatalog } from "./catalog.ts";
 import { openDb, searchLocal, catalogList, getSyncMeta, latestVersion, dbPath } from "./db.ts";
 import { NAME_RE, defaultPiBin } from "./install.ts";
@@ -109,6 +111,7 @@ interface Flags {
 	force: boolean;
 	prune: boolean;
 	machineLocal: boolean;
+	project?: string;
 }
 
 function parseFlags(rest: string[]): { flags: Flags; pos: string[] } {
@@ -126,6 +129,8 @@ function parseFlags(rest: string[]): { flags: Flags; pos: string[] } {
 		else if (a === "--machine-local") flags.machineLocal = true;
 		else if (a === "--limit" && i + 1 < rest.length) flags.limit = Number(rest[++i]) || SEARCH_DEFAULT_LIMIT;
 		else if (a.startsWith("--limit=")) flags.limit = Number(a.slice(8)) || SEARCH_DEFAULT_LIMIT;
+		else if (a === "--project" && i + 1 < rest.length) flags.project = rest[++i];
+		else if (a.startsWith("--project=")) flags.project = a.slice(10);
 		else pos.push(a);
 	}
 	return { flags, pos };
@@ -159,6 +164,21 @@ const PACKAGE_COMMAND_OPERATIONS: Record<string, PackageOperation | undefined> =
 	remove: "remove",
 	pi: "pi.status",
 };
+
+function formatResourcesList(result: { global: PackageResources[]; project: PackageResources[] }): string {
+	let out = "";
+	for (const [scope, groups] of [["global", result.global], ["project", result.project]] as const) {
+		if (groups.length === 0) continue;
+		out += `${scope}:\n`;
+		for (const group of groups) {
+			out += `  ${group.name} (${group.source}):\n`;
+			for (const field of RESOURCE_FIELDS) {
+				for (const item of group[field]) out += `    ${item.enabled ? "on " : "off"}  ${field}/${item.path}\n`;
+			}
+		}
+	}
+	return out || "no package resources found\n";
+}
 
 function formatPiVersionReport(report: PiVersionReport): string {
 	if (!report.current && !report.latest) return "pi version unknown (pi not found on PATH, and the latest-version check failed or was skipped)\n";
@@ -326,6 +346,43 @@ const commands: Record<string, { usage: string; run: Command }> = {
 			const report = d.daemon ? await d.daemon.piStatus() : await (d.piVersion ?? { check: checkPiVersion }).check();
 			if (flags.json) return ok(JSON.stringify(report) + "\n");
 			return ok(formatPiVersionReport(report));
+		},
+	},
+
+	resources: {
+		usage: "packed resources list [--project <path>] [--json] | packed resources toggle <source> <field> <path> <on|off> [--project <path>] [--approve] [--json]",
+		async run(_rest, d, flags, pos) {
+			const action = pos[0];
+			if (action === "list") {
+				const result = d.daemon ? await d.daemon.resourcesList(flags.project) : listPackageResources(d.piHome, flags.project);
+				if (flags.json) return ok(JSON.stringify(result) + "\n");
+				return ok(formatResourcesList(result));
+			}
+			if (action === "toggle") {
+				const [source, field, path, state] = [pos[1] ?? "", pos[2] ?? "", pos[3] ?? "", pos[4] ?? ""];
+				if (!source || !RESOURCE_FIELDS.includes(field as ResourceField) || !path || (state !== "on" && state !== "off")) {
+					return usageErr(`usage: ${commands["resources"]!.usage}\n`);
+				}
+				const enabled = state === "on";
+				try {
+					let output: string;
+					if (d.daemon) {
+						output = await d.daemon.resourcesToggle(source, field as ResourceField, path, enabled, flags.project, flags.approved);
+					} else {
+						assertPackagePermission(await d.security.security(), "resources.toggle", flags.approved);
+						const settingsPath = resolveToggleSettingsPath(d.piHome, flags.project);
+						if (flags.project && !existsSync(settingsPath)) throw new Error("no project settings file to toggle");
+						const result = toggleResource({ settingsPath, source, field: field as ResourceField, path, enabled });
+						if (!result.ok) throw new Error(result.error ?? "toggle failed");
+						output = `${enabled ? "enabled" : "disabled"} ${path}`;
+					}
+					return flags.json ? ok(`${JSON.stringify({ ok: true, source, field, path, enabled, output })}\n`) : ok(`${output}\n`);
+				} catch (e) {
+					const error = e instanceof Error ? e.message : String(e);
+					return flags.json ? fail(`${JSON.stringify({ ok: false, source, field, path, enabled, error })}\n`) : fail(`${error}\n`);
+				}
+			}
+			return usageErr(`usage: ${commands["resources"]!.usage}\n`);
 		},
 	},
 

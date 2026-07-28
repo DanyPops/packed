@@ -137,6 +137,13 @@ export function listPackageResources(piHome: string, projectRoot?: string): { gl
 	return { global, project };
 }
 
+/** The exact settings.json a toggle targets -- shared by the daemon's
+ * resources.toggle route and the standalone CLI fallback so they can never
+ * drift onto two different resolutions of the same package's settings. */
+export function resolveToggleSettingsPath(piHome: string, projectRoot?: string): string {
+	return projectRoot ? join(projectRoot, ".pi", "settings.json") : join(piHome, "settings.json");
+}
+
 function atomicWriteJson(path: string, value: unknown): void {
 	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
 	if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw new Error(`RESOURCE_PATH_UNSAFE: refusing to replace symlink ${path}`);

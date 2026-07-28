@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { cliRun, type CliDeps } from "../src/cli.ts";
@@ -376,6 +376,8 @@ describe("CLI", () => {
 			async remove(name) { return name; },
 			async update(source) { return { output: source, reloadRequired: false, alreadyUpToDate: true, pinned: false }; },
 			async piStatus() { calls.push("piStatus"); return { current: "0.82.1", latest: "0.83.0", upToDate: false }; },
+			async resourcesList(projectRoot) { calls.push(`resourcesList:${projectRoot}`); return { global: [{ source: "npm:pi-daemon", name: "pi-daemon", scope: "global" as const, extensions: [{ path: "extensions/index.ts", enabled: true }], skills: [], prompts: [], themes: [] }], project: [] }; },
+			async resourcesToggle(source, field, path, enabled) { calls.push(`resourcesToggle:${source}:${field}:${path}:${enabled}`); return `${enabled ? "enabled" : "disabled"} ${path}`; },
 		};
 		const d = deps({ daemon });
 		expect(JSON.parse((await cliRun(["search", "daemon", "--offline", "--json"], d)).out).results[0].name).toBe("pi-daemon");
@@ -391,7 +393,9 @@ describe("CLI", () => {
 		expect((await cliRun(["setup", "plan", "/tmp/project/pi-setup.json", "--json"], d)).code).toBe(0);
 		expect((await cliRun(["setup", "apply", "/tmp/project/pi-setup.json", "--approve", "--json"], d)).code).toBe(0);
 		expect(JSON.parse((await cliRun(["pi", "status", "--json"], d)).out)).toEqual({ current: "0.82.1", latest: "0.83.0", upToDate: false });
-		expect(calls).toEqual(["search:true", "installed", "updates", "catalog", "mirror", "check:/tmp/package:true", "pack:/tmp/package", "score:pi-daemon", "setupExport:/tmp/project:true", "setupUpdate:/tmp/project/pi-setup.json", "setupPlan:/tmp/project/pi-setup.json", "setupApply:/tmp/project/pi-setup.json:true", "piStatus"]);
+		expect(JSON.parse((await cliRun(["resources", "list", "--json"], d)).out).global[0].name).toBe("pi-daemon");
+		expect(JSON.parse((await cliRun(["resources", "toggle", "npm:pi-daemon", "extensions", "extensions/index.ts", "off", "--approve", "--json"], d)).out)).toMatchObject({ ok: true, enabled: false });
+		expect(calls).toEqual(["search:true", "installed", "updates", "catalog", "mirror", "check:/tmp/package:true", "pack:/tmp/package", "score:pi-daemon", "setupExport:/tmp/project:true", "setupUpdate:/tmp/project/pi-setup.json", "setupPlan:/tmp/project/pi-setup.json", "setupApply:/tmp/project/pi-setup.json:true", "piStatus", "resourcesList:undefined", "resourcesToggle:npm:pi-daemon:extensions:extensions/index.ts:false"]);
 	});
 
 	it("pi status runs standalone without a daemon, through an injectable check -- never a real subprocess/network call in tests", async () => {
@@ -403,6 +407,34 @@ describe("CLI", () => {
 		expect(human.out).toContain("pi 0.82.1 (latest 0.83.0)");
 		expect(human.out).toContain("pi update --self");
 		expect((await cliRun(["pi", "bogus"], d)).code).toBe(2);
+	});
+
+	it("resources list and toggle run standalone without a daemon (CLI parity for the daemon-only resources.list/toggle operations)", async () => {
+		const piHome = mkdtempSync(join(tmpdir(), "packed-resources-cli-"));
+		writeFileSync(join(piHome, "settings.json"), JSON.stringify({ packages: ["npm:pi-demo"] }));
+		const pkgDir = join(piHome, "npm", "node_modules", "pi-demo");
+		mkdirSync(pkgDir, { recursive: true });
+		writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ name: "pi-demo", version: "1.0.0", pi: { extensions: ["extensions/index.ts"] } }));
+		mkdirSync(join(pkgDir, "extensions"), { recursive: true });
+		writeFileSync(join(pkgDir, "extensions", "index.ts"), "export default function () {}");
+		const d = deps({ piHome });
+
+		const list = await cliRun(["resources", "list", "--json"], d);
+		expect(list.code).toBe(0);
+		const parsed = JSON.parse(list.out);
+		expect(parsed.global[0].extensions).toEqual([{ path: "extensions/index.ts", enabled: true }]);
+		const human = await cliRun(["resources", "list"], d);
+		expect(human.out).toContain("pi-demo");
+		expect(human.out).toContain("extensions/index.ts");
+
+		expect((await cliRun(["resources", "toggle", "npm:pi-demo", "extensions", "extensions/index.ts", "off"], d)).code).toBe(1); // approval required
+		const toggled = await cliRun(["resources", "toggle", "npm:pi-demo", "extensions", "extensions/index.ts", "off", "--approve", "--json"], d);
+		expect(JSON.parse(toggled.out)).toMatchObject({ ok: true, enabled: false });
+		const after = JSON.parse((await cliRun(["resources", "list", "--json"], d)).out);
+		expect(after.global[0].extensions).toEqual([{ path: "extensions/index.ts", enabled: false }]);
+
+		expect((await cliRun(["resources", "toggle", "npm:pi-demo", "bogus-field", "x", "on"], d)).code).toBe(2);
+		expect((await cliRun(["resources", "bogus"], d)).code).toBe(2);
 	});
 
 	it("unknown command → usage, code 2", async () => {

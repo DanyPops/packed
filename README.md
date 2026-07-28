@@ -69,6 +69,8 @@ Packages execute arbitrary code and mutate Pi settings/install roots. One daemon
 | `packed install-service <source> --approve [--json]` | Registers an installed npm package's own daemon as a persistent login/boot service, via its `packed.daemonService` manifest |
 | `packed remove <name> [--approve] [--json]` | Authenticated daemon removal by bare npm name; applies and reports any declared `pi.cleanup` paths first |
 | `packed pi status [--json]` | Report the running Pi version against pi.dev's own latest-release endpoint -- the same source `pi update --self` itself uses, never the npm registry. On a real interactive terminal, offers to run `pi update --self` when behind |
+| `packed resources list [--project <path>] [--json]` | List every installed package's extensions/skills/prompts/themes and their enabled state |
+| `packed resources toggle <source> <field> <path> <on\|off> [--project <path>] [--approve] [--json]` | Enable or disable one declared resource through the same settings.json filter arrays `pi config` writes |
 | `packed security [always\|never] [--approve] [--json]` | Read or set the package mutation approval policy |
 | `packed serve` | Run the loopback daemon |
 | `packed service` | Print the systemd user unit |

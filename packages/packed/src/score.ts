@@ -4,6 +4,10 @@ import type { PkgInfo, Registry } from "./ports.ts";
 import { NpmPackVerifier, type PackReport } from "./pack.ts";
 import { satisfiesRange } from "./publish.ts";
 import { resolveCurrentPiVersion } from "./pi-version.ts";
+import { lastLocalCommitAt, githubLastCommitAt, type FetchGithubLastCommitAt } from "./commit-freshness.ts";
+
+const PI_COMMAND_NAME = "@earendil-works/pi-coding-agent";
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /** The peer range Pi's own docs actually recommend -- carries no real
  * compatibility signal, so it's treated identically to an absent range. */
@@ -31,6 +35,7 @@ export interface AdoptionReport {
 		maintenance: AdoptionDimension;
 		traction: AdoptionDimension;
 		compatibility: AdoptionDimension;
+		freshness: AdoptionDimension;
 	};
 }
 
@@ -120,6 +125,51 @@ function maintenance(info: PkgInfo): AdoptionDimension {
 	return dimension(met, 3, evidence, actions);
 }
 
+interface FreshnessCandidate {
+	date: string;
+	/** "commit" is a real git-history date (local checkout, or GitHub's
+	 * Commits API); "publish" is the npm publish-date proxy -- used only
+	 * when a real commit date could not be resolved. */
+	source: "commit" | "publish";
+}
+
+/**
+ * Compares the candidate's most accurate available date -- a real commit
+ * (local `git log`, or GitHub's Commits API for a pre-install registry
+ * candidate) when resolvable, falling back to the npm publish-date proxy
+ * otherwise -- against @earendil-works/pi-coding-agent's own last publish
+ * date. The publish-date proxy is reasonable but still a proxy: real
+ * published packages in this ecosystem publish via CI immediately on
+ * tag/commit (confirmed live across dozens of real packages: OIDC
+ * trusted-publisher via GitHub Actions is the dominant pattern), which is
+ * exactly why a real commit date, when available, is preferred instead.
+ * Observational only, like traction() -- no invented threshold for "how
+ * stale is bad"; Pi enforces nothing here. Unknown (never a guess)
+ * whenever neither source resolved, or pi's own publish date is
+ * unavailable.
+ */
+function freshness(candidate: FreshnessCandidate | undefined, piModified: string | undefined): AdoptionDimension {
+	if (!candidate) {
+		return { status: "unknown", met: 0, total: 0, evidence: ["candidate's commit history and npm publish date are both unavailable"], actions: [] };
+	}
+	if (!piModified) {
+		return { status: "unknown", met: 0, total: 0, evidence: ["pi-coding-agent's own latest npm publish date is unavailable"], actions: [] };
+	}
+	const candidateMs = Date.parse(candidate.date);
+	const piMs = Date.parse(piModified);
+	if (!Number.isFinite(candidateMs) || !Number.isFinite(piMs)) {
+		return { status: "unknown", met: 0, total: 0, evidence: ["dates could not be parsed"], actions: [] };
+	}
+	const deltaDays = Math.round((piMs - candidateMs) / MS_PER_DAY);
+	const relation = deltaDays > 0 ? `${deltaDays}d before pi-coding-agent's latest publish` : deltaDays < 0 ? `${-deltaDays}d after pi-coding-agent's latest publish` : "the same day as pi-coding-agent's latest publish";
+	const sourceLabel = candidate.source === "commit" ? "last real commit" : "npm publish date (commit history unavailable; proxy for commit recency)";
+	return {
+		status: "observed", met: 0, total: 0,
+		evidence: [`candidate's ${sourceLabel}: ${candidate.date}`, `pi-coding-agent last published ${piModified} -- candidate is ${relation}`],
+		actions: [],
+	};
+}
+
 function traction(info: PkgInfo): AdoptionDimension {
 	const observations = info.downloads;
 	if (!observations || (observations.weekly === undefined && observations.monthly === undefined)) {
@@ -180,14 +230,19 @@ function compatibility(info: PkgInfo, currentPiVersion: string | undefined): Ado
 	};
 }
 
-export function assessRegistryAdoption(info: PkgInfo, currentPiVersion?: string): AdoptionReport {
+export function assessRegistryAdoption(info: PkgInfo, currentPiVersion?: string, piModified?: string, candidateCommitAt?: string): AdoptionReport {
+	const candidate: FreshnessCandidate | undefined = candidateCommitAt
+		? { date: candidateCommitAt, source: "commit" }
+		: info.modified
+			? { date: info.modified, source: "publish" }
+			: undefined;
 	return {
 		target: info.name, source: "registry", package: { name: info.name, version: info.version },
-		dimensions: { discoverability: discoverability(info), firstRun: firstRun(info), trust: trust(info), maintenance: maintenance(info), traction: traction(info), compatibility: compatibility(info, currentPiVersion) },
+		dimensions: { discoverability: discoverability(info), firstRun: firstRun(info), trust: trust(info), maintenance: maintenance(info), traction: traction(info), compatibility: compatibility(info, currentPiVersion), freshness: freshness(candidate, piModified) },
 	};
 }
 
-export function assessLocalAdoption(packagePath: string, pack: PackReport, currentPiVersion?: string): AdoptionReport {
+export async function assessLocalAdoption(packagePath: string, pack: PackReport, currentPiVersion?: string, piModified?: string): Promise<AdoptionReport> {
 	const root = realpathSync(resolve(packagePath));
 	const pkg = localManifest(root);
 	const readmeName = ["README.md", "README", "readme.md"].find((name) => existsSync(join(root, name)));
@@ -202,7 +257,10 @@ export function assessLocalAdoption(packagePath: string, pack: PackReport, curre
 		publication: { integrity: pack.integrity, trustedPublisher: "unknown" },
 		packageEvidence: { shape: pack.shape.kind, verified: pack.shape.verified, evidence: pack.shape.evidence },
 	};
-	const report = assessRegistryAdoption(info, currentPiVersion);
+	// A local checkout has no npm publish date, but does have real git
+	// history -- prefer that over the (unavailable) publish-date proxy.
+	const commitAt = await lastLocalCommitAt(root);
+	const report = assessRegistryAdoption(info, currentPiVersion, piModified, commitAt);
 	report.target = root;
 	report.source = "local";
 	if (!pack.ok) report.dimensions.trust.actions.push("resolve npm tarball verification errors");
@@ -219,17 +277,28 @@ export async function scoreTarget(
 	target: string, registry: Registry,
 	verifier: Pick<NpmPackVerifier, "verify"> = new NpmPackVerifier(),
 	currentPiVersion: () => Promise<string | undefined> = resolveCurrentPiVersion,
+	fetchGithubCommit: FetchGithubLastCommitAt = githubLastCommitAt,
 ): Promise<AdoptionReport> {
 	const piVersion = await currentPiVersion();
+	let piModified: string | undefined;
+	if (registry.modifiedAt) {
+		try { piModified = await registry.modifiedAt(PI_COMMAND_NAME); } catch { /* freshness remains explicitly unknown */ }
+	}
 	if (existsSync(resolve(target))) {
 		const pack = await verifier.verify(target);
-		return assessLocalAdoption(target, pack, piVersion);
+		return await assessLocalAdoption(target, pack, piVersion, piModified);
 	}
 	const info = await registry.info(target);
 	if (registry.downloads) {
 		try { info.downloads = await registry.downloads(target); } catch { /* traction remains explicitly unknown */ }
 	}
-	return assessRegistryAdoption(info, piVersion);
+	if (registry.modifiedAt) {
+		try { info.modified = await registry.modifiedAt(target); } catch { /* freshness proxy remains explicitly unknown */ }
+	}
+	// githubLastCommitAt never throws -- undefined for a non-GitHub host, a
+	// missing repository field, a rate limit, or any other failure.
+	const candidateCommitAt = await fetchGithubCommit(info.repository, info.repositoryDirectory);
+	return assessRegistryAdoption(info, piVersion, piModified, candidateCommitAt);
 }
 
 export function formatAdoptionReport(report: AdoptionReport, json = false): string {

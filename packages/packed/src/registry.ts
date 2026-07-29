@@ -109,7 +109,7 @@ export class HttpRegistry implements Registry {
 			name: boundedString(v.name, 214) ?? boundedString(name, 214)!,
 			version: boundedString(v.version, 128) ?? "",
 			description: boundedString(v.description, 512), homepage: boundedString(v.homepage, 2_048),
-			repository: boundedString(rawToString(v.repository, "url"), 2_048), bugs: boundedString(rawToString(v.bugs, "url"), 2_048),
+			repository: boundedString(rawToString(v.repository, "url"), 2_048), repositoryDirectory: boundedString(rawToString(v.repository, "directory"), 256), bugs: boundedString(rawToString(v.bugs, "url"), 2_048),
 			license: boundedString(rawToString(v.license, "type"), 128),
 			keywords: v.keywords?.filter((value): value is string => typeof value === "string").slice(0, 50).map((value) => value.slice(0, 64)),
 			pi: boundedPiManifest(v.pi), peerDependencies: boundedDependencies(v.peerDependencies), readmeAvailable: false,
@@ -119,6 +119,19 @@ export class HttpRegistry implements Registry {
 				: { shape: "keyword-only", verified: false, evidence: ["registry metadata has no Pi manifest resources; tarball not inspected"] },
 			publication: { integrity: v.dist?.integrity, provenanceUrl: v.dist?.attestations?.provenance ? v.dist.attestations.url : undefined, trustedPublisher: "unknown" },
 		};
+	}
+
+	/** Uses npm's abbreviated multi-version doc, not `/latest` (which carries
+	 * no `time`/`modified` field at all -- confirmed against the live
+	 * registry). Still bounded well under the full unabbreviated document's
+	 * size, since the abbreviated shape drops readme/changelog content per
+	 * version. */
+	async modifiedAt(name: string): Promise<string | undefined> {
+		const encoded = encodeURIComponent(name).replace("%2F", "/");
+		const res = await fetchWithRetry(`${this.base}/${encoded}`, { headers: { accept: "application/vnd.npm.install-v1+json" } }, this.retryBaseDelayMs);
+		if (!res.ok) throw new Error(`npm modifiedAt ${name}: HTTP ${res.status}`);
+		const doc = (await boundedJson(res, 512 * 1024)) as { modified?: unknown };
+		return boundedString(doc.modified, 64);
 	}
 
 	async downloads(name: string): Promise<DownloadObservations> {

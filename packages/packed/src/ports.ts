@@ -39,6 +39,9 @@ export interface PkgInfo {
 	description?: string;
 	homepage?: string;
 	repository?: string;
+	/** Monorepo subdirectory the package lives in, from repository.directory
+	 * -- scopes a real commit-history lookup to the package's own path. */
+	repositoryDirectory?: string;
 	license?: string;
 	keywords?: string[];
 	pi?: Record<string, unknown>;
@@ -65,6 +68,11 @@ export interface Registry {
 	searchAll(query: string): Promise<Pkg[]>;
 	info(name: string): Promise<PkgInfo>;
 	downloads?(name: string): Promise<DownloadObservations>;
+	/** Last npm publish date across any version, from the abbreviated
+	 * multi-version doc -- the `/latest` endpoint `info()` uses carries no
+	 * `time`/`modified` field at all. Optional, like `downloads`; undefined
+	 * on any failure, never thrown. */
+	modifiedAt?(name: string): Promise<string | undefined>;
 }
 
 /**

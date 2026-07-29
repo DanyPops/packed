@@ -5,13 +5,16 @@ import { join } from "node:path";
 import { formatPackReport, NpmPackVerifier, type PackCommand } from "../src/pack.ts";
 import { assessLocalAdoption, assessRegistryAdoption, scoreTarget } from "../src/score.ts";
 import type { PkgInfo, Registry, SearchPage } from "../src/ports.ts";
+import { runBounded } from "../src/publish.ts";
+import { createGithubLastCommitAt, type FetchGithubLastCommitAt } from "../src/commit-freshness.ts";
 
 class FakeRegistry implements Registry {
-	constructor(private info_: PkgInfo) {}
+	constructor(private info_: PkgInfo, private modifiedByName: Record<string, string | undefined> = {}) {}
 	async search(): Promise<SearchPage> { return { results: [], total: 0 }; }
 	async searchPage(): Promise<SearchPage> { return { results: [], total: 0 }; }
 	async searchAll() { return []; }
 	async info(): Promise<PkgInfo> { return this.info_; }
+	async modifiedAt(name: string): Promise<string | undefined> { return this.modifiedByName[name]; }
 }
 
 function fixture(manifest: Record<string, unknown>, readme = ""): string {
@@ -91,7 +94,7 @@ describe("adoption readiness evidence", () => {
 			pi: { extensions: ["extensions/demo.ts"] },
 		}, "# pi-demo\n\nInstall: `pi install npm:pi-demo`\n\n## Usage\nRun `/demo`.\n\n![demo](demo.png)\n");
 		const pack = await new NpmPackVerifier(successfulPack).verify(root);
-		const report = assessLocalAdoption(root, pack);
+		const report = await assessLocalAdoption(root, pack);
 		expect(report.dimensions.discoverability.met).toBeGreaterThan(0);
 		expect(report.dimensions.firstRun.status).toBe("ready");
 		expect(report.dimensions.traction.status).toBe("unknown");
@@ -111,6 +114,134 @@ describe("adoption readiness evidence", () => {
 		expect(report.dimensions.trust.evidence.join(" ")).toContain("provenance");
 		expect(report.dimensions.trust.actions.join(" ")).toContain("trusted publisher");
 		expect(report.dimensions.traction.evidence.join(" ")).toContain("12 weekly");
+	});
+});
+
+describe("freshness (npm publish-date proxy for commit recency)", () => {
+	it("is unknown when neither a real commit date nor a publish date is available for the candidate", () => {
+		const report = assessRegistryAdoption({ name: "pi-demo", version: "1.0.0" }, undefined, "2026-07-25T12:47:12.883Z");
+		expect(report.dimensions.freshness).toEqual({ status: "unknown", met: 0, total: 0, evidence: ["candidate's commit history and npm publish date are both unavailable"], actions: [] });
+	});
+
+	it("is unknown when pi-coding-agent's own publish date is unavailable", () => {
+		const report = assessRegistryAdoption({ name: "pi-demo", version: "1.0.0", modified: "2026-06-01T00:00:00.000Z" }, undefined, undefined);
+		expect(report.dimensions.freshness).toEqual({ status: "unknown", met: 0, total: 0, evidence: ["pi-coding-agent's own latest npm publish date is unavailable"], actions: [] });
+	});
+
+	it("reports a signed day-delta as observational evidence, never a pass/fail gate", () => {
+		const report = assessRegistryAdoption({ name: "pi-demo", version: "1.0.0", modified: "2026-06-01T00:00:00.000Z" }, undefined, "2026-07-25T00:00:00.000Z");
+		expect(report.dimensions.freshness.status).toBe("observed");
+		expect(report.dimensions.freshness.met).toBe(0);
+		expect(report.dimensions.freshness.total).toBe(0);
+		expect(report.dimensions.freshness.evidence.join(" ")).toContain("54d before pi-coding-agent's latest publish");
+	});
+
+	it("reports the candidate publishing after pi-coding-agent's latest, not just before", () => {
+		const report = assessRegistryAdoption({ name: "pi-demo", version: "1.0.0", modified: "2026-08-01T00:00:00.000Z" }, undefined, "2026-07-25T00:00:00.000Z");
+		expect(report.dimensions.freshness.evidence.join(" ")).toContain("7d after pi-coding-agent's latest publish");
+	});
+
+	it("is unknown for local-checkout scoring when the checkout is not a git repository and pi's publish date is unavailable", async () => {
+		const root = fixture({ name: "pi-demo", version: "1.0.0" });
+		const pack = await new NpmPackVerifier(successfulPack).verify(root);
+		const report = await assessLocalAdoption(root, pack);
+		expect(report.dimensions.freshness.status).toBe("unknown");
+	});
+
+	it("scoreTarget resolves both the candidate's and pi-coding-agent's publish dates through the optional modifiedAt port method", async () => {
+		const registry = new FakeRegistry(
+			{ name: "pi-demo", version: "1.0.0" },
+			{ "pi-demo": "2026-06-01T00:00:00.000Z", "@earendil-works/pi-coding-agent": "2026-07-25T00:00:00.000Z" },
+		);
+		const report = await scoreTarget("pi-demo", registry, new NpmPackVerifier(successfulPack), async () => undefined, async () => undefined);
+		expect(report.dimensions.freshness.status).toBe("observed");
+		expect(report.dimensions.freshness.evidence.join(" ")).toContain("54d before");
+		expect(report.dimensions.freshness.evidence.join(" ")).toContain("npm publish date (commit history unavailable");
+	});
+
+	it("scoreTarget leaves freshness unknown when the registry has no modifiedAt method at all", async () => {
+		class NoModifiedAtRegistry implements Registry {
+			async search(): Promise<SearchPage> { return { results: [], total: 0 }; }
+			async searchPage(): Promise<SearchPage> { return { results: [], total: 0 }; }
+			async searchAll() { return []; }
+			async info(): Promise<PkgInfo> { return { name: "pi-demo", version: "1.0.0" }; }
+		}
+		const report = await scoreTarget("pi-demo", new NoModifiedAtRegistry(), new NpmPackVerifier(successfulPack), async () => undefined, async () => undefined);
+		expect(report.dimensions.freshness.status).toBe("unknown");
+	});
+});
+
+describe("freshness: real commit-date source (preferred over the npm publish-date proxy)", () => {
+	it("prefers a real commit date over the publish-date proxy when both are available", () => {
+		const report = assessRegistryAdoption(
+			{ name: "pi-demo", version: "1.0.0", modified: "2026-05-01T00:00:00.000Z" },
+			undefined, "2026-07-25T00:00:00.000Z", "2026-07-20T00:00:00.000Z",
+		);
+		expect(report.dimensions.freshness.evidence.join(" ")).toContain("last real commit: 2026-07-20");
+		expect(report.dimensions.freshness.evidence.join(" ")).not.toContain("2026-05-01");
+	});
+
+	it("assessLocalAdoption reads the checkout's real last-commit date via git log, scoped to no network at all", async () => {
+		const root = fixture({ name: "pi-demo", version: "1.0.0" });
+		await runBounded(["git", "-C", root, "init", "--quiet"]);
+		await runBounded(["git", "-C", root, "config", "user.email", "test@example.com"]);
+		await runBounded(["git", "-C", root, "config", "user.name", "Test"]);
+		await runBounded(["git", "-C", root, "add", "."]);
+		await runBounded(["git", "-C", root, "commit", "--quiet", "-m", "init", "--date", "2026-07-20T00:00:00+00:00"]);
+		const pack = await new NpmPackVerifier(successfulPack).verify(root);
+		const report = await assessLocalAdoption(root, pack, undefined, "2026-07-25T00:00:00.000Z");
+		expect(report.dimensions.freshness.status).toBe("observed");
+		expect(report.dimensions.freshness.evidence.join(" ")).toContain("last real commit");
+	});
+
+	it("assessLocalAdoption falls back to unknown, never a guess, for a checkout that is not a git repository", async () => {
+		const root = fixture({ name: "pi-demo", version: "1.0.0" });
+		const pack = await new NpmPackVerifier(successfulPack).verify(root);
+		const report = await assessLocalAdoption(root, pack, undefined, "2026-07-25T00:00:00.000Z");
+		expect(report.dimensions.freshness.status).toBe("unknown");
+		expect(report.dimensions.freshness.evidence.join(" ")).toContain("both unavailable");
+	});
+
+	it("scoreTarget resolves the candidate's real commit date from GitHub's Commits API, preferring it over the publish-date proxy", async () => {
+		await using server = Bun.serve({
+			port: 0,
+			fetch: (req) => {
+				expect(new URL(req.url).pathname).toBe("/repos/example/pi-demo/commits");
+				return Response.json([{ commit: { committer: { date: "2026-07-20T00:00:00.000Z" } } }]);
+			},
+		});
+		const fetchGithubCommit = createGithubLastCommitAt(`http://127.0.0.1:${server.port}`);
+		const registry = new FakeRegistry(
+			{ name: "pi-demo", version: "1.0.0", repository: "https://github.com/example/pi-demo", modified: "2026-05-01T00:00:00.000Z" },
+			{ "@earendil-works/pi-coding-agent": "2026-07-25T00:00:00.000Z" },
+		);
+		const report = await scoreTarget("pi-demo", registry, new NpmPackVerifier(successfulPack), async () => undefined, fetchGithubCommit);
+		expect(report.dimensions.freshness.evidence.join(" ")).toContain("last real commit: 2026-07-20");
+	});
+
+	it("scopes the GitHub Commits API lookup to the package's monorepo subdirectory", async () => {
+		await using server = Bun.serve({
+			port: 0,
+			fetch: (req) => {
+				expect(new URL(req.url).searchParams.get("path")).toBe("adapters/pi");
+				return Response.json([{ commit: { committer: { date: "2026-07-20T00:00:00.000Z" } } }]);
+			},
+		});
+		const fetchGithubCommit = createGithubLastCommitAt(`http://127.0.0.1:${server.port}`);
+		const date = await fetchGithubCommit("https://github.com/example/mono", "adapters/pi");
+		expect(date).toBe("2026-07-20T00:00:00.000Z");
+	});
+
+	it("never makes a network call for a non-GitHub repository host (GitLab, Bitbucket, sourcehut)", async () => {
+		const neverCalled: FetchGithubLastCommitAt = createGithubLastCommitAt("http://127.0.0.1:1");
+		expect(await neverCalled("https://gitlab.com/example/pi-demo")).toBeUndefined();
+		expect(await neverCalled(undefined)).toBeUndefined();
+	});
+
+	it("falls back to unknown, never throws, when GitHub responds with a rate-limit-style failure", async () => {
+		await using server = Bun.serve({ port: 0, fetch: () => new Response("rate limited", { status: 403 }) });
+		const fetchGithubCommit = createGithubLastCommitAt(`http://127.0.0.1:${server.port}`);
+		expect(await fetchGithubCommit("https://github.com/example/pi-demo")).toBeUndefined();
 	});
 });
 

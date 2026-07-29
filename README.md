@@ -53,6 +53,7 @@ Packages execute arbitrary code and mutate Pi settings/install roots. One daemon
 | `packed info <name> [--json]` | Show version, repository, Pi manifest, size, and license |
 | `packed updates [--json]` | Show drift from the local mirror |
 | `packed update <source> [--approve] [--json]` | Update one configured source through `pi update --extension` |
+| `packed update --self [--approve] [--json]` | Update Packed itself (npm-global installs; a local checkout is left to your own `git pull`) and restart its supervised `pi-packed.service` (Linux/systemd only) |
 | `packed mirror [--json]` | Refresh the SQLite package index |
 | `packed installed [--json]` | Read Pi's installed package declarations |
 | `packed catalog [--json]` | Inspect the local package index |

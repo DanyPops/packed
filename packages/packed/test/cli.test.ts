@@ -377,6 +377,49 @@ describe("CLI", () => {
 		});
 	});
 
+	it("update --self requires approval under the guarded default, same as every other mutation", async () => {
+		const d = deps({ selfUpdater: { async run() { throw new Error("must never run without approval"); } } });
+		const { code, out } = await cliRun(["update", "--self"], d);
+		expect(code).toBe(1);
+		expect(out).toContain("approval required");
+	});
+
+	it("update --self delegates to the injected selfUpdater once approved, reporting the version transition", async () => {
+		const d = deps({
+			selfUpdater: {
+				async run() {
+					return { ok: true, previousVersion: "0.1.1", latestVersion: "0.2.0", updated: true, restarted: true, message: "updated via npm and restarted the pi-packed service" };
+				},
+			},
+		});
+		const human = await cliRun(["update", "--self", "--approve"], d);
+		expect(human.code).toBe(0);
+		expect(human.out).toContain("updated via npm and restarted the pi-packed service");
+		expect(human.out).toContain("(0.1.1 \u2192 0.2.0)");
+		const json = await cliRun(["update", "--self", "--approve", "--json"], d);
+		expect(JSON.parse(json.out)).toEqual({ ok: true, previousVersion: "0.1.1", latestVersion: "0.2.0", updated: true, restarted: true, message: "updated via npm and restarted the pi-packed service" });
+	});
+
+	it("update --self reports failure with exit code 1 when the selfUpdater itself reports not ok", async () => {
+		const d = deps({
+			selfUpdater: {
+				async run() {
+					return { ok: false, previousVersion: "0.1.1", updated: false, restarted: false, message: "npm install --global @danypops/packed@latest failed (exit 1)" };
+				},
+			},
+		});
+		const { code, out } = await cliRun(["update", "--self", "--approve"], d);
+		expect(code).toBe(1);
+		expect(out).toContain("npm install --global");
+	});
+
+	it("update --self fails closed without a running daemon, matching install-service", async () => {
+		const d = deps({ selfUpdater: undefined });
+		const { code, out } = await cliRun(["update", "--self", "--approve"], d);
+		expect(code).toBe(1);
+		expect(out).toContain("requires a running packed daemon");
+	});
+
 	it("update reports honestly when pi update is a no-op (pinned or already latest)", async () => {
 		const d = deps();
 		(d.inst as FakeInstaller).updateOutcome = {

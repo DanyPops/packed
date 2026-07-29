@@ -11,7 +11,7 @@ import type { PackageDaemonPort } from "./client.ts";
 import { checkPackage, formatCheckReport } from "./check.ts";
 import { NpmPackVerifier, formatPackReport, type PackReport } from "./pack.ts";
 import { formatAdoptionReport, scoreTarget, type AdoptionReport } from "./score.ts";
-import { formatPublishReport, npmWebUrl, openBrowser, PublishManager, runNpmLoginWeb, type PublishSetupReport, type PublishStatusReport } from "./publish.ts";
+import { formatPublishReport, npmWebUrl, openBrowser, PublishManager, runInherited, runNpmLoginWeb, type PublishSetupReport, type PublishStatusReport } from "./publish.ts";
 import { bundledEcosystemManifestPath, formatSetupReport, SetupManager, type SetupApplyResult, type SetupExportReport, type SetupPlan, type SetupUpdateReport } from "./setup.ts";
 import { resolve } from "node:path";
 import { npmPackageName, readInstalledPackages } from "./installed.ts";
@@ -30,6 +30,7 @@ import {
 	type PackageOperation,
 	type SecuritySettingsPort,
 } from "./security.ts";
+import { runSelfUpdate, type SelfUpdateReport } from "./self-update.ts";
 
 /** A generated unit must never trust a bare "pi" resolving under systemd's
  * own restricted PATH just because it resolves in the shell that generated
@@ -56,6 +57,7 @@ usage:
   packed info <name> [--json]                  package details
   packed updates [--json]                      updates per the local mirror
   packed update <source> [--approve] [--json]  update one configured package through Pi
+  packed update --self [--approve] [--json]    update Packed itself (npm-global installs only) and restart its supervised service
   packed mirror [--json]                       sync upstream into the local SQLite index
   packed installed [--json]                    installed pi packages
   packed catalog [--json]                      local package index (apt-cache stats)
@@ -102,6 +104,7 @@ export interface CliDeps {
 	};
 	daemonService?: { install(source: string, approved?: boolean): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }> };
 	piVersion?: { check(): Promise<PiVersionReport> };
+	selfUpdater?: { run(): Promise<SelfUpdateReport> };
 }
 
 export interface CliResult {
@@ -121,11 +124,12 @@ interface Flags {
 	machineLocal: boolean;
 	noService: boolean;
 	ecosystem: boolean;
+	self: boolean;
 	project?: string;
 }
 
 function parseFlags(rest: string[]): { flags: Flags; pos: string[] } {
-	const flags: Flags = { json: false, limit: SEARCH_DEFAULT_LIMIT, cached: false, offline: false, approved: false, smoke: false, force: false, prune: false, machineLocal: false, noService: false, ecosystem: false };
+	const flags: Flags = { json: false, limit: SEARCH_DEFAULT_LIMIT, cached: false, offline: false, approved: false, smoke: false, force: false, prune: false, machineLocal: false, noService: false, ecosystem: false, self: false };
 	const pos: string[] = [];
 	for (let i = 0; i < rest.length; i++) {
 		const a = rest[i]!;
@@ -139,6 +143,7 @@ function parseFlags(rest: string[]): { flags: Flags; pos: string[] } {
 		else if (a === "--machine-local") flags.machineLocal = true;
 		else if (a === "--no-service") flags.noService = true;
 		else if (a === "--ecosystem") flags.ecosystem = true;
+		else if (a === "--self") flags.self = true;
 		else if (a === "--limit" && i + 1 < rest.length) flags.limit = Number(rest[++i]) || SEARCH_DEFAULT_LIMIT;
 		else if (a.startsWith("--limit=")) flags.limit = Number(a.slice(8)) || SEARCH_DEFAULT_LIMIT;
 		else if (a === "--project" && i + 1 < rest.length) flags.project = rest[++i];
@@ -512,8 +517,21 @@ const commands: Record<string, { usage: string; run: Command }> = {
 	},
 
 	update: {
-		usage: "packed update <configured-source> [--approve] [--json]",
+		usage: "packed update <configured-source> [--approve] [--json] | packed update --self [--approve] [--json]",
 		async run(_rest, d, flags, pos) {
+			if (flags.self) {
+				try {
+					assertPackagePermission(await d.security.security(), "update.self", flags.approved);
+				} catch (e) {
+					const error = e instanceof Error ? e.message : String(e);
+					return flags.json ? fail(`${JSON.stringify({ ok: false, error })}\n`) : fail(`${error}\n`);
+				}
+				if (!d.selfUpdater) return fail("update --self requires a running packed daemon\n");
+				const report = await d.selfUpdater.run();
+				if (flags.json) return report.ok ? ok(`${JSON.stringify(report)}\n`) : fail(`${JSON.stringify(report)}\n`);
+				const transition = report.latestVersion && report.previousVersion !== report.latestVersion ? ` (${report.previousVersion} → ${report.latestVersion})` : "";
+				return report.ok ? ok(`${report.message}${transition}\n`) : fail(`${report.message}\n`);
+			}
 			const source = pos[0] ?? "";
 			if (!SOURCE_RE.test(source)) return usageErr(`usage: ${commands["update"]!.usage}\n`);
 			try {
@@ -705,6 +723,15 @@ if (import.meta.main) {
 			stateDir: dir,
 			dataDir: dirname(paths.database),
 			piHome: defaultPiHome(),
+			selfUpdater: {
+				run: () => runSelfUpdate({
+					registry: reg,
+					isServiceInstalled: () => existsSync(paths.serviceDescriptor),
+					restartService: process.platform === "linux"
+						? () => runInherited(["systemctl", "--user", "restart", "pi-packed.service"])
+						: undefined,
+				}),
+			},
 		});
 		const interactive = process.stdin.isTTY && process.stdout.isTTY && !args.includes("--json");
 		if (interactive && args[0] === "publish" && args[1] === "status") {

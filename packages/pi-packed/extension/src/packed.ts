@@ -10,8 +10,10 @@
  * one connected client instead of reconnecting on every single operation.
  */
 import { createRetryingClient } from "@danypops/daemon-kit/pi-client";
-import { ensurePackedClient, type PackedExtensionClient } from "@danypops/packed/client";
-import type { InstalledPackage, PackageInfo, PackageResources, PackageSummary, ResourceField, SecuritySettings, SetupApplyResult, SetupPlan, UpdateEntry, UpdateOutcome } from "@danypops/packed/protocol";
+import { ensurePackedClient, InstallServiceError, type PackedExtensionClient } from "@danypops/packed/client";
+import type { InstalledPackage, PackageInfo, PackageResources, PackageSummary, ResourceField, SecuritySettings, ServiceSpecSummary, SetupApplyResult, SetupPlan, UpdateEntry, UpdateOutcome } from "@danypops/packed/protocol";
+
+export { InstallServiceError };
 
 export type { PackageInfo, PackageResources, ResourceField, UpdateEntry, UpdateOutcome };
 export type InstalledPkg = InstalledPackage;
@@ -33,6 +35,8 @@ export interface Natives {
 	security(): Promise<SecuritySettings>;
 	setMutationApproval(value: MutationApproval, approved?: boolean): Promise<SecuritySettings>;
 	install(source: string, approved?: boolean): Promise<string>;
+	/** Throws InstallServiceError; check .notADaemon before surfacing a failure -- most packages aren't daemons at all. */
+	installService(source: string, approved?: boolean): Promise<{ output: string; spec?: ServiceSpecSummary }>;
 	remove(name: string, approved?: boolean): Promise<string>;
 	update(source: string, approved?: boolean): Promise<UpdateOutcome>;
 	setupPlan(manifestPath: string, prune?: boolean): Promise<SetupPlan>;
@@ -59,6 +63,7 @@ export async function createNatives(connect: PackageDaemonConnector = connectDef
 		security: () => client.call((daemon) => daemon.security()),
 		setMutationApproval: (value, approved) => client.call((daemon) => daemon.setMutationApproval(value, approved)),
 		install: (source, approved) => client.call((daemon) => daemon.install(source, approved)),
+		installService: (source, approved) => client.call((daemon) => daemon.installService(source, approved)),
 		remove: (name, approved) => client.call((daemon) => daemon.remove(name, approved)),
 		update: (source, approved) => client.call((daemon) => daemon.update(source, approved)),
 		setupPlan: (manifestPath, prune) => client.call((daemon) => daemon.setupPlan(manifestPath, prune)),

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import { installPackageWithPolicy, registerTools, removePackageWithPolicy, updatePackageWithPolicy } from "../extension/src/tools.ts";
-import type { Natives } from "../extension/src/packed.ts";
+import { InstallServiceError, type Natives } from "../extension/src/packed.ts";
+
+/** The overwhelmingly common case: an ordinary test package that isn't a daemon at all. */
+async function notADaemonInstallService(): Promise<never> {
+	throw new InstallServiceError("pkg does not declare a packed.daemonService manifest and no Vehicle-shaped daemon dependency was detected", true);
+}
 
 describe("native package mutation permission policy", () => {
 	it("requires confirmation for install under the secure default", async () => {
@@ -77,11 +82,50 @@ describe("native package mutation permission policy", () => {
 		const result = await installPackageWithPolicy("npm:pkg", {
 			async security() { return { mutationApproval: "never" }; },
 			async install(_source, approved) { expect(approved).toBe(false); installs += 1; return "installed"; },
+			installService: notADaemonInstallService,
 		}, {
 			hasUI: false,
 			ui: { async confirm() { throw new Error("must not prompt"); } },
 		});
 		expect(installs).toBe(1);
+		expect(result.content[0]?.text).toBe("installed");
+	});
+
+	it("install auto-registers a detected daemon service under the same approval, appended to the model-facing output", async () => {
+		let serviceApproved: boolean | undefined;
+		const result = await installPackageWithPolicy("npm:pkg", {
+			async security() { return { mutationApproval: "never" }; },
+			async install() { return "installed"; },
+			async installService(_source, approved) { serviceApproved = approved; return { output: "installed a persistent service for npm:pkg" }; },
+		}, {
+			hasUI: false,
+			ui: { async confirm() { throw new Error("must not prompt"); } },
+		});
+		expect(serviceApproved).toBe(false);
+		expect(result.content[0]?.text).toBe("installed\ninstalled a persistent service for npm:pkg");
+	});
+
+	it("reports a genuine installService failure (a daemon was detected but registration failed) without failing the install", async () => {
+		const result = await installPackageWithPolicy("npm:pkg", {
+			async security() { return { mutationApproval: "never" }; },
+			async install() { return "installed"; },
+			async installService() { throw new InstallServiceError("systemctl not found"); },
+		}, {
+			hasUI: false,
+			ui: { async confirm() { throw new Error("must not prompt"); } },
+		});
+		expect(result.content[0]?.text).toBe("installed\nnote: detected a persistent-service daemon but could not register it: systemctl not found");
+	});
+
+	it("never attempts service detection for a non-npm source", async () => {
+		const result = await installPackageWithPolicy("git:github.com/u/r@v1", {
+			async security() { return { mutationApproval: "never" }; },
+			async install() { return "installed"; },
+			async installService() { throw new Error("must not be called for a non-npm source"); },
+		}, {
+			hasUI: false,
+			ui: { async confirm() { throw new Error("must not prompt"); } },
+		});
 		expect(result.content[0]?.text).toBe("installed");
 	});
 

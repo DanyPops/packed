@@ -14,7 +14,9 @@ export type ResourceField = "extensions" | "skills" | "prompts" | "themes";
 export interface ResourceItem { path: string; enabled: boolean; }
 export type PackageResources = { source: string; name: string; scope: "global" | "project" } & Record<ResourceField, ResourceItem[]>;
 
-export type ExtensionOperationName = "package.search" | "package.info" | "package.installed" | "package.updates" | "package.security.get" | "package.security.set" | "package.install" | "package.remove" | "package.update" | "setup.plan" | "setup.apply" | "resources.list" | "resources.toggle";
+export interface ServiceSpecSummary { name: string; binPath: string; descriptorPath: string; }
+
+export type ExtensionOperationName = "package.search" | "package.info" | "package.installed" | "package.updates" | "package.security.get" | "package.security.set" | "package.install" | "package.install_service" | "package.remove" | "package.update" | "setup.plan" | "setup.apply" | "resources.list" | "resources.toggle";
 export interface ExtensionOperationInputs {
 	"package.search": { query: string; limit: number; offline?: boolean };
 	"package.info": { name: string };
@@ -23,6 +25,7 @@ export interface ExtensionOperationInputs {
 	"package.security.get": Record<string, never>;
 	"package.security.set": { mutationApproval: SecuritySettings["mutationApproval"]; approved?: boolean };
 	"package.install": { source: string; approved?: boolean };
+	"package.install_service": { source: string; approved?: boolean };
 	"package.remove": { name: string; approved?: boolean };
 	"package.update": { source: string; approved?: boolean };
 	"setup.plan": { manifestPath: string; prune?: boolean };
@@ -38,6 +41,7 @@ export interface ExtensionOperationOutputs {
 	"package.security.get": SecuritySettings;
 	"package.security.set": SecuritySettings;
 	"package.install": { ok: boolean; output: string };
+	"package.install_service": { ok: boolean; output: string; spec?: ServiceSpecSummary; notADaemon?: boolean };
 	"package.remove": { ok: boolean; output: string };
 	"package.update": { ok: boolean; output: string; reloadRequired?: boolean; alreadyUpToDate?: boolean; pinned?: boolean; previousVersion?: string; currentVersion?: string };
 	"setup.plan": SetupPlan;

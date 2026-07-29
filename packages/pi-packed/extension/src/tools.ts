@@ -2,7 +2,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { packagePermissionDecision, type PackageOperation } from "./permission.js";
-import type { Natives } from "./packed.js";
+import { InstallServiceError, type Natives } from "./packed.js";
 import { reloadWarning } from "./reload.js";
 import {
 	createInfoDetails,
@@ -49,7 +49,7 @@ export async function approvePackageOperation(
 
 export async function installPackageWithPolicy(
 	source: string,
-	natives: Pick<Natives, "security" | "install">,
+	natives: Pick<Natives, "security" | "install" | "installService">,
 	ctx: ApprovalContext,
 ) {
 	const approval = await approvePackageOperation("install", `pi install ${source}`, natives, ctx);
@@ -57,7 +57,23 @@ export async function installPackageWithPolicy(
 		const output = approval.message ?? "install denied";
 		return text(output, createMutationDetails("install", source, approval.reason ?? "denied", output));
 	}
-	const output = await natives.install(source, approval.approved) || `Installed ${source}. Reload with /reload to activate.`;
+	let output = await natives.install(source, approval.approved) || `Installed ${source}. Reload with /reload to activate.`;
+	// Piggybacks on the same approval already granted for install -- both are
+	// the same code-execution mutation tier, not a new consent surface. Silent
+	// for the overwhelmingly common case (most Pi packages aren't daemons at
+	// all); a genuine failure is reported without failing the install itself,
+	// which already succeeded.
+	if (source.startsWith("npm:")) {
+		try {
+			const svc = await natives.installService(source, approval.approved);
+			output += `\n${svc.output}`;
+		} catch (e) {
+			if (!(e instanceof InstallServiceError) || !e.notADaemon) {
+				const message = e instanceof Error ? e.message : String(e);
+				output += `\nnote: detected a persistent-service daemon but could not register it: ${message}`;
+			}
+		}
+	}
 	return text(output, createMutationDetails("install", source, "succeeded", output));
 }
 

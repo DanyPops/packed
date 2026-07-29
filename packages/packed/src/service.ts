@@ -113,7 +113,7 @@ export interface OperationInputs {
 
 interface MutationResponse { ok: boolean; output: string }
 interface UpdateMutationResponse extends MutationResponse, Partial<Omit<UpdateOutcome, "output">> {}
-interface InstallServiceResponse { ok: boolean; output: string; spec?: Pick<ServiceSpec, "name" | "binPath" | "descriptorPath"> }
+interface InstallServiceResponse { ok: boolean; output: string; spec?: Pick<ServiceSpec, "name" | "binPath" | "descriptorPath">; notADaemon?: boolean }
 
 export interface OperationOutputs {
 	"package.search": { query: string; total: number; results: SearchPage["results"]; offline?: boolean };
@@ -320,7 +320,7 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			const denied = authorize("install_service", approved);
 			if (denied) return denied;
 			const resolved = daemonServiceInstaller.install(piHomeForServiceInstall, source);
-			if (!resolved.ok) return json({ ok: false, output: resolved.reason });
+			if (!resolved.ok) return json({ ok: false, output: resolved.reason, notADaemon: resolved.notADaemon });
 			if (!resolved.result.installed) return json({ ok: false, output: resolved.result.reason, spec: pickSpec(resolved.spec) });
 			return json({ ok: true, output: `installed a persistent service for ${resolved.spec.name}`, spec: pickSpec(resolved.spec) });
 		}

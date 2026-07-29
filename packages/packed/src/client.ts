@@ -46,7 +46,8 @@ export interface PackageDaemonPort {
 }
 
 export class PackageDaemonError extends Error {
-	constructor(message: string, readonly operation: string, readonly status?: number) {
+	/** True only for install_service's "this package isn't Vehicle-shaped at all" outcome -- distinct from a real failure (systemctl unavailable, spec resolved but the install itself failed). Lets a caller composing install + install-service (see cli.ts's `install` command) stay silent instead of surfacing a false alarm on every ordinary, non-daemon package install. */
+	constructor(message: string, readonly operation: string, readonly status?: number, readonly notADaemon?: boolean) {
 		super(message);
 		this.name = "PackageDaemonError";
 	}
@@ -163,7 +164,7 @@ export class PackageDaemonClient implements PackageDaemonPort {
 
 	async installService(source: string, approved = false): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }> {
 		const result = await this.call("package.install_service", { source, approved });
-		if (!result.ok) throw new PackageDaemonError(result.output || `failed to install a persistent service for ${source}`, "package.install_service");
+		if (!result.ok) throw new PackageDaemonError(result.output || `failed to install a persistent service for ${source}`, "package.install_service", undefined, result.notADaemon === true);
 		return { output: result.output, spec: result.spec };
 	}
 

@@ -65,8 +65,8 @@ Packages execute arbitrary code and mutate Pi settings/install roots. One daemon
 | `packed setup update [manifest] [--json]` | Deliberately refresh package versions, commits, and integrity |
 | `packed setup plan [manifest] [--prune] [--json]` | Validate and show an additive or exact setup diff without mutation |
 | `packed setup apply [manifest] [--prune] [--approve] [--json]` | Apply locked packages/profiles; optionally remove undeclared state last |
-| `packed install <source> [--approve] [--json]` | Authenticated daemon install for `npm:`, `git:`, or `https://` sources |
-| `packed install-service <source> --approve [--json]` | Registers an installed npm package's own daemon as a persistent login/boot service, via its `packed.daemonService` manifest |
+| `packed install <source> [--approve] [--no-service] [--json]` | Authenticated daemon install for `npm:`, `git:`, or `https://` sources; auto-registers a detected Vehicle daemon as a persistent service in the same step unless `--no-service` |
+| `packed install-service <source> --approve [--json]` | Standalone service (re-)registration for an already-installed npm package's own daemon, via detection or an explicit `packed.daemonService` manifest |
 | `packed remove <name> [--approve] [--json]` | Authenticated daemon removal by bare npm name; applies and reports any declared `pi.cleanup` paths first |
 | `packed advisories [name] [--json]` | Report known advisories (severity, id, vulnerable range, patched-version age) for one or all installed npm-sourced Pi packages -- no lockfile required |
 | `packed pi status [--json]` | Report the running Pi version against pi.dev's own latest-release endpoint -- the same source `pi update --self` itself uses, never the npm registry. On a real interactive terminal, offers to run `pi update --self` when behind |
@@ -83,7 +83,9 @@ Every daemon-backed pi package already auto-spawns its own daemon lazily on firs
 
 `ensurePackedClient()` checks for a real, installed supervised service (`isServiceInstalled`, a plain file-existence check on the systemd unit / launchd plist path) before ever auto-spawning. When one is installed, it never spawns a second, differently-supervised process -- it retries the connection and, if the service genuinely never comes up, fails with a message pointing at the service instead of silently creating a competing daemon. This closes a real, confirmed hazard: an auto-spawned orphan gets a much longer idle budget than a supervised service typically does, so it could otherwise keep winning daemon-kit's single-instance lock race against every later `systemctl restart`, invisibly, for the rest of that budget.
 
-`packed install-service <source>` closes that gap for any package that opts in. A package declares its daemon entry point once, in its own `package.json`:
+**`packed install npm:<pkg> --approve` registers a detected daemon as a persistent service automatically, in the same step.** No manifest, no second command, for the common case: `resolveDaemonServiceSpec` first checks for an explicit `packed.daemonService` manifest (still supported, still wins when present -- useful for a non-standard bin name or args), then falls back to `detectVehicleDaemonService()`, which reads two conventions every real daemon-backed package already follows without declaring anything extra: a `bin` entry in `package.json`, and a `serve` subcommand on that same binary. A real dependency on `@danypops/vehicle-server` (or the legacy `@danypops/daemon-kit`) is the signal detection looks for -- checked on the installed package itself first, then one level into its own `dependencies` (the common shape: a Pi extension like `@danypops/pi-papyrus` has no daemon of its own, but npm already resolved its real daemon dependency, `@danypops/papyrus`, into its own `node_modules` during install). Service registration piggybacks on the exact same approval already granted for `install` -- both are the same `code-execution` mutation tier, not a new consent surface -- and never fails the install itself: a package that isn't a daemon at all (the overwhelming majority) is silently skipped, and a genuine registration failure (systemctl unavailable, etc.) is reported alongside a successful install, not in place of it. Pass `--no-service` to skip the attempt entirely.
+
+An explicit manifest is still the right call for a non-standard package:
 
 ```json
 {
@@ -98,7 +100,7 @@ Every daemon-backed pi package already auto-spawns its own daemon lazily on firs
 }
 ```
 
-`packed install-service` reads that manifest from the already-installed npm package and calls daemon-kit's `installUserService()` -- the exact same systemd `--user` / launchd / Windows Run-key mechanism that package's own `service install` command would use, so the two are fully interchangeable. `binPath` is required; `name`/`displayName` default to the package's own (unscoped) npm name. git:/local sources aren't supported yet -- only `npm:`. Classified as a `code-execution` mutation, same tier as `install`/`update`, so it requires `--approve` under the secure default like everything else that runs code or touches system state.
+`packed install-service <source>` remains available standalone -- for re-registering a service later without reinstalling the package, or for a package that opted out of auto-registration with `--no-service` the first time. It reads a manifest or falls back to the same detection `install` uses, and calls daemon-kit's `installUserService()` -- the exact same systemd `--user` / launchd / Windows Run-key mechanism that package's own `service install` command would use, so the two are fully interchangeable. git:/local sources aren't supported yet -- only `npm:`. Classified as a `code-execution` mutation, same tier as `install`/`update`, so it requires `--approve` under the secure default like everything else that runs code or touches system state.
 
 Guarded CLI mutations require `--approve` under the secure default. This is pi-packed mutation authorization, distinct from Pi's project-trust `--approve` semantics. Install/remove JSON results are stable objects:
 

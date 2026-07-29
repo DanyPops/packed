@@ -5,7 +5,15 @@ import { fileURLToPath } from "node:url";
 import { AuthenticatedRpcClient } from "@danypops/daemon-kit/rpc-client";
 import { readDaemonHandle, resolveDaemonPaths } from "@danypops/daemon-kit/paths";
 import { isServiceInstalled as daemonKitIsServiceInstalled } from "@danypops/daemon-kit/service";
-import type { ExtensionOperationInputs, ExtensionOperationName, ExtensionOperationOutputs, PackageInfo, PackageResources, PackageSummary, ResourceField, SecuritySettings, SetupApplyResult, SetupPlan, UpdateEntry, UpdateOutcome } from "./protocol.js";
+import type { ExtensionOperationInputs, ExtensionOperationName, ExtensionOperationOutputs, PackageInfo, PackageResources, PackageSummary, ResourceField, SecuritySettings, ServiceSpecSummary, SetupApplyResult, SetupPlan, UpdateEntry, UpdateOutcome } from "./protocol.js";
+
+/** notADaemon: the overwhelmingly common case for install() -- most Pi packages aren't daemons at all. Distinct from a real installService failure (systemctl unavailable, spec resolved but installation itself failed). */
+export class InstallServiceError extends Error {
+	constructor(message: string, readonly notADaemon?: boolean) {
+		super(message);
+		this.name = "InstallServiceError";
+	}
+}
 
 export interface PackedClientPaths { token: string; handle: string; serviceDescriptor: string; }
 const SERVICE_NAME = "pi-packed";
@@ -19,6 +27,7 @@ export interface PackedExtensionClient {
 	security(): Promise<SecuritySettings>;
 	setMutationApproval(value: SecuritySettings["mutationApproval"], approved?: boolean): Promise<SecuritySettings>;
 	install(source: string, approved?: boolean): Promise<string>;
+	installService(source: string, approved?: boolean): Promise<{ output: string; spec?: ServiceSpecSummary }>;
 	remove(name: string, approved?: boolean): Promise<string>;
 	update(source: string, approved?: boolean): Promise<UpdateOutcome>;
 	setupPlan(manifestPath: string, prune?: boolean): Promise<SetupPlan>;
@@ -66,6 +75,7 @@ export class PackedClient implements PackedExtensionClient {
 	security() { return this.call("package.security.get", {}); }
 	setMutationApproval(mutationApproval: SecuritySettings["mutationApproval"], approved = false) { return this.call("package.security.set", { mutationApproval, approved }); }
 	async install(source: string, approved = false) { const result = await this.call("package.install", { source, approved }); if (!result.ok) throw new Error(result.output); return result.output; }
+	async installService(source: string, approved = false) { const result = await this.call("package.install_service", { source, approved }); if (!result.ok) throw new InstallServiceError(result.output, result.notADaemon); return { output: result.output, spec: result.spec }; }
 	async remove(name: string, approved = false) { const result = await this.call("package.remove", { name, approved }); if (!result.ok) throw new Error(result.output); return result.output; }
 	async update(source: string, approved = false): Promise<UpdateOutcome> { const result = await this.call("package.update", { source, approved }); if (!result.ok) throw new Error(result.output); return { output: result.output, reloadRequired: result.reloadRequired ?? true, alreadyUpToDate: result.alreadyUpToDate ?? false, pinned: result.pinned ?? false, previousVersion: result.previousVersion, currentVersion: result.currentVersion }; }
 	setupPlan(manifestPath: string, prune = false) { return this.call("setup.plan", { manifestPath, prune }); }

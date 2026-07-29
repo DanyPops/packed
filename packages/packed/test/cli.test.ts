@@ -251,13 +251,59 @@ describe("CLI", () => {
 	it("install runs with stable human and JSON output", async () => {
 		const d = deps();
 		expect((await cliRun(["install", "npm:foo"], d)).code).toBe(1);
-		const human = await cliRun(["install", "npm:foo", "--approve"], d);
+		// --no-service scopes this test to the base install output; service
+		// auto-registration composition has its own dedicated tests below.
+		const human = await cliRun(["install", "npm:foo", "--approve", "--no-service"], d);
 		expect(human.code).toBe(0);
 		expect(human.out).toContain("Installed npm:foo");
 		expect((d.inst as FakeInstaller).approved).toBe(true);
-		const json = await cliRun(["install", "npm:foo", "--approve", "--json"], d);
+		const json = await cliRun(["install", "npm:foo", "--approve", "--no-service", "--json"], d);
 		expect(json.code).toBe(0);
 		expect(JSON.parse(json.out)).toEqual({ ok: true, source: "npm:foo", output: "Installed npm:foo" });
+	});
+
+	it("install auto-registers a detected daemon service under the same approval, silently for a non-daemon package", async () => {
+		const d = deps();
+		const human = await cliRun(["install", "npm:foo", "--approve"], d);
+		expect(human.code).toBe(0);
+		expect(human.out).toContain("Installed npm:foo");
+		expect(human.out).toContain("installed a persistent service for npm:foo");
+		expect((d.daemonService as FakeDaemonServiceInstaller).approved).toBe(true);
+		const json = await cliRun(["install", "npm:foo", "--approve", "--json"], d);
+		expect(json.code).toBe(0);
+		expect(JSON.parse(json.out)).toEqual({
+			ok: true, source: "npm:foo", output: "Installed npm:foo",
+			serviceInstall: { detected: true, ok: true, output: "installed a persistent service for npm:foo" },
+		});
+
+		// notADaemon: the overwhelmingly common case (an ordinary, non-daemon package) stays silent.
+		const notADaemon = deps();
+		(notADaemon.daemonService as FakeDaemonServiceInstaller).install = async () => {
+			throw Object.assign(new Error("foo does not declare a packed.daemonService manifest and no Vehicle-shaped daemon dependency was detected"), { notADaemon: true });
+		};
+		const silent = await cliRun(["install", "npm:foo", "--approve", "--json"], notADaemon);
+		expect(JSON.parse(silent.out)).toEqual({ ok: true, source: "npm:foo", output: "Installed npm:foo" });
+
+		// A genuine failure (a daemon was detected but registration itself failed) is reported
+		// without failing the install, which already succeeded.
+		const realFailure = deps();
+		(realFailure.daemonService as FakeDaemonServiceInstaller).fail = true;
+		const failed = await cliRun(["install", "npm:foo", "--approve", "--json"], realFailure);
+		expect(failed.code).toBe(0);
+		expect(JSON.parse(failed.out)).toEqual({
+			ok: true, source: "npm:foo", output: "Installed npm:foo",
+			serviceInstall: { detected: true, ok: false, output: "install-service failed" },
+		});
+
+		// --no-service skips the attempt entirely -- the daemonService fake is never called.
+		const skipped = deps();
+		await cliRun(["install", "npm:foo", "--approve", "--no-service"], skipped);
+		expect((skipped.daemonService as FakeDaemonServiceInstaller).gotSource).toBe("");
+
+		// A non-npm source never attempts service detection -- daemon-service resolution only supports npm: today.
+		const gitSource = deps();
+		await cliRun(["install", "git:github.com/u/r@v1", "--approve"], gitSource);
+		expect((gitSource.daemonService as FakeDaemonServiceInstaller).gotSource).toBe("");
 	});
 
 	it("install-service validates source", async () => {

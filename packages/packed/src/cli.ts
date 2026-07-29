@@ -68,8 +68,8 @@ usage:
   packed setup update [manifest] [--json]       deliberately refresh immutable package resolutions
   packed setup plan [manifest] [--prune] [--json] show an additive or exact setup diff without mutation
   packed setup apply [manifest] [--prune] [--approve] [--json] apply an approved setup plan
-  packed install <source> [--approve] [--json] pi install npm:|git:|https://… via daemon
-  packed install-service <source> --approve [--json] register a package's own daemon as a persistent login/boot service
+  packed install <source> [--approve] [--no-service] [--json] pi install npm:|git:|https://… via daemon; auto-registers a detected npm: Vehicle daemon as a service unless --no-service
+  packed install-service <source> --approve [--json] register a package's own daemon as a persistent login/boot service (also useful standalone, e.g. re-registering after --no-service)
   packed remove <name> [--approve] [--json]    remove by bare npm name via daemon
   packed security [always|never] [--approve] [--json] read or set mutation approval policy
   packed serve                                 run the long-running daemon
@@ -119,11 +119,12 @@ interface Flags {
 	force: boolean;
 	prune: boolean;
 	machineLocal: boolean;
+	noService: boolean;
 	project?: string;
 }
 
 function parseFlags(rest: string[]): { flags: Flags; pos: string[] } {
-	const flags: Flags = { json: false, limit: SEARCH_DEFAULT_LIMIT, cached: false, offline: false, approved: false, smoke: false, force: false, prune: false, machineLocal: false };
+	const flags: Flags = { json: false, limit: SEARCH_DEFAULT_LIMIT, cached: false, offline: false, approved: false, smoke: false, force: false, prune: false, machineLocal: false, noService: false };
 	const pos: string[] = [];
 	for (let i = 0; i < rest.length; i++) {
 		const a = rest[i]!;
@@ -135,6 +136,7 @@ function parseFlags(rest: string[]): { flags: Flags; pos: string[] } {
 		else if (a === "--force") flags.force = true;
 		else if (a === "--prune") flags.prune = true;
 		else if (a === "--machine-local") flags.machineLocal = true;
+		else if (a === "--no-service") flags.noService = true;
 		else if (a === "--limit" && i + 1 < rest.length) flags.limit = Number(rest[++i]) || SEARCH_DEFAULT_LIMIT;
 		else if (a.startsWith("--limit=")) flags.limit = Number(a.slice(8)) || SEARCH_DEFAULT_LIMIT;
 		else if (a === "--project" && i + 1 < rest.length) flags.project = rest[++i];
@@ -436,13 +438,35 @@ const commands: Record<string, { usage: string; run: Command }> = {
 	},
 
 	install: {
-		usage: "packed install npm:<pkg>[@ver] | git:<host>/<owner>/<repo>[@ref] | https://… [--json]",
+		usage: "packed install npm:<pkg>[@ver] | git:<host>/<owner>/<repo>[@ref] | https://… [--no-service] [--json]",
 		async run(_rest, d, flags, pos) {
 			const source = pos[0] ?? "";
 			if (!SOURCE_RE.test(source)) return usageErr(`usage: ${commands["install"]!.usage}\n`);
 			try {
 				const output = await d.inst.install(source, { approved: flags.approved });
-				return flags.json ? ok(`${JSON.stringify({ ok: true, source, output })}\n`) : ok(`${output}\n`);
+				// A package's own persistent-service registration piggybacks on the same
+				// approval already granted for install -- both are the same "code-execution"
+				// mutation tier, so this isn't a new consent surface. Silent for the
+				// overwhelmingly common case (most Pi packages aren't daemons at all);
+				// --no-service skips the attempt entirely, and a genuine failure (detected
+				// a daemon but couldn't register it) is reported without failing the
+				// install itself, which already succeeded.
+				let serviceInstall: { detected: true; ok: boolean; output: string } | undefined;
+				if (!flags.noService && source.startsWith("npm:") && d.daemonService) {
+					try {
+						const svc = await d.daemonService.install(source, flags.approved);
+						serviceInstall = { detected: true, ok: true, output: svc.output };
+					} catch (e) {
+						if (!(e instanceof Error) || !(e as { notADaemon?: boolean }).notADaemon) {
+							serviceInstall = { detected: true, ok: false, output: e instanceof Error ? e.message : String(e) };
+						}
+					}
+				}
+				if (flags.json) return ok(`${JSON.stringify({ ok: true, source, output, ...(serviceInstall ? { serviceInstall } : {}) })}\n`);
+				let human = `${output}\n`;
+				if (serviceInstall?.ok) human += `${serviceInstall.output}\n`;
+				else if (serviceInstall && !serviceInstall.ok) human += `note: detected a persistent-service daemon but could not register it: ${serviceInstall.output}\n`;
+				return ok(human);
 			} catch (e) {
 				const error = e instanceof Error ? e.message : String(e);
 				return flags.json ? fail(`${JSON.stringify({ ok: false, source, error })}\n`) : fail(`${error}\n`);

@@ -1,0 +1,15 @@
+{
+  "$schema": "./schema/pi-setup-v1.schema.json",
+  "schemaVersion": 1,
+  "packages": [
+    { "kind": "npm", "scope": "global", "source": "npm:@danypops/pi-packed", "resolved": "0.5.3", "integrity": "sha512-n1qLFkEanvODh7QcoFdODCvuuAuKR9G8rMmF9RR9YTOvgqGYSCYL5XhFnECrODewqF+JrNFN9+SfgCJc5DiyAw==" },
+    { "kind": "npm", "scope": "global", "source": "npm:@danypops/pi-papyrus", "resolved": "0.38.0", "integrity": "sha512-M5wV8X6kpKNXCS5kO7XifG+y4i2/6DNe6pYky5fcIbK7CpmAD4NIUVcxQMW2S9/03K5Oe589vKKfGlStvMz6uw==" },
+    { "kind": "npm", "scope": "global", "source": "npm:@danypops/pi-lector", "resolved": "0.3.0", "integrity": "sha512-vis+YRDLUyl1joGDP8pck6zG4EHX1nRw6LLkjKwV7CxMZnvBh+FLVNDBv+0s6hKJU6gal5qP0YEOCU24I7VcxA==" },
+    { "kind": "npm", "scope": "global", "source": "npm:@danypops/pi-pipes", "resolved": "0.8.1", "integrity": "sha512-Niu0DtG/usPdsQrsUGKhTjNrZR8HxAlc43sMMeLz7mzxC+MKlVFD6wmDgnAXPxyWGQtPKI78ZpzSDrkEobHZCQ==" },
+    { "kind": "npm", "scope": "global", "source": "npm:@danypops/pi-tickets", "resolved": "0.5.2", "integrity": "sha512-6ipP4jtcMhQD61CVLWW1PYk6iA2ormUt5t1IGPgUOF4K3yK8xr+M+T3VA0ByXamG4vuE/dZ6b3cLm7qnn3YDOA==" },
+    { "kind": "npm", "scope": "global", "source": "npm:@danypops/pi-jittor", "resolved": "0.1.0", "integrity": "sha512-CMyr1tzeop1OYaLJ6ItzZSShzu+0AGWekigFTLZRHG1sI9gVfYVCVYWYjbuEMYuDjtr8/4wEnj9OI5MvrWO9aw==" },
+    { "kind": "npm", "scope": "global", "source": "npm:@danypops/pi-web-spider", "resolved": "0.13.0", "integrity": "sha512-n6j/7enB4wUCeQVIIeFDUxeyk/SkV9lxJyQA+KYYQGDSCQd6Wr+ZbtVgM73X5quWPZMCB5akzxO0m3ZU92xNfg==" },
+    { "kind": "npm", "scope": "global", "source": "npm:@danypops/enigma", "resolved": "0.22.0", "integrity": "sha512-l/zLpNfaN4MQi5EDTa7IVka8daYk7ScWxDUUqFSUBSoQ2b0AOxtoY5JtdC6JRLcXSNhq9KqXNmJ1VSkf2HAC+w==" }
+  ],
+  "profiles": {}
+}

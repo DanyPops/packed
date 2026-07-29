@@ -165,6 +165,20 @@ describe("CLI", () => {
 		expect(calls).toEqual([`export:${root}:true`, `update:${root}`, `plan:${root}`, `apply:${root}`]);
 	});
 
+	it("setup plan/apply --ecosystem resolves the bundled @danypops starter manifest, not the cwd", async () => {
+		const calls: string[] = [];
+		const d = deps({ setup: {
+			async export() { throw new Error("not exercised"); },
+			async update() { throw new Error("not exercised"); },
+			async plan(manifestPath) { calls.push(`plan:${manifestPath}`); return { ok: true, manifestPath, operations: [], diagnostics: [] }; },
+			async apply(manifestPath) { calls.push(`apply:${manifestPath}`); return { ok: true, manifestPath, operations: [], reloadRequired: false, diagnostics: [] }; },
+		} });
+		expect((await cliRun(["setup", "plan", "--ecosystem", "--json"], d)).code).toBe(0);
+		expect((await cliRun(["setup", "apply", "--ecosystem", "--approve", "--json"], d)).code).toBe(0);
+		expect(calls[0]).toContain("setup/danypops-ecosystem.pi-setup.json");
+		expect(calls[1]).toContain("setup/danypops-ecosystem.pi-setup.json");
+	});
+
 	it("search --json", async () => {
 		const d = deps({ reg: new FakeRegistry([{ name: "pi-lsp", version: "0.3.0" }]) });
 		const { code, out } = await cliRun(["search", "lsp", "--json"], d);

@@ -25,5 +25,5 @@
     "url": "git+https://github.com/DanyPops/pi-packed.git",
     "directory": "packages/pi-packed"
   },
-  "files": ["extension", "README.md"]
+  "files": ["extension", "setup", "README.md"]
 }

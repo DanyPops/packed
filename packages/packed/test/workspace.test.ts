@@ -18,6 +18,6 @@ describe("Packed workspace boundary", () => {
 		expect(core).toMatchObject({ name: "@danypops/packed", bin: { packed: "src/cli.ts" } });
 		expect(typeof core.version).toBe("string");
 		expect(core.pi).toBeUndefined();
-		expect(core.files).toEqual(["src", "dist", "schema", "README.md"]);
+		expect(core.files).toEqual(["src", "dist", "schema", "setup", "README.md"]);
 	});
 });

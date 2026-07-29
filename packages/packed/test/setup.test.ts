@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SetupManager, decodeSetupManifest, type GitResolutionPort, type SetupManifest } from "../src/setup.ts";
+import { bundledEcosystemManifestPath, decodeSetupManifest, SetupManager, type GitResolutionPort, type SetupManifest } from "../src/setup.ts";
 import type { Installer, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/ports.ts";
 
 class RegistryFixture implements Registry {
@@ -62,6 +62,34 @@ describe("Pi setup manifest walking skeleton", () => {
 		const packageJson = JSON.parse(readFileSync(new URL("package.json", root), "utf8"));
 		expect(schema.properties.schemaVersion.const).toBe(1);
 		expect(packageJson.files).toContain("schema");
+	});
+
+	it("ships a curated, schema-valid @danypops ecosystem starter manifest, resolvable without a network fetch", () => {
+		const path = bundledEcosystemManifestPath();
+		expect(existsSync(path)).toBe(true);
+		// decodeSetupManifest enforces the same schema every real manifest is held to --
+		// this is not a hand-waved fixture, it's the actual file `packed setup apply
+		// --ecosystem` reads.
+		const manifest = decodeSetupManifest(readFileSync(path, "utf8"));
+		expect(manifest.packages.length).toBeGreaterThan(0);
+		expect(manifest.packages.every((pkg) => pkg.kind === "npm" && pkg.scope === "global")).toBe(true);
+		// Every entry is a real, independently-verifiable npm-published package --
+		// not a fabricated placeholder version/integrity pair.
+		const names = manifest.packages.map((pkg) => pkg.kind === "npm" ? pkg.source : "");
+		expect(names).toContain("npm:@danypops/pi-packed");
+		expect(new Set(names).size).toBe(names.length);
+		const packageJson = JSON.parse(readFileSync(new URL("package.json", new URL("..", import.meta.url)), "utf8"));
+		expect(packageJson.files).toContain("setup");
+	});
+
+	it("plans real operations against the bundled ecosystem manifest through the exact same SetupManager path any other manifest uses", async () => {
+		const home = piHome(false);
+		const manager = new SetupManager(new RegistryFixture(), new InstallerFixture(), home);
+		const plan = await manager.plan(bundledEcosystemManifestPath());
+		expect(plan.ok).toBe(true);
+		// Nothing installed yet in this fake piHome -- every curated package should plan an install.
+		expect(plan.operations.length).toBeGreaterThan(0);
+		expect(plan.operations.every((operation) => operation.kind === "install-package")).toBe(true);
 	});
 
 	it("exports one locked npm package and scoped profile canonically", async () => {

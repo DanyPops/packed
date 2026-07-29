@@ -46,6 +46,7 @@
     "src",
     "dist",
     "schema",
+    "setup",
     "README.md"
   ]
 }

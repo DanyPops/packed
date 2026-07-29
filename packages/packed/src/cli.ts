@@ -12,7 +12,7 @@ import { checkPackage, formatCheckReport } from "./check.ts";
 import { NpmPackVerifier, formatPackReport, type PackReport } from "./pack.ts";
 import { formatAdoptionReport, scoreTarget, type AdoptionReport } from "./score.ts";
 import { formatPublishReport, npmWebUrl, openBrowser, PublishManager, runNpmLoginWeb, type PublishSetupReport, type PublishStatusReport } from "./publish.ts";
-import { formatSetupReport, SetupManager, type SetupApplyResult, type SetupExportReport, type SetupPlan, type SetupUpdateReport } from "./setup.ts";
+import { bundledEcosystemManifestPath, formatSetupReport, SetupManager, type SetupApplyResult, type SetupExportReport, type SetupPlan, type SetupUpdateReport } from "./setup.ts";
 import { resolve } from "node:path";
 import { npmPackageName, readInstalledPackages } from "./installed.ts";
 import { checkUpdates } from "./watcher.ts";
@@ -120,11 +120,12 @@ interface Flags {
 	prune: boolean;
 	machineLocal: boolean;
 	noService: boolean;
+	ecosystem: boolean;
 	project?: string;
 }
 
 function parseFlags(rest: string[]): { flags: Flags; pos: string[] } {
-	const flags: Flags = { json: false, limit: SEARCH_DEFAULT_LIMIT, cached: false, offline: false, approved: false, smoke: false, force: false, prune: false, machineLocal: false, noService: false };
+	const flags: Flags = { json: false, limit: SEARCH_DEFAULT_LIMIT, cached: false, offline: false, approved: false, smoke: false, force: false, prune: false, machineLocal: false, noService: false, ecosystem: false };
 	const pos: string[] = [];
 	for (let i = 0; i < rest.length; i++) {
 		const a = rest[i]!;
@@ -137,6 +138,7 @@ function parseFlags(rest: string[]): { flags: Flags; pos: string[] } {
 		else if (a === "--prune") flags.prune = true;
 		else if (a === "--machine-local") flags.machineLocal = true;
 		else if (a === "--no-service") flags.noService = true;
+		else if (a === "--ecosystem") flags.ecosystem = true;
 		else if (a === "--limit" && i + 1 < rest.length) flags.limit = Number(rest[++i]) || SEARCH_DEFAULT_LIMIT;
 		else if (a.startsWith("--limit=")) flags.limit = Number(a.slice(8)) || SEARCH_DEFAULT_LIMIT;
 		else if (a === "--project" && i + 1 < rest.length) flags.project = rest[++i];
@@ -205,11 +207,14 @@ function formatPiVersionReport(report: PiVersionReport): string {
 
 const commands: Record<string, { usage: string; run: Command }> = {
 	setup: {
-		usage: "packed setup export [path] [--force] [--machine-local] [--json] | packed setup update [manifest] [--json] | packed setup plan [manifest] [--prune] [--json] | packed setup apply [manifest] [--prune] [--approve] [--json]",
+		usage: "packed setup export [path] [--force] [--machine-local] [--json] | packed setup update [manifest] [--json] | packed setup plan [manifest|--ecosystem] [--prune] [--json] | packed setup apply [manifest|--ecosystem] [--prune] [--approve] [--json]",
 		async run(_rest, d, flags, pos) {
 			const action = pos[0];
 			if (action !== "export" && action !== "update" && action !== "plan" && action !== "apply") return usageErr(`usage: ${commands["setup"]!.usage}\n`);
-			const path = resolve(pos[1] ?? ".");
+			// --ecosystem resolves to the curated @danypops starter manifest bundled
+			// in this same package -- no separate download, review, or trust surface
+			// beyond the npm package itself. Only meaningful for plan/apply.
+			const path = flags.ecosystem ? bundledEcosystemManifestPath() : resolve(pos[1] ?? ".");
 			let report: SetupExportReport | SetupUpdateReport | SetupPlan | SetupApplyResult;
 			if (d.daemon) {
 				if (action === "export") report = await d.daemon.setupExport(path, flags.force, flags.machineLocal);

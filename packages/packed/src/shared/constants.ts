@@ -28,6 +28,16 @@ export const RETRY_BASE_DELAY_MS = 2_000; // 2+4+8+16+32s spans npm's ~60s searc
 export const PAGE_DELAY_MS = 100; // politeness pause between catalog pages
 export const MIRROR_PAGE_DELAY_MS = 400; // manual full-sync: extra polite (burst limits)
 
+// --- GitHub self-throttling (single-candidate commit lookup only, never bulk) ---
+// Confirmed against GitHub's own docs and @octokit/plugin-throttling's reference
+// shape: retry a short secondary-limit or transient failure, but never block an
+// interactive `packed score` call for anywhere near the full primary-limit reset
+// window (which can be up to an hour away).
+export const GITHUB_RETRY_MAX_ATTEMPTS = 4;
+export const GITHUB_MAX_TOTAL_BACKOFF_MS = 60_000; // hard cap across every retry combined
+export const GITHUB_SECONDARY_RATE_LIMIT_FALLBACK_MS = 60_000; // matches plugin-throttling's own fallbackSecondaryRateRetryAfter default when no Retry-After header is present
+export const GITHUB_TRANSIENT_BASE_DELAY_MS = 1_000; // 1+2+4s for a plain network blip or 5xx, well under the total cap
+
 // --- Cache / fetch ---
 export const CACHE_TTL_MS = 5 * 60_000;
 export const PROBE_TIMEOUT_MS = 800;

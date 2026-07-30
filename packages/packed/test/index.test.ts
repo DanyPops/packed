@@ -6,6 +6,22 @@ import type { Server } from "bun";
 import { HttpRegistry } from "../src/registry/registry.ts";
 import { openDb, replaceAll, dbPath } from "../src/packages/db.ts";
 import { buildIndex, writeIndex, readIndex, indexStatus, generateIndex, indexPath } from "../src/index/build-index.ts";
+import { readFileSync } from "node:fs";
+
+// Guards the "never bulk GitHub calls" constraint against regression: a
+// future edit could easily start threading a GitHub-commit fetcher through
+// buildIndex the same way scoreTarget does. A source-level check catches
+// that before it ships, independent of whatever fixture happens to be
+// running in the behavioral tests below.
+describe("index/build-index.ts never touches GitHub", () => {
+	it("does not import commit-freshness.ts's GitHub-facing exports", () => {
+		const source = readFileSync(new URL("../src/index/build-index.ts", import.meta.url), "utf8");
+		// Matches a real import specifier or a real call, not prose mentioning
+		// the file/function names in a comment (this file's own doc comment
+		// legitimately explains *why* it avoids commit-freshness.ts).
+		expect(source).not.toMatch(/from\s+["'][^"']*commit-freshness(?:\.ts)?["']|\b(?:githubLastCommitAt|createGithubLastCommitAt)\s*\(/);
+	});
+});
 
 // Real HTTP adapter against a fake npm upstream (Bun.serve) -- same pattern
 // core.test.ts's HttpRegistry suite uses. No mocked fetch, no fake

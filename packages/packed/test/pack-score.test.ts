@@ -243,6 +243,64 @@ describe("freshness: real commit-date source (preferred over the npm publish-dat
 		const fetchGithubCommit = createGithubLastCommitAt(`http://127.0.0.1:${server.port}`);
 		expect(await fetchGithubCommit("https://github.com/example/pi-demo")).toBeUndefined();
 	});
+
+	it("self-throttles: retries a secondary rate limit's short Retry-After and succeeds", async () => {
+		let calls = 0;
+		await using server = Bun.serve({
+			port: 0,
+			fetch: () => {
+				calls++;
+				if (calls === 1) return new Response("secondary rate limited", { status: 403, headers: { "retry-after": "0.05" } });
+				return Response.json([{ commit: { committer: { date: "2026-07-20T00:00:00.000Z" } } }]);
+			},
+		});
+		const fetchGithubCommit = createGithubLastCommitAt(`http://127.0.0.1:${server.port}`);
+		expect(await fetchGithubCommit("https://github.com/example/pi-demo")).toBe("2026-07-20T00:00:00.000Z");
+		expect(calls).toBe(2);
+	});
+
+	it("self-throttles: retries a transient 5xx and succeeds, same shape as a rate limit", async () => {
+		let calls = 0;
+		await using server = Bun.serve({
+			port: 0,
+			fetch: () => {
+				calls++;
+				if (calls === 1) return new Response("server error", { status: 500 });
+				return Response.json([{ commit: { committer: { date: "2026-07-20T00:00:00.000Z" } } }]);
+			},
+		});
+		const fetchGithubCommit = createGithubLastCommitAt(`http://127.0.0.1:${server.port}`);
+		expect(await fetchGithubCommit("https://github.com/example/pi-demo")).toBe("2026-07-20T00:00:00.000Z");
+		expect(calls).toBe(2);
+	});
+
+	it("self-throttles: a primary-limit reset far in the future is treated as immediately exhausted, never blocking anywhere near that long", async () => {
+		let calls = 0;
+		const farFutureReset = Math.floor(Date.now() / 1000) + 3_600; // an hour away
+		await using server = Bun.serve({
+			port: 0,
+			fetch: () => {
+				calls++;
+				return new Response("primary rate limit exhausted", { status: 403, headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(farFutureReset) } });
+			},
+		});
+		const fetchGithubCommit = createGithubLastCommitAt(`http://127.0.0.1:${server.port}`);
+		const start = Date.now();
+		expect(await fetchGithubCommit("https://github.com/example/pi-demo")).toBeUndefined();
+		expect(Date.now() - start).toBeLessThan(2_000); // real proof it never waited toward the hour-away reset
+		expect(calls).toBe(1); // gave up on the first attempt, never retried into the budget
+	});
+
+	it("self-throttles: gives up after the bounded attempt count, never retries forever", async () => {
+		let calls = 0;
+		await using server = Bun.serve({
+			port: 0,
+			fetch: () => { calls++; return new Response("server error", { status: 500 }); },
+		});
+		const fetchGithubCommit = createGithubLastCommitAt(`http://127.0.0.1:${server.port}`);
+		expect(await fetchGithubCommit("https://github.com/example/pi-demo")).toBeUndefined();
+		expect(calls).toBe(4); // GITHUB_RETRY_MAX_ATTEMPTS
+	}, 15_000); // real exponential backoff across 4 attempts (1+2+4s) exceeds bun's default 5s test timeout
 });
 
 describe("compatibility (informal Pi peer-range signal)", () => {

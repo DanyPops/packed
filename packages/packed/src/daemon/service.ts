@@ -8,6 +8,7 @@ import { buildSearchQuery, clampLimit } from "../shared/ports.ts";
 import type { InstalledPkg, Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome, UpdatesSnapshot } from "../shared/ports.ts";
 import { TTLCache } from "../shared/cache.ts";
 import { syncCatalog } from "../packages/catalog.ts";
+import { buildIndex, indexPath, readIndex, writeIndex, type PackageIndex } from "../index/build-index.ts";
 import { loadUpdates } from "./watcher.ts";
 import { readInstalledPackages, defaultPiHome } from "../packages/installed.ts";
 import { openDb, searchLocal, catalogList, getSyncMeta, dbPath } from "../packages/db.ts";
@@ -66,6 +67,8 @@ export type OperationName =
 	| "package.installed"
 	| "package.catalog"
 	| "package.catalog.sync"
+	| "package.index"
+	| "package.index.build"
 	| "package.updates"
 	| "package.check"
 	| "package.pack"
@@ -91,6 +94,8 @@ export interface OperationInputs {
 	"package.installed": Record<string, never>;
 	"package.catalog": Record<string, never>;
 	"package.catalog.sync": Record<string, never>;
+	"package.index": Record<string, never>;
+	"package.index.build": Record<string, never>;
 	"package.updates": Record<string, never>;
 	"package.check": { path: string; smoke?: boolean };
 	"package.pack": { path: string };
@@ -121,6 +126,8 @@ export interface OperationOutputs {
 	"package.installed": InstalledPkg[];
 	"package.catalog": { fetchedAt?: string; sha256?: string; packages: Pkg[] };
 	"package.catalog.sync": { synced: number };
+	"package.index": PackageIndex | undefined;
+	"package.index.build": PackageIndex;
 	"package.updates": UpdatesSnapshot;
 	"package.check": CheckReport;
 	"package.pack": PackReport;
@@ -142,7 +149,7 @@ export interface OperationOutputs {
 }
 
 export const OPERATION_NAMES: readonly OperationName[] = [
-	"package.search", "package.info", "package.installed", "package.catalog", "package.catalog.sync", "package.updates", "package.check", "package.pack", "package.score",
+	"package.search", "package.info", "package.installed", "package.catalog", "package.catalog.sync", "package.index", "package.index.build", "package.updates", "package.check", "package.pack", "package.score",
 	"setup.export", "setup.update", "setup.plan", "setup.apply",
 	"package.security.get", "package.security.set", "package.install", "package.install_service", "package.remove", "package.update",
 	"resources.list", "resources.toggle",
@@ -368,6 +375,12 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 
 	async function executeOperation<Name extends OperationName>(op: Name, input: OperationInputs[Name]): Promise<OperationOutputs[Name]> {
 		if (op === "package.catalog.sync") return { synced: await syncCatalog(deps.reg, dataDir) } as OperationOutputs[Name];
+		if (op === "package.index") return readIndex(indexPath(dataDir)) as OperationOutputs[Name];
+		if (op === "package.index.build") {
+			const index = await buildIndex(deps.reg, dataDir);
+			writeIndex(indexPath(dataDir), index);
+			return index as OperationOutputs[Name];
+		}
 		if (op === "package.check" || op === "package.pack") {
 			const packagePath = (input as OperationInputs["package.check"] | OperationInputs["package.pack"]).path;
 			if (typeof packagePath !== "string" || packagePath.length === 0 || packagePath.length > 4_096) throw new PackageOperationError("path must be a non-empty string up to 4096 characters", 400);

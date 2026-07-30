@@ -6,7 +6,9 @@ import { satisfiesRange } from "../publish/publish.ts";
 import { resolveCurrentPiVersion } from "../pi/pi-version.ts";
 import { lastLocalCommitAt, githubLastCommitAt, type FetchGithubLastCommitAt } from "./commit-freshness.ts";
 
-const PI_COMMAND_NAME = "@earendil-works/pi-coding-agent";
+/** Exported so bulk index generation can resolve pi's own last-publish
+ * date once per run without duplicating the literal. */
+export const PI_COMMAND_NAME = "@earendil-works/pi-coding-agent";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /** The peer range Pi's own docs actually recommend -- carries no real

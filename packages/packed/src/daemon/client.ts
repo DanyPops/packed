@@ -15,6 +15,7 @@ import type { SetupApplyResult, SetupExportReport, SetupPlan, SetupUpdateReport 
 import type { PiVersionReport } from "../pi/pi-version.ts";
 import type { PackageResources, ResourceField } from "../packages/resources.ts";
 import type { AdvisoryReport } from "../adoption/advisories.ts";
+import type { PackageIndex } from "../index/build-index.ts";
 
 export type FetchTransport = (request: Request) => Promise<Response>;
 type RpcClient = AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>;
@@ -25,6 +26,8 @@ export interface PackageDaemonPort {
 	installed(): Promise<InstalledPkg[]>;
 	catalog(): Promise<{ fetchedAt?: string; sha256?: string; packages: Pkg[] }>;
 	mirror(): Promise<number>;
+	index(): Promise<PackageIndex | undefined>;
+	indexBuild(): Promise<PackageIndex>;
 	updates(): Promise<UpdateEntry[]>;
 	check(path: string, smoke?: boolean): Promise<CheckReport>;
 	pack(path: string): Promise<PackReport>;
@@ -97,6 +100,18 @@ export class PackageDaemonClient implements PackageDaemonPort {
 			return (await this.maintenanceRpc.call("package.catalog.sync", {})).synced;
 		} catch (error) {
 			throw new PackageDaemonError(error instanceof Error ? error.message : String(error), "package.catalog.sync");
+		}
+	}
+
+	index(): Promise<PackageIndex | undefined> {
+		return this.call("package.index", {});
+	}
+
+	async indexBuild(): Promise<PackageIndex> {
+		try {
+			return await this.maintenanceRpc.call("package.index.build", {});
+		} catch (error) {
+			throw new PackageDaemonError(error instanceof Error ? error.message : String(error), "package.index.build");
 		}
 	}
 

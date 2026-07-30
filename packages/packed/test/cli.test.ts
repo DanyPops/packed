@@ -255,6 +255,21 @@ describe("CLI", () => {
 		db.close();
 	});
 
+	it("index build generates a local snapshot from the SQLite mirror standalone, and index status reads it back", async () => {
+		const d = deps({ reg: new FakeRegistry([], { "pi-lsp": "1.0.0" }) });
+		const db = openDb(dbPath(d.stateDir));
+		replaceAll(db, [{ name: "pi-lsp", version: "1.0.0" }], "test");
+		db.close();
+		expect((await cliRun(["index", "status", "--json"], d)).out).toContain("null"); // nothing built yet
+		const built = await cliRun(["index", "build", "--json"], d);
+		expect(built.code).toBe(0);
+		expect(JSON.parse(built.out).packages[0]).toMatchObject({ name: "pi-lsp", version: "1.0.0" });
+		const status = await cliRun(["index", "status", "--json"], d);
+		expect(JSON.parse(status.out).packages).toHaveLength(1);
+		expect((await cliRun(["index", "status"], d)).out).toContain("1 packages");
+		expect((await cliRun(["index", "bogus"], d)).code).toBe(2);
+	});
+
 	it("install validates source", async () => {
 		const d = deps();
 		const { code } = await cliRun(["install", "foo; rm -rf ~"], d);
@@ -464,6 +479,8 @@ describe("CLI", () => {
 			async installed() { calls.push("installed"); return [{ name: "pi-daemon", pinned: "1.0.0" }]; },
 			async catalog() { calls.push("catalog"); return { fetchedAt: "2026-01-01T00:00:00.000Z", sha256: "a".repeat(64), packages: [{ name: "pi-daemon", version: "1.0.0" }] }; },
 			async mirror() { calls.push("mirror"); return 1; },
+			async index() { calls.push("index"); return { generatedAt: "2026-01-01T00:00:00.000Z", packages: [{ name: "pi-daemon", version: "1.0.0", dimensions: {} as never }] }; },
+			async indexBuild() { calls.push("indexBuild"); return { generatedAt: "2026-01-01T00:00:00.000Z", packages: [{ name: "pi-daemon", version: "1.0.0", dimensions: {} as never }] }; },
 			async updates() { calls.push("updates"); return [{ name: "pi-daemon", installed: "1.0.0", latest: "1.1.0", detectedAt: "2026-01-01T00:00:00.000Z" }]; },
 			async check(path, smoke) { calls.push(`check:${path}:${smoke}`); return { root: path, ok: true, diagnostics: [], summary: { errors: 0, warnings: 0, info: 0 }, checkedFiles: 1, truncated: false }; },
 			async pack(path) { calls.push(`pack:${path}`); return { root: path, ok: true, command: ["npm", "pack"], files: [], shape: { kind: "manifest", verified: true, evidence: [] }, diagnostics: [], truncated: false }; },
@@ -489,6 +506,8 @@ describe("CLI", () => {
 		expect(JSON.parse((await cliRun(["updates", "--json"], d)).out).updates[0].name).toBe("pi-daemon");
 		expect(JSON.parse((await cliRun(["catalog", "--json"], d)).out).packages[0].name).toBe("pi-daemon");
 		expect(JSON.parse((await cliRun(["mirror", "--json"], d)).out).synced).toBe(1);
+		expect(JSON.parse((await cliRun(["index", "status", "--json"], d)).out).packages[0].name).toBe("pi-daemon");
+		expect(JSON.parse((await cliRun(["index", "build", "--json"], d)).out).packages[0].name).toBe("pi-daemon");
 		expect(JSON.parse((await cliRun(["check", "/tmp/package", "--smoke", "--json"], d)).out).root).toBe("/tmp/package");
 		expect(JSON.parse((await cliRun(["pack", "/tmp/package", "--json"], d)).out).shape.verified).toBe(true);
 		expect(JSON.parse((await cliRun(["score", "pi-daemon", "--json"], d)).out).target).toBe("pi-daemon");
@@ -500,7 +519,7 @@ describe("CLI", () => {
 		expect(JSON.parse((await cliRun(["resources", "list", "--json"], d)).out).global[0].name).toBe("pi-daemon");
 		expect(JSON.parse((await cliRun(["resources", "toggle", "npm:pi-daemon", "extensions", "extensions/index.ts", "off", "--approve", "--json"], d)).out)).toMatchObject({ ok: true, enabled: false });
 		expect(JSON.parse((await cliRun(["advisories", "--json"], d)).out)).toEqual({ scanned: 1, findings: [], diagnostics: [], truncated: false });
-		expect(calls).toEqual(["search:true", "installed", "updates", "catalog", "mirror", "check:/tmp/package:true", "pack:/tmp/package", "score:pi-daemon", "setupExport:/tmp/project:true", "setupUpdate:/tmp/project/pi-setup.json", "setupPlan:/tmp/project/pi-setup.json", "setupApply:/tmp/project/pi-setup.json:true", "piStatus", "resourcesList:undefined", "resourcesToggle:npm:pi-daemon:extensions:extensions/index.ts:false", "advisoriesScan:undefined"]);
+		expect(calls).toEqual(["search:true", "installed", "updates", "catalog", "mirror", "index", "indexBuild", "check:/tmp/package:true", "pack:/tmp/package", "score:pi-daemon", "setupExport:/tmp/project:true", "setupUpdate:/tmp/project/pi-setup.json", "setupPlan:/tmp/project/pi-setup.json", "setupApply:/tmp/project/pi-setup.json:true", "piStatus", "resourcesList:undefined", "resourcesToggle:npm:pi-daemon:extensions:extensions/index.ts:false", "advisoriesScan:undefined"]);
 	});
 
 	it("advisories runs standalone without a daemon and degrades to zero findings, never a real network call, when nothing is installed", async () => {
@@ -619,6 +638,11 @@ describe("daemon client", () => {
 		expect((await client.info("pi-lsp")).version).toBe("1.0.0");
 		expect(await client.installed()).toEqual([]);
 		expect((await client.catalog()).packages).toEqual([]);
+		expect(await client.index()).toBeUndefined(); // nothing generated yet
+		const built = await client.indexBuild();
+		expect(built.packages).toEqual([]); // empty catalog in this fixture daemon -- proves the RPC round-trips a real PackageIndex shape
+		expect(typeof built.generatedAt).toBe("string");
+		expect(await client.index()).toEqual(built); // now persisted, readable back through the same RPC
 		expect(await client.updates()).toEqual([]);
 		const checkRoot = new URL("..", import.meta.url).pathname;
 		expect((await client.check(checkRoot)).root).toBe(checkRoot.replace(/\/$/, ""));

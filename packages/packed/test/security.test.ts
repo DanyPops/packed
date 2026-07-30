@@ -15,7 +15,7 @@ describe("package permission policy", () => {
 		const settings = readSecuritySettings(dir);
 		expect(settings).toEqual({ mutationApproval: "always" });
 		expect(PACKAGE_OPERATIONS).toEqual([
-		"search", "info", "installed", "catalog", "updates", "check", "setup.plan", "security.read",
+		"search", "info", "installed", "catalog", "index.status", "index.build", "updates", "check", "setup.plan", "security.read",
 		"mirror", "setup.export", "setup.update", "install", "install_service", "setup.apply", "update", "update.self", "remove",
 		"resources.list", "resources.toggle", "security.write", "pi.status", "advisories.scan",
 	]);
@@ -25,6 +25,8 @@ describe("package permission policy", () => {
 			info: { classification: "read", approvalRequired: false },
 			installed: { classification: "read", approvalRequired: false },
 			catalog: { classification: "read", approvalRequired: false },
+			"index.status": { classification: "read", approvalRequired: false },
+			"index.build": { classification: "maintenance", approvalRequired: false },
 			updates: { classification: "read", approvalRequired: false },
 			check: { classification: "read", approvalRequired: false },
 			"setup.plan": { classification: "read", approvalRequired: false },

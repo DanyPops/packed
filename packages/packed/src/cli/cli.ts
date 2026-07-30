@@ -22,6 +22,7 @@ import { scanInstalledPackages, resolveInstalledVersions, formatAdvisoryReport }
 import { existsSync } from "node:fs";
 import { syncCatalog } from "../packages/catalog.ts";
 import { openDb, searchLocal, catalogList, getSyncMeta, latestVersion, dbPath } from "../packages/db.ts";
+import { generateIndex, indexPath, readIndex } from "../index/build-index.ts";
 import { NAME_RE, defaultPiBin } from "../packages/install.ts";
 import {
 	assertPackagePermission,
@@ -61,6 +62,8 @@ usage:
   packed mirror [--json]                       sync upstream into the local SQLite index
   packed installed [--json]                    installed pi packages
   packed catalog [--json]                      local package index (apt-cache stats)
+  packed index build [--json]                  regenerate the local static adoption-scoring snapshot (npm-only, no GitHub)
+  packed index status [--json]                 report the local static index's generatedAt and package count
   packed check [path] [--smoke] [--json]       diagnose a Pi package; smoke is isolated and opt-in
   packed pack [path] [--json]                  verify exact npm tarball contents without lifecycle scripts
   packed score [path|name] [--json]            report adoption-readiness evidence by dimension
@@ -320,6 +323,23 @@ const commands: Record<string, { usage: string; run: Command }> = {
 			const n = d.daemon ? await d.daemon.mirror() : await syncCatalog(d.reg, dataDirectory(d));
 			if (flags.json) return ok(JSON.stringify({ synced: n }) + "\n");
 			return ok(`mirrored ${n} packages into the local index\n`);
+		},
+	},
+
+	index: {
+		usage: "packed index build [--json] | packed index status [--json]  (local static adoption-scoring snapshot, npm-only -- createrepo/dpkg-scanpackages analog)",
+		async run(_rest, d, flags, pos) {
+			const action = pos[0];
+			if (action !== "build" && action !== "status") return usageErr(`usage: ${commands["index"]!.usage}\n`);
+			if (action === "build") {
+				const index = d.daemon ? await d.daemon.indexBuild() : await generateIndex(d.reg, dataDirectory(d), indexPath(dataDirectory(d)));
+				if (flags.json) return ok(JSON.stringify(index) + "\n");
+				return ok(`generated a static index of ${index.packages.length} packages (generatedAt ${index.generatedAt})\n`);
+			}
+			const status = d.daemon ? await d.daemon.index() : readIndex(indexPath(dataDirectory(d)));
+			if (flags.json) return ok(JSON.stringify(status ?? null) + "\n");
+			if (!status) return ok("no local index generated yet -- run packed index build\n");
+			return ok(`local index: ${status.packages.length} packages, generated ${status.generatedAt}\n`);
 		},
 	},
 

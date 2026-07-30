@@ -57,6 +57,8 @@ Packages execute arbitrary code and mutate Pi settings/install roots. One daemon
 | `packed mirror [--json]` | Refresh the SQLite package index |
 | `packed installed [--json]` | Read Pi's installed package declarations |
 | `packed catalog [--json]` | Inspect the local package index |
+| `packed index build [--json]` | Regenerate a local static adoption-scoring snapshot across the whole catalog (npm-registry data only, never GitHub -- see below) |
+| `packed index status [--json]` | Report the local static index's `generatedAt` and package count |
 | `packed check [path] [--smoke] [--json]` | Diagnose Pi resources and npm packaging; optionally load extensions in an isolated child |
 | `packed pack [path] [--json]` | Inspect exact `npm pack --dry-run --json --ignore-scripts` output and verify shipped Pi resources |
 | `packed score [path\|name] [--json]` | Report discoverability, first-run, trust, maintenance, observational traction, declared Pi-version compatibility, and freshness (candidate vs. pi-coding-agent's own latest publish) evidence |
@@ -114,6 +116,8 @@ Guarded CLI mutations require `--approve` under the secure default. This is pi-p
 `packed pack` uses npm's authoritative dry-run file list while suppressing lifecycle scripts. It bounds command time and output, rejects missing declared resources and sensitive-looking files, and classifies the tarball as keyword-only, manifest-shaped, or conventional Pi-shaped.
 
 `packed score` reports each readiness dimension separately. npm downloads are bounded weekly/monthly observations and never contribute to a quality score. Provenance is shown when npm publishes an attestation; trusted-publisher status remains unknown unless independently verified because provenance alone does not prove that configuration.
+
+`packed index build` runs the same scoring dimensions across every package already in the local catalog (`packed mirror`'s SQLite index) and writes one JSON snapshot to local state -- a local-only prototype of a static, publishable package index (the APT `Packages`/DNF `primary.xml` model), scoped for now to generation, not distribution. It deliberately never calls GitHub: computing `freshness`'s git-commit-based signal for every cataloged package would exceed GitHub's unauthenticated 60 requests/hour limit, so bulk generation always uses the npm publish-date proxy instead. The daemon regenerates this snapshot on the same schedule as the catalog mirror; `packed index build` triggers it on demand and `packed index status` reports its age.
 
 ### Pi profiles
 

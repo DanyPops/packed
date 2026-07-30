@@ -6,8 +6,9 @@ import { ExecInstaller } from "../packages/install.ts";
 import { envMs } from "../shared/state.ts";
 import { catalogStatus, syncCatalog } from "../packages/catalog.ts";
 import { openDb, latestVersion } from "../packages/db.ts";
+import { generateIndex, indexPath, indexStatus } from "../index/build-index.ts";
 import {
-	ENV, WATCH_INTERVAL_DEFAULT_MS, CATALOG_INTERVAL_DEFAULT_MS, IDLE_BUDGET_DEFAULT_MS, WATCHDOG_TICK_MS,
+	ENV, WATCH_INTERVAL_DEFAULT_MS, CATALOG_INTERVAL_DEFAULT_MS, INDEX_INTERVAL_DEFAULT_MS, IDLE_BUDGET_DEFAULT_MS, WATCHDOG_TICK_MS,
 } from "../shared/constants.ts";
 import { readInstalledPackages, defaultPiHome } from "../packages/installed.ts";
 import { checkUpdates, saveUpdates } from "./watcher.ts";
@@ -52,6 +53,15 @@ function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOptions {
 				const ttlMs = envMs(ENV.CATALOG_SECS, CATALOG_INTERVAL_DEFAULT_MS);
 				const dataDirectory = dirname(paths.database);
 				if (catalogStatus(dataDirectory, ttlMs).stale) await syncCatalog(reg, dataDirectory);
+			},
+		},
+		{
+			name: "index-build",
+			intervalMs: envMs(ENV.INDEX_SECS, INDEX_INTERVAL_DEFAULT_MS),
+			run: async () => {
+				const ttlMs = envMs(ENV.INDEX_SECS, INDEX_INTERVAL_DEFAULT_MS);
+				const dataDirectory = dirname(paths.database);
+				if (indexStatus(indexPath(dataDirectory), ttlMs).stale) await generateIndex(reg, dataDirectory, indexPath(dataDirectory));
 			},
 		},
 	];

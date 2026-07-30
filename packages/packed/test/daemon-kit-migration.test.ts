@@ -108,7 +108,7 @@ describe("daemon-kit migration", () => {
 		});
 
 		expect(await client.operations()).toEqual([
-			"package.search", "package.info", "package.installed", "package.catalog", "package.catalog.sync", "package.updates", "package.check", "package.pack", "package.score",
+			"package.search", "package.info", "package.installed", "package.catalog", "package.catalog.sync", "package.index", "package.index.build", "package.updates", "package.check", "package.pack", "package.score",
 			"setup.export", "setup.update", "setup.plan", "setup.apply",
 			"package.security.get", "package.security.set", "package.install", "package.install_service", "package.remove", "package.update",
 			"resources.list", "resources.toggle",

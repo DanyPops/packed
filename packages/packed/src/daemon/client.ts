@@ -4,7 +4,7 @@ import { AuthenticatedRpcClient } from "@danypops/daemon-kit/rpc-client";
 import { readDaemonHandle } from "@danypops/daemon-kit/paths";
 import type { InstalledPkg, Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateEntry, UpdateOutcome } from "../shared/ports.ts";
 import { HttpRegistry } from "../registry/registry.ts";
-import { MIRROR_OPERATION_TIMEOUT_MS, PROBE_TIMEOUT_MS, REGISTRY_FETCH_TIMEOUT_MS } from "../shared/constants.ts";
+import { INDEX_OPERATION_TIMEOUT_MS, MIRROR_OPERATION_TIMEOUT_MS, PROBE_TIMEOUT_MS, REGISTRY_FETCH_TIMEOUT_MS } from "../shared/constants.ts";
 import type { MutationApproval, SecuritySettings } from "../security/security.ts";
 import { resolvePackedPaths, type PackedPaths } from "../shared/paths.ts";
 import type { OperationInputs, OperationName, OperationOutputs } from "./service.ts";
@@ -65,10 +65,12 @@ function timeoutTransport(transport: FetchTransport, timeoutMs = REGISTRY_FETCH_
 export class PackageDaemonClient implements PackageDaemonPort {
 	private readonly rpc: RpcClient;
 	private readonly maintenanceRpc: RpcClient;
+	private readonly indexRpc: RpcClient;
 
 	constructor(base: string, token: string, transport: FetchTransport = fetch) {
 		this.rpc = new AuthenticatedRpcClient(base, token, { label: "Packed", transport: timeoutTransport(transport) });
 		this.maintenanceRpc = new AuthenticatedRpcClient(base, token, { label: "Packed", transport: timeoutTransport(transport, MIRROR_OPERATION_TIMEOUT_MS) });
+		this.indexRpc = new AuthenticatedRpcClient(base, token, { label: "Packed", transport: timeoutTransport(transport, INDEX_OPERATION_TIMEOUT_MS) });
 	}
 
 	private async call<Name extends OperationName>(operation: Name, input: OperationInputs[Name]): Promise<OperationOutputs[Name]> {
@@ -109,7 +111,7 @@ export class PackageDaemonClient implements PackageDaemonPort {
 
 	async indexBuild(): Promise<PackageIndex> {
 		try {
-			return await this.maintenanceRpc.call("package.index.build", {});
+			return await this.indexRpc.call("package.index.build", {});
 		} catch (error) {
 			throw new PackageDaemonError(error instanceof Error ? error.message : String(error), "package.index.build");
 		}

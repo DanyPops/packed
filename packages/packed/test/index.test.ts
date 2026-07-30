@@ -126,6 +126,30 @@ describe("buildIndex bounds", () => {
 			server.stop(true);
 		}
 	});
+
+	it("collapses two concurrent callers into one run -- confirmed live to matter: the daemon's own maintenance tick and an on-demand CLI build overlapping compounded into a shutdown the daemon's SIGTERM grace period couldn't outlast", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "packed-index-concurrent-"));
+		const db = openDb(dbPath(dir));
+		replaceAll(db, [{ name: "pi-one", version: "1.0.0" }], "test");
+		db.close();
+		let infoCalls = 0;
+		const server = Bun.serve({
+			port: 0,
+			async fetch(req) {
+				const url = new URL(req.url);
+				if (url.pathname.endsWith("/latest")) { infoCalls++; await Bun.sleep(30); return Response.json({ name: "pi-one", version: "1.0.0" }); }
+				return new Response("not found", { status: 404 });
+			},
+		});
+		try {
+			const reg = new HttpRegistry(`http://127.0.0.1:${server.port}`, 250, 0, 1, `http://127.0.0.1:${server.port}`);
+			const [a, b] = await Promise.all([buildIndex(reg, dir, { delayMs: 0 }), buildIndex(reg, dir, { delayMs: 0 })]);
+			expect(a).toBe(b); // the very same result object -- one real run, not two
+			expect(infoCalls).toBe(1); // never doubled
+		} finally {
+			server.stop(true);
+		}
+	});
 });
 
 describe("index persistence", () => {

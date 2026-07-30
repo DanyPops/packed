@@ -33,6 +33,10 @@ export const CACHE_TTL_MS = 5 * 60_000;
 export const PROBE_TIMEOUT_MS = 800;
 export const REGISTRY_FETCH_TIMEOUT_MS = 15_000;
 export const MIRROR_OPERATION_TIMEOUT_MS = 2 * 60_000;
+// Confirmed live: 500 packages (index build's own bound) took just over
+// MIRROR_OPERATION_TIMEOUT_MS end to end -- a dedicated, more generous
+// budget, matching the same per-operation-timeout pattern mirror() uses.
+export const INDEX_OPERATION_TIMEOUT_MS = 10 * 60_000;
 
 // --- Daemon ---
 export const WATCH_INTERVAL_DEFAULT_MS = 30 * 60_000; // updates diff cadence

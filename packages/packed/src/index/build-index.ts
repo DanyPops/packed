@@ -42,9 +42,21 @@ export interface PackageIndex {
 	truncated: boolean;
 }
 
-/** Generous for a real Pi-package catalog, still bounded against a
- * polluted or adversarial one. */
-const DEFAULT_MAX_PACKAGES = 500;
+/** Confirmed live this needs to stay small: even with downloads() removed,
+ * 500 packages against a real npm registry took long enough that two
+ * overlapping runs (the daemon's own maintenance-task tick and an
+ * on-demand CLI build) compounded into a shutdown the daemon's own
+ * SIGTERM grace period couldn't outlast, forcing a SIGABRT/coredump.
+ * Small and bounded beats generous here. */
+const DEFAULT_MAX_PACKAGES = 50;
+
+// Guards against the exact failure just described: the daemon's scheduled
+// maintenance tick and an on-demand `packed index build` both call into
+// this module inside the same process. Without this, both would run a
+// full generation concurrently against the same npm endpoints, doubling
+// load and compounding retry backoff. A concurrent caller gets the
+// in-flight run's own result instead of starting a second one.
+let inFlight: Promise<PackageIndex> | undefined;
 
 export interface IndexStatus {
 	stale: boolean;
@@ -86,7 +98,14 @@ export function indexPath(dir: string): string {
  * dimension's own honest fallback for missing download data, not a new
  * failure mode.
  */
-export async function buildIndex(reg: Registry, catalogDir: string, options: BuildIndexOptions = {}): Promise<PackageIndex> {
+export function buildIndex(reg: Registry, catalogDir: string, options: BuildIndexOptions = {}): Promise<PackageIndex> {
+	if (inFlight) return inFlight;
+	const run = buildIndexNow(reg, catalogDir, options).finally(() => { inFlight = undefined; });
+	inFlight = run;
+	return run;
+}
+
+async function buildIndexNow(reg: Registry, catalogDir: string, options: BuildIndexOptions): Promise<PackageIndex> {
 	const delayMs = options.delayMs ?? PAGE_DELAY_MS;
 	const currentPiVersion = options.currentPiVersion ?? resolveCurrentPiVersion;
 	const maxPackages = options.maxPackages ?? DEFAULT_MAX_PACKAGES;

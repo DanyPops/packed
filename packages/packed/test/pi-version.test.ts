@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Server } from "bun";
 import { AuthenticatedRpcClient } from "@danypops/daemon-kit/rpc-client";
-import { checkPiVersion, createFetchLatestPiRelease, piUpdateSelfArgs, runPiStatusInteractive, runPiUpdateSelf, type PiReleaseInfo, type PiVersionReport } from "../src/pi-version.ts";
-import type { VersionCommand } from "../src/publish.ts";
-import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/service.ts";
-import type { Installer, PkgInfo, Registry, SearchPage } from "../src/ports.ts";
+import { checkPiVersion, createFetchLatestPiRelease, piUpdateSelfArgs, runPiStatusInteractive, runPiUpdateSelf, type PiReleaseInfo, type PiVersionReport } from "../src/pi/pi-version.ts";
+import type { VersionCommand } from "../src/publish/publish.ts";
+import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/daemon/service.ts";
+import type { Installer, PkgInfo, Registry, SearchPage } from "../src/shared/ports.ts";
 
 class NoopRegistry implements Registry {
 	async search(): Promise<SearchPage> { return { results: [], total: 0 }; }

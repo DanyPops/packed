@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthenticatedRpcClient } from "@danypops/daemon-kit/rpc-client";
 import { readDaemonHandle } from "@danypops/daemon-kit/paths";
-import { connectPackageDaemon } from "../src/client.ts";
-import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/service.ts";
-import { startPackedDaemon } from "../src/daemon.ts";
-import { migrateLegacyPackedState, resolvePackedPaths } from "../src/paths.ts";
-import type { Installer, Registry } from "../src/ports.ts";
+import { connectPackageDaemon } from "../src/daemon/client.ts";
+import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/daemon/service.ts";
+import { startPackedDaemon } from "../src/daemon/daemon.ts";
+import { migrateLegacyPackedState, resolvePackedPaths } from "../src/shared/paths.ts";
+import type { Installer, Registry } from "../src/shared/ports.ts";
 
 const roots: string[] = [];
 afterEach(() => {

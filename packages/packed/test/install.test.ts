@@ -14,7 +14,7 @@ import { describe, it, expect } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ExecInstaller } from "../src/install.ts";
+import { ExecInstaller } from "../src/packages/install.ts";
 
 /**
  * A fake `pi` binary: always prints "Updated <source>" and exits 0 (matching

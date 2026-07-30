@@ -15,7 +15,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { discoverPackageResources, matchesPattern, walk, type ResourceField } from "./check.ts";
+import { discoverPackageResources, matchesPattern, walk, type ResourceField } from "../adoption/check.ts";
 
 export type { ResourceField };
 

@@ -5,11 +5,11 @@
  */
 import { writeFile, readFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { UPDATES_FILE } from "./constants.ts";
-import { createLogger } from "./log.ts";
+import { UPDATES_FILE } from "../shared/constants.ts";
+import { createLogger } from "../shared/log.ts";
 
 const log = createLogger("watcher");
-import type { InstalledPkg, UpdateEntry, UpdatesSnapshot } from "./ports.ts";
+import type { InstalledPkg, UpdateEntry, UpdatesSnapshot } from "../shared/ports.ts";
 
 function updatesPath(dir: string): string {
 	return join(dir, UPDATES_FILE);

@@ -7,7 +7,7 @@ import {
 	packagePermissionDecision,
 	readSecuritySettings,
 	writeSecuritySettings,
-} from "../src/security.ts";
+} from "../src/security/security.ts";
 
 describe("package permission policy", () => {
 	it("defaults every arbitrary-code and settings/install-root mutation to approval", () => {

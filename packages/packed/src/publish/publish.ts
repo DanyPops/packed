@@ -1,7 +1,7 @@
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
-import type { Diagnostic } from "./check.ts";
-import type { Registry } from "./ports.ts";
+import type { Diagnostic } from "../adoption/check.ts";
+import type { Registry } from "../shared/ports.ts";
 
 export const TRUST_NPM_VERSION = "11.15.0";
 const MAX_MANIFEST_BYTES = 1024 * 1024;

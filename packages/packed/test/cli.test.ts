@@ -2,15 +2,15 @@ import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { cliRun, type CliDeps } from "../src/cli.ts";
-import { DaemonRegistry, PackageDaemonClient, PackageDaemonInstaller, probe, resolveRegistry, type PackageDaemonPort } from "../src/client.ts";
+import { cliRun, type CliDeps } from "../src/cli/cli.ts";
+import { DaemonRegistry, PackageDaemonClient, PackageDaemonInstaller, probe, resolveRegistry, type PackageDaemonPort } from "../src/daemon/client.ts";
 import { writeDaemonHandle } from "@danypops/daemon-kit/paths";
-import { resolvePackedPaths, type PackedPaths } from "../src/paths.ts";
-import { createApp } from "../src/service.ts";
-import { saveUpdates } from "../src/watcher.ts";
-import { openDb, replaceAll, dbPath, catalogList } from "../src/db.ts";
-import { HttpRegistry } from "../src/registry.ts";
-import type { Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/ports.ts";
+import { resolvePackedPaths, type PackedPaths } from "../src/shared/paths.ts";
+import { createApp } from "../src/daemon/service.ts";
+import { saveUpdates } from "../src/daemon/watcher.ts";
+import { openDb, replaceAll, dbPath, catalogList } from "../src/packages/db.ts";
+import { HttpRegistry } from "../src/registry/registry.ts";
+import type { Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/shared/ports.ts";
 import type { Server } from "bun";
 
 class FakeRegistry implements Registry {
@@ -21,7 +21,7 @@ class FakeRegistry implements Registry {
 	async searchPage(): Promise<SearchPage> {
 		return { results: this.results, total: this.results.length };
 	}
-	async searchAll(): Promise<import("../src/ports.ts").Pkg[]> {
+	async searchAll(): Promise<import("../src/shared/ports.ts").Pkg[]> {
 		return this.results;
 	}
 	async info(name: string): Promise<PkgInfo> {
@@ -91,8 +91,8 @@ function deps(over: Partial<CliDeps> = {}): CliDeps {
 describe("CLI", () => {
 	it("publishes an executable packed binary", () => {
 		const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { bin?: Record<string, string> };
-		expect(manifest.bin).toEqual({ packed: "src/cli.ts" });
-		expect(readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8").startsWith("#!/usr/bin/env bun\n")).toBe(true);
+		expect(manifest.bin).toEqual({ packed: "src/cli/cli.ts" });
+		expect(readFileSync(new URL("../src/cli/cli.ts", import.meta.url), "utf8").startsWith("#!/usr/bin/env bun\n")).toBe(true);
 	});
 
 	it("security reads and writes stable JSON through the daemon port", async () => {

@@ -2,11 +2,11 @@ import { describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { formatPackReport, NpmPackVerifier, type PackCommand } from "../src/pack.ts";
-import { assessLocalAdoption, assessRegistryAdoption, scoreTarget } from "../src/score.ts";
-import type { PkgInfo, Registry, SearchPage } from "../src/ports.ts";
-import { runBounded } from "../src/publish.ts";
-import { createGithubLastCommitAt, type FetchGithubLastCommitAt } from "../src/commit-freshness.ts";
+import { formatPackReport, NpmPackVerifier, type PackCommand } from "../src/adoption/pack.ts";
+import { assessLocalAdoption, assessRegistryAdoption, scoreTarget } from "../src/adoption/score.ts";
+import type { PkgInfo, Registry, SearchPage } from "../src/shared/ports.ts";
+import { runBounded } from "../src/publish/publish.ts";
+import { createGithubLastCommitAt, type FetchGithubLastCommitAt } from "../src/adoption/commit-freshness.ts";
 
 class FakeRegistry implements Registry {
 	constructor(private info_: PkgInfo, private modifiedByName: Record<string, string | undefined> = {}) {}

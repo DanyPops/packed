@@ -4,8 +4,8 @@
  * disagree with pi.dev/api/latest-version during a package-rename
  * migration (the API's own packageName field exists for exactly that).
  */
-import { runBounded, runInherited, versionAtLeast, type InteractiveRunResult, type VersionCommand, type VersionCommandResult } from "./publish.ts";
-import { defaultPiBin } from "./install.ts";
+import { runBounded, runInherited, versionAtLeast, type InteractiveRunResult, type VersionCommand, type VersionCommandResult } from "../publish/publish.ts";
+import { defaultPiBin } from "../packages/install.ts";
 
 const LATEST_VERSION_URL = "https://pi.dev/api/latest-version";
 const DEFAULT_TIMEOUT_MS = 10_000;

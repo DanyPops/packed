@@ -3,10 +3,10 @@
  * Paginates the upstream registry into the local SQLite mirror and records
  * sync metadata (the Release/repomd checksum role) in sync_meta.
  */
-import type { Pkg, Registry } from "./ports.ts";
-import { PI_PACKAGE_KEYWORD } from "./constants.ts";
+import type { Pkg, Registry } from "../shared/ports.ts";
+import { PI_PACKAGE_KEYWORD } from "../shared/constants.ts";
 import { openDb, replaceAll, getSyncMeta, dbPath } from "./db.ts";
-import { createLogger } from "./log.ts";
+import { createLogger } from "../shared/log.ts";
 
 const log = createLogger("catalog");
 import type { SyncMeta } from "./db.ts";

@@ -1,20 +1,20 @@
 import { startDaemon, runDaemonProcess, type MaintenanceTask, type RunningDaemon, type StartDaemonOptions } from "@danypops/daemon-kit/daemon";
 import { ensureAuthToken } from "@danypops/daemon-kit/paths";
 import { createApp } from "./service.ts";
-import { HttpRegistry } from "./registry.ts";
-import { ExecInstaller } from "./install.ts";
-import { envMs } from "./state.ts";
-import { catalogStatus, syncCatalog } from "./catalog.ts";
-import { openDb, latestVersion } from "./db.ts";
+import { HttpRegistry } from "../registry/registry.ts";
+import { ExecInstaller } from "../packages/install.ts";
+import { envMs } from "../shared/state.ts";
+import { catalogStatus, syncCatalog } from "../packages/catalog.ts";
+import { openDb, latestVersion } from "../packages/db.ts";
 import {
 	ENV, WATCH_INTERVAL_DEFAULT_MS, CATALOG_INTERVAL_DEFAULT_MS, IDLE_BUDGET_DEFAULT_MS, WATCHDOG_TICK_MS,
-} from "./constants.ts";
-import { readInstalledPackages, defaultPiHome } from "./installed.ts";
+} from "../shared/constants.ts";
+import { readInstalledPackages, defaultPiHome } from "../packages/installed.ts";
 import { checkUpdates, saveUpdates } from "./watcher.ts";
-import { createLogger } from "./log.ts";
+import { createLogger } from "../shared/log.ts";
 import { dirname } from "node:path";
-import { legacyPackedStateDirectory, migrateLegacyPackedState, resolvePackedPaths, type PackedPaths } from "./paths.ts";
-import type { Installer, Registry } from "./ports.ts";
+import { legacyPackedStateDirectory, migrateLegacyPackedState, resolvePackedPaths, type PackedPaths } from "../shared/paths.ts";
+import type { Installer, Registry } from "../shared/ports.ts";
 
 const logger = createLogger("daemon");
 

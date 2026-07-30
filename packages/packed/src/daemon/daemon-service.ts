@@ -30,7 +30,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { resolveDaemonPaths } from "@danypops/daemon-kit/paths";
 import { installUserService, type ServiceInstallDeps, type ServiceInstallResult, type ServiceSpec } from "@danypops/daemon-kit/service";
-import { npmPackageName } from "./installed.ts";
+import { npmPackageName } from "../packages/installed.ts";
 
 export interface DaemonServiceManifest {
 	/** Relative to the installed package's own root directory. */

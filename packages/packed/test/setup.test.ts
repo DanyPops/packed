@@ -2,8 +2,8 @@ import { describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bundledEcosystemManifestPath, decodeSetupManifest, SetupManager, type GitResolutionPort, type SetupManifest } from "../src/setup.ts";
-import type { Installer, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/ports.ts";
+import { bundledEcosystemManifestPath, decodeSetupManifest, SetupManager, type GitResolutionPort, type SetupManifest } from "../src/setup/setup.ts";
+import type { Installer, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/shared/ports.ts";
 
 class RegistryFixture implements Registry {
 	async search(): Promise<SearchPage> { return { results: [], total: 0 }; }

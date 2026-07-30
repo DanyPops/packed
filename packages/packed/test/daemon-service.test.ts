@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { detectVehicleDaemonService, resolveDaemonServiceSpec } from "../src/daemon-service.ts";
+import { detectVehicleDaemonService, resolveDaemonServiceSpec } from "../src/daemon/daemon-service.ts";
 
 function fakePiHome(): string {
 	return mkdtempSync(join(tmpdir(), "packed-daemon-service-"));

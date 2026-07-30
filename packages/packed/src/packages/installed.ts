@@ -3,8 +3,8 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { ENV, SETTINGS_FILE } from "./constants.ts";
-import type { InstalledPkg } from "./ports.ts";
+import { ENV, SETTINGS_FILE } from "../shared/constants.ts";
+import type { InstalledPkg } from "../shared/ports.ts";
 
 export function splitNpmSource(spec: string): [name: string, version: string] {
 	const i = spec.lastIndexOf("@");

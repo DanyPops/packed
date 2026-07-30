@@ -7,16 +7,16 @@
  * Detects how this CLI is actually running first. An npm-global install
  * (the real end-user case) gets a real `npm install --global` update. A
  * local git checkout (this repo's own dev setup: the shell wrapper execs
- * `bun .../packed/packages/packed/src/cli.ts` directly, no npm layer at
+ * `bun .../packed/packages/packed/src/cli/cli.ts` directly, no npm layer at
  * all) skips the update step entirely rather than guessing at a git
  * workflow -- but still restarts the service, which is the actual
  * point for that case: pick up already-committed local source changes
  * without a manual `systemctl restart`.
  */
 import { fileURLToPath } from "node:url";
-import { runInherited, type InteractiveRunResult } from "./publish.ts";
-import { VERSION } from "./version.ts";
-import type { Registry } from "./ports.ts";
+import { runInherited, type InteractiveRunResult } from "../publish/publish.ts";
+import { VERSION } from "../shared/version.ts";
+import type { Registry } from "../shared/ports.ts";
 
 export const PACKED_PACKAGE_NAME = "@danypops/packed";
 

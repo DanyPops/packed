@@ -3,9 +3,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthenticatedRpcClient } from "@danypops/daemon-kit/rpc-client";
-import { listPackageResources, toggleResource } from "../src/resources.ts";
-import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/service.ts";
-import type { Installer, Registry, SearchPage, PkgInfo } from "../src/ports.ts";
+import { listPackageResources, toggleResource } from "../src/packages/resources.ts";
+import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/daemon/service.ts";
+import type { Installer, Registry, SearchPage, PkgInfo } from "../src/shared/ports.ts";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

@@ -1,9 +1,9 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import type { PkgInfo, Registry } from "./ports.ts";
+import type { PkgInfo, Registry } from "../shared/ports.ts";
 import { NpmPackVerifier, type PackReport } from "./pack.ts";
-import { satisfiesRange } from "./publish.ts";
-import { resolveCurrentPiVersion } from "./pi-version.ts";
+import { satisfiesRange } from "../publish/publish.ts";
+import { resolveCurrentPiVersion } from "../pi/pi-version.ts";
 import { lastLocalCommitAt, githubLastCommitAt, type FetchGithubLastCommitAt } from "./commit-freshness.ts";
 
 const PI_COMMAND_NAME = "@earendil-works/pi-coding-agent";

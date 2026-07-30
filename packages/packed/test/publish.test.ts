@@ -2,8 +2,8 @@ import { describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { browserOpenCommand, npmWebUrl, PublishManager, renderStageWorkflow, runNpmLoginWeb, satisfiesRange, stageWorkflowFile, type TrustStatusCommand, type VersionCommand } from "../src/publish.ts";
-import type { PkgInfo, Registry, SearchPage } from "../src/ports.ts";
+import { browserOpenCommand, npmWebUrl, PublishManager, renderStageWorkflow, runNpmLoginWeb, satisfiesRange, stageWorkflowFile, type TrustStatusCommand, type VersionCommand } from "../src/publish/publish.ts";
+import type { PkgInfo, Registry, SearchPage } from "../src/shared/ports.ts";
 
 class RegistryFixture implements Registry {
 	constructor(private readonly existing = true) {}

@@ -47,8 +47,8 @@ function addReadOnlyBind(args: string[], path: string): void {
 
 function sandboxCommand(packageRoot: string, extensionPath: string, maxProcesses: number): string[] | undefined {
 	if (process.platform !== "linux" || !existsSync("/usr/bin/bwrap") || !existsSync("/usr/bin/prlimit")) return undefined;
-	const runnerRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-	const childHarness = join(runnerRoot, "src/smoke-child.ts");
+	const runnerRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+	const childHarness = join(runnerRoot, "src/adoption/smoke-child.ts");
 	const runnerModules = join(runnerRoot, "node_modules");
 	const jitiModules = realpathSync(join(runnerModules, "jiti"));
 	const bun = realpathSync(process.execPath);

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { OPERATION_NAMES } from "../src/service.ts";
-import type { SetupApplyResult as CoreSetupApplyResult, SetupPlan as CoreSetupPlan } from "../src/setup.ts";
+import { OPERATION_NAMES } from "../src/daemon/service.ts";
+import type { SetupApplyResult as CoreSetupApplyResult, SetupPlan as CoreSetupPlan } from "../src/setup/setup.ts";
 import type { ExtensionOperationName, SetupApplyResult as PublicSetupApplyResult, SetupPlan as PublicSetupPlan } from "../src/public/protocol.ts";
 
 const publicPlan: PublicSetupPlan = {} as CoreSetupPlan;

@@ -26,7 +26,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       # packages/packed's smoke-mode tests require a real bubblewrap + prlimit
-      # sandbox (see src/smoke.ts) -- not present on GitHub-hosted runners by default.
+      # sandbox (see src/adoption/smoke.ts) -- not present on GitHub-hosted runners by default.
       - run: sudo apt-get update && sudo apt-get install -y bubblewrap util-linux
 
       - run: bun install

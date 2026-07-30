@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { SECURITY_FILE } from "./constants.ts";
+import { SECURITY_FILE } from "../shared/constants.ts";
 
 export const MUTATION_APPROVAL_VALUES = ["always", "never"] as const;
 export type MutationApproval = typeof MUTATION_APPROVAL_VALUES[number];

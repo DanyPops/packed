@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Server } from "bun";
 import { AuthenticatedRpcClient } from "@danypops/daemon-kit/rpc-client";
-import { fetchBulkAdvisories, scanInstalledPackages, PATCHED_VERSION_FRESH_DAYS } from "../src/advisories.ts";
-import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/service.ts";
-import type { Installer, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/ports.ts";
+import { fetchBulkAdvisories, scanInstalledPackages, PATCHED_VERSION_FRESH_DAYS } from "../src/adoption/advisories.ts";
+import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/daemon/service.ts";
+import type { Installer, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/shared/ports.ts";
 
 class NoopRegistry implements Registry {
 	async search(): Promise<SearchPage> { return { results: [], total: 0 }; }
@@ -166,7 +166,7 @@ describe("scanInstalledPackages", () => {
 	it("never executes package code -- scanning is pure metadata comparison", async () => {
 		// no eval/require/child_process anywhere in the module; structural
 		// guarantee, not just an assertion about this one test run
-		const source = await Bun.file(new URL("../src/advisories.ts", import.meta.url)).text();
+		const source = await Bun.file(new URL("../src/adoption/advisories.ts", import.meta.url)).text();
 		expect(source).not.toMatch(/\brequire\(|child_process|Bun\.spawn|eval\(/);
 	});
 });

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { detectSelfInstallMethod, runSelfUpdate, PACKED_PACKAGE_NAME, type SelfUpdateDeps } from "../src/self-update.ts";
-import type { InteractiveRunResult } from "../src/publish.ts";
-import type { PkgInfo, Registry } from "../src/ports.ts";
-import { VERSION } from "../src/version.ts";
+import { detectSelfInstallMethod, runSelfUpdate, PACKED_PACKAGE_NAME, type SelfUpdateDeps } from "../src/self-update/self-update.ts";
+import type { InteractiveRunResult } from "../src/publish/publish.ts";
+import type { PkgInfo, Registry } from "../src/shared/ports.ts";
+import { VERSION } from "../src/shared/version.ts";
 
 class FakeRegistry implements Pick<Registry, "info"> {
 	constructor(private version: string) {}

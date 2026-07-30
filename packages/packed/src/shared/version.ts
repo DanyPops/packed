@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 
 function packageVersion(): string {
-	const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as unknown;
+	const manifest = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as unknown;
 	if (typeof manifest !== "object" || manifest === null || Array.isArray(manifest)) {
 		throw new Error("packed package manifest must be an object");
 	}

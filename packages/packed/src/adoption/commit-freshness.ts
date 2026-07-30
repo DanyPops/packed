@@ -5,7 +5,7 @@
  * pre-install registry candidate (bounded, single attempt, GitHub-only).
  * Both resolve to undefined on any failure -- never throw, never guess.
  */
-import { runBounded } from "./publish.ts";
+import { runBounded } from "../publish/publish.ts";
 
 const GITHUB_API_BASE = "https://api.github.com";
 const GITHUB_COMMITS_TIMEOUT_MS = 8_000;

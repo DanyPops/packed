@@ -11,7 +11,7 @@
  */
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { isContainedFile } from "./check.ts";
+import { isContainedFile } from "../adoption/check.ts";
 
 export const MAX_CLEANUP_ENTRIES = 50;
 export const MAX_CLEANUP_PATH_BYTES = 512;

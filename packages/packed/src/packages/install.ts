@@ -1,6 +1,6 @@
 /** install.ts — driven adapter: pi CLI mutations via Bun.spawn. */
 import { defaultPiHome, isPinnedNpmSource, readResolvedVersion } from "./installed.ts";
-import type { Installer, UpdateOutcome } from "./ports.ts";
+import type { Installer, UpdateOutcome } from "../shared/ports.ts";
 
 /** Bare npm package name (for `packed remove`). */
 export const NAME_RE = /^(@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._-]+$/;

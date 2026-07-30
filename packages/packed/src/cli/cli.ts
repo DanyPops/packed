@@ -1,36 +1,36 @@
 #!/usr/bin/env bun
 /**
- * cli.ts — second driving adapter (humans drive the same hexagon ports).
+ * cli.ts — the CLI entry point; drives the same shared ports (registry, installer, security) the HTTP service also drives.
  * cliRun is pure: ({code, out}) in, no I/O — the entry point prints.
  * Command table follows the go-tool/Cobra convention; flags may appear
  * anywhere (agents put them anywhere).
  */
-import { buildSearchQuery, clampLimit } from "./ports.ts";
-import type { Installer, Pkg, Registry } from "./ports.ts";
-import type { PackageDaemonPort } from "./client.ts";
-import { checkPackage, formatCheckReport } from "./check.ts";
-import { NpmPackVerifier, formatPackReport, type PackReport } from "./pack.ts";
-import { formatAdoptionReport, scoreTarget, type AdoptionReport } from "./score.ts";
-import { formatPublishReport, npmWebUrl, openBrowser, PublishManager, runInherited, runNpmLoginWeb, type PublishSetupReport, type PublishStatusReport } from "./publish.ts";
-import { bundledEcosystemManifestPath, formatSetupReport, SetupManager, type SetupApplyResult, type SetupExportReport, type SetupPlan, type SetupUpdateReport } from "./setup.ts";
+import { buildSearchQuery, clampLimit } from "../shared/ports.ts";
+import type { Installer, Pkg, Registry } from "../shared/ports.ts";
+import type { PackageDaemonPort } from "../daemon/client.ts";
+import { checkPackage, formatCheckReport } from "../adoption/check.ts";
+import { NpmPackVerifier, formatPackReport, type PackReport } from "../adoption/pack.ts";
+import { formatAdoptionReport, scoreTarget, type AdoptionReport } from "../adoption/score.ts";
+import { formatPublishReport, npmWebUrl, openBrowser, PublishManager, runInherited, runNpmLoginWeb, type PublishSetupReport, type PublishStatusReport } from "../publish/publish.ts";
+import { bundledEcosystemManifestPath, formatSetupReport, SetupManager, type SetupApplyResult, type SetupExportReport, type SetupPlan, type SetupUpdateReport } from "../setup/setup.ts";
 import { resolve } from "node:path";
-import { npmPackageName, readInstalledPackages } from "./installed.ts";
-import { checkUpdates } from "./watcher.ts";
-import { checkPiVersion, runPiStatusInteractive, runPiUpdateSelf, type PiVersionReport } from "./pi-version.ts";
-import { listPackageResources, resolveToggleSettingsPath, toggleResource, RESOURCE_FIELDS, type PackageResources, type ResourceField } from "./resources.ts";
-import { scanInstalledPackages, resolveInstalledVersions, formatAdvisoryReport } from "./advisories.ts";
+import { npmPackageName, readInstalledPackages } from "../packages/installed.ts";
+import { checkUpdates } from "../daemon/watcher.ts";
+import { checkPiVersion, runPiStatusInteractive, runPiUpdateSelf, type PiVersionReport } from "../pi/pi-version.ts";
+import { listPackageResources, resolveToggleSettingsPath, toggleResource, RESOURCE_FIELDS, type PackageResources, type ResourceField } from "../packages/resources.ts";
+import { scanInstalledPackages, resolveInstalledVersions, formatAdvisoryReport } from "../adoption/advisories.ts";
 import { existsSync } from "node:fs";
-import { syncCatalog } from "./catalog.ts";
-import { openDb, searchLocal, catalogList, getSyncMeta, latestVersion, dbPath } from "./db.ts";
-import { NAME_RE, defaultPiBin } from "./install.ts";
+import { syncCatalog } from "../packages/catalog.ts";
+import { openDb, searchLocal, catalogList, getSyncMeta, latestVersion, dbPath } from "../packages/db.ts";
+import { NAME_RE, defaultPiBin } from "../packages/install.ts";
 import {
 	assertPackagePermission,
 	packageOperationClassification,
 	type MutationApproval,
 	type PackageOperation,
 	type SecuritySettingsPort,
-} from "./security.ts";
-import { runSelfUpdate, type SelfUpdateReport } from "./self-update.ts";
+} from "../security/security.ts";
+import { runSelfUpdate, type SelfUpdateReport } from "../self-update/self-update.ts";
 
 /** A generated unit must never trust a bare "pi" resolving under systemd's
  * own restricted PATH just because it resolves in the shell that generated
@@ -45,8 +45,8 @@ function defaultPiBinForUnit(): string | undefined {
 }
 import {
 	SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT, NPM_REGISTRY_BASE, SEARCH_PAGE_SIZE, MIRROR_PAGE_DELAY_MS,
-} from "./constants.ts";
-import { VERSION } from "./version.ts";
+} from "../shared/constants.ts";
+import { VERSION } from "../shared/version.ts";
 
 const SOURCE_RE = /^(npm:[A-Za-z0-9@._/-]+|git:[A-Za-z0-9@:._/-]+|https:\/\/[A-Za-z0-9@:._/?=&%~-]+)$/;
 
@@ -638,7 +638,7 @@ export async function cliRun(args: string[], d: CliDeps): Promise<CliResult> {
 	}
 }
 
-// Entry point (bun src/cli.ts …). `serve` is dispatched before any proxying
+// Entry point (bun src/cli/cli.ts …). `serve` is dispatched before any proxying
 // so the daemon always talks directly to npm.
 /** Bounded, TTY-only y/n prompt -- never invoked non-interactively, never
  * assumes an answer. Lives outside cliRun so the pure command table never
@@ -698,20 +698,20 @@ async function runPublishInteractive(path: string, reg: Registry, openBrowserAut
 if (import.meta.main) {
 	const args = process.argv.slice(2);
 	if (args[0] === "serve") {
-		const { serveMain } = await import("./daemon.ts");
+		const { serveMain } = await import("../daemon/daemon.ts");
 		serveMain();
 	} else {
-		const { migrateLegacyPackedState, resolvePackedPaths } = await import("./paths.ts");
+		const { migrateLegacyPackedState, resolvePackedPaths } = await import("../shared/paths.ts");
 		const { dirname } = await import("node:path");
-		const { defaultPiHome } = await import("./installed.ts");
-		const { connectPackageDaemon, DaemonBackedSecurity, DaemonBackedInstaller, DaemonBackedDaemonServiceInstaller, resolveRegistry } = await import("./client.ts");
+		const { defaultPiHome } = await import("../packages/installed.ts");
+		const { connectPackageDaemon, DaemonBackedSecurity, DaemonBackedInstaller, DaemonBackedDaemonServiceInstaller, resolveRegistry } = await import("../daemon/client.ts");
 		const paths = resolvePackedPaths();
 		migrateLegacyPackedState(paths);
 		const dir = paths.stateDirectory;
 		// mirror talks to UPSTREAM, not the daemon cache — apt update semantics.
 		const reg =
 			args[0] === "mirror"
-				? new (await import("./registry.ts")).HttpRegistry(NPM_REGISTRY_BASE, SEARCH_PAGE_SIZE, MIRROR_PAGE_DELAY_MS)
+				? new (await import("../registry/registry.ts")).HttpRegistry(NPM_REGISTRY_BASE, SEARCH_PAGE_SIZE, MIRROR_PAGE_DELAY_MS)
 				: await resolveRegistry(paths, NPM_REGISTRY_BASE);
 		const daemon = await connectPackageDaemon(paths).catch(() => undefined);
 		const { code, out } = await cliRun(args, {

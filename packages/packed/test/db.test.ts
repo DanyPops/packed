@@ -2,10 +2,10 @@ import { describe, it, expect } from "bun:test";
 import { mkdtempSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openDb, replaceAll, searchLocal, catalogList, getSyncMeta, dbPath } from "../src/db.ts";
-import { HttpRegistry } from "../src/registry.ts";
-import { syncCatalog } from "../src/catalog.ts";
-import type { Registry, SearchPage, PkgInfo, Pkg } from "../src/ports.ts";
+import { openDb, replaceAll, searchLocal, catalogList, getSyncMeta, dbPath } from "../src/packages/db.ts";
+import { HttpRegistry } from "../src/registry/registry.ts";
+import { syncCatalog } from "../src/packages/catalog.ts";
+import type { Registry, SearchPage, PkgInfo, Pkg } from "../src/shared/ports.ts";
 
 const PKGS = [
 	{ name: "pi-lsp", version: "0.18.0", description: "LSP tools for pi" },

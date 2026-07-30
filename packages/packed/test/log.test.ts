@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { createLogger, type LogSink } from "../src/log.ts";
+import { createLogger, type LogSink } from "../src/shared/log.ts";
 
 function capture(): { lines: string[]; sink: LogSink } {
 	const lines: string[] = [];

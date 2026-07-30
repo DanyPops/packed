@@ -8,8 +8,8 @@
  */
 import { satisfies, valid, compare } from "semver";
 import type { Diagnostic } from "./check.ts";
-import { NPM_REGISTRY_BASE, REGISTRY_FETCH_TIMEOUT_MS } from "./constants.ts";
-import { readInstalledPackages, readResolvedVersion } from "./installed.ts";
+import { NPM_REGISTRY_BASE, REGISTRY_FETCH_TIMEOUT_MS } from "../shared/constants.ts";
+import { readInstalledPackages, readResolvedVersion } from "../packages/installed.ts";
 
 const BULK_ADVISORY_PATH = "/-/npm/v1/security/advisories/bulk";
 const MAX_PACKAGES_PER_SCAN = 200;

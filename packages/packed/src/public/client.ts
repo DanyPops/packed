@@ -149,7 +149,7 @@ export async function ensurePackedClient(paths = resolvePackedClientPaths(), tra
 		spawn: () => {
 			const override = process.env.PI_PACKED_BIN;
 			const command = override ?? process.env.PI_PACKED_BUN ?? "bun";
-			const args = override ? ["serve"] : [join(dirname(fileURLToPath(import.meta.url)), "../src/cli.ts"), "serve"];
+			const args = override ? ["serve"] : [join(dirname(fileURLToPath(import.meta.url)), "../src/cli/cli.ts"), "serve"];
 			const child = spawn(command, args, {
 				detached: true,
 				stdio: "ignore",

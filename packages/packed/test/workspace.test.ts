@@ -15,7 +15,7 @@ describe("Packed workspace boundary", () => {
 		expect(root).toMatchObject({ private: true, workspaces: ["packages/*"] });
 		expect(root.pi).toBeUndefined();
 		expect(root.bin).toBeUndefined();
-		expect(core).toMatchObject({ name: "@danypops/packed", bin: { packed: "src/cli.ts" } });
+		expect(core).toMatchObject({ name: "@danypops/packed", bin: { packed: "src/cli/cli.ts" } });
 		expect(typeof core.version).toBe("string");
 		expect(core.pi).toBeUndefined();
 		expect(core.files).toEqual(["src", "dist", "schema", "setup", "README.md"]);

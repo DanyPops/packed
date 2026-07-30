@@ -3,8 +3,8 @@ import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { runExtensionSmoke } from "../src/smoke.ts";
-import { checkPackage } from "../src/check.ts";
+import { runExtensionSmoke } from "../src/adoption/smoke.ts";
+import { checkPackage } from "../src/adoption/check.ts";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -15,7 +15,7 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
  * bubblewrap package but block the unprivileged user namespaces it needs,
  * so every real invocation fails at runtime with no way to tell from just
  * `existsSync`. Probing for real is the only way to know, and it mirrors
- * src/smoke.ts's own fail-closed philosophy: skip the suite rather than
+ * src/adoption/smoke.ts's own fail-closed philosophy: skip the suite rather than
  * assert against a sandbox this host can't actually provide.
  */
 function bwrapUsable(): boolean {

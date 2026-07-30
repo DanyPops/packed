@@ -4,14 +4,14 @@
   "description": "Standalone package lifecycle, validation, catalog, setup, and daemon service for Pi packages",
   "type": "module",
   "bin": {
-    "packed": "src/cli.ts"
+    "packed": "src/cli/cli.ts"
   },
   "scripts": {
     "build": "rm -rf dist && bun build src/public/client.ts src/public/protocol.ts --outdir dist --target node --format esm --minify && bunx tsc -p tsconfig.public.json",
     "test": "bun run build && bun test test",
     "typecheck": "bunx tsc --noEmit",
-    "cli": "bun src/cli.ts",
-    "serve": "bun src/cli.ts serve"
+    "cli": "bun src/cli/cli.ts",
+    "serve": "bun src/cli/cli.ts serve"
   },
   "dependencies": {
     "@danypops/daemon-kit": "^0.12.0",

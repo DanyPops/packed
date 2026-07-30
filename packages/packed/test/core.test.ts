@@ -2,10 +2,10 @@ import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildSearchQuery, clampLimit } from "../src/ports.ts";
-import { TTLCache } from "../src/cache.ts";
-import { envMs } from "../src/state.ts";
-import { HttpRegistry } from "../src/registry.ts";
+import { buildSearchQuery, clampLimit } from "../src/shared/ports.ts";
+import { TTLCache } from "../src/shared/cache.ts";
+import { envMs } from "../src/shared/state.ts";
+import { HttpRegistry } from "../src/registry/registry.ts";
 import type { Server } from "bun";
 
 describe("buildSearchQuery", () => {

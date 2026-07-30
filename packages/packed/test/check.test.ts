@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { checkPackage, discoverPackageResources, formatCheckReport, type Diagnostic } from "../src/check.ts";
+import { checkPackage, discoverPackageResources, formatCheckReport, type Diagnostic } from "../src/adoption/check.ts";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -133,7 +133,7 @@ describe("static capability and lifecycle-script signals (packed check)", () => 
 	});
 
 	it("never executes the scanned source -- purely a text scan (structural guarantee on the check function itself)", async () => {
-		const source = await Bun.file(new URL("../src/check.ts", import.meta.url)).text();
+		const source = await Bun.file(new URL("../src/adoption/check.ts", import.meta.url)).text();
 		const capabilityCheckBody = source.slice(source.indexOf("function capabilityCheck"), source.indexOf("function capabilityCheck") + 1200);
 		expect(capabilityCheckBody).not.toMatch(/\brequire\(|import\s*\(|eval\(|Bun\.spawn|child_process/);
 	});

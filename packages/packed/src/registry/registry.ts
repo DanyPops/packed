@@ -2,11 +2,11 @@
  * registry.ts — driven adapter: npm registry over HTTP (web-standard fetch).
  * Lean mapping = Facade over npm's verbose package documents.
  */
-import type { DownloadObservations, Pkg, PkgInfo, Registry, SearchPage } from "./ports.ts";
+import type { DownloadObservations, Pkg, PkgInfo, Registry, SearchPage } from "../shared/ports.ts";
 import {
 	NPM_REGISTRY_BASE, SEARCH_PAGE_SIZE, RETRY_MAX_ATTEMPTS, RETRY_BASE_DELAY_MS, PAGE_DELAY_MS, REGISTRY_FETCH_TIMEOUT_MS,
-} from "./constants.ts";
-import { createLogger } from "./log.ts";
+} from "../shared/constants.ts";
+import { createLogger } from "../shared/log.ts";
 
 const log = createLogger("registry");
 

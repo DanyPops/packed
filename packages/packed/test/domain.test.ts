@@ -2,11 +2,11 @@ import { describe, it, expect } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isPinnedNpmSource, npmPackageName, readInstalledPackages, readResolvedVersion, splitNpmSource } from "../src/installed.ts";
-import { checkUpdates, saveUpdates, loadUpdates, startWatcher } from "../src/watcher.ts";
-import { catalogStatus } from "../src/catalog.ts";
-import { openDb, replaceAll } from "../src/db.ts";
-import type { PkgInfo, Registry, SearchPage } from "../src/ports.ts";
+import { isPinnedNpmSource, npmPackageName, readInstalledPackages, readResolvedVersion, splitNpmSource } from "../src/packages/installed.ts";
+import { checkUpdates, saveUpdates, loadUpdates, startWatcher } from "../src/daemon/watcher.ts";
+import { catalogStatus } from "../src/packages/catalog.ts";
+import { openDb, replaceAll } from "../src/packages/db.ts";
+import type { PkgInfo, Registry, SearchPage } from "../src/shared/ports.ts";
 
 class FakeRegistry implements Registry {
 	infoCalls = 0;
@@ -20,8 +20,8 @@ class FakeRegistry implements Registry {
 	async searchPage(_q: string, from: number, _size?: number): Promise<SearchPage> {
 		return this.pages[from] ?? { results: [], total: 0 };
 	}
-	async searchAll(q: string): Promise<import("../src/ports.ts").Pkg[]> {
-		const out: import("../src/ports.ts").Pkg[] = [];
+	async searchAll(q: string): Promise<import("../src/shared/ports.ts").Pkg[]> {
+		const out: import("../src/shared/ports.ts").Pkg[] = [];
 		let from = 0;
 		for (;;) {
 			const { results, total } = await this.searchPage(q, from, 0);

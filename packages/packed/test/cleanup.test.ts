@@ -3,9 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthenticatedRpcClient } from "@danypops/daemon-kit/rpc-client";
-import { formatCleanupSummary, readCleanupManifest, runCleanup } from "../src/cleanup.ts";
-import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/service.ts";
-import type { Installer, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/ports.ts";
+import { formatCleanupSummary, readCleanupManifest, runCleanup } from "../src/daemon/cleanup.ts";
+import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/daemon/service.ts";
+import type { Installer, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/shared/ports.ts";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

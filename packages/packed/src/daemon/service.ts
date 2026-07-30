@@ -1,28 +1,28 @@
 /**
- * service.ts — the hexagon's HTTP driving adapter as a pure Web Standard
+ * service.ts — the HTTP entry point into the daemon, as a pure Web Standard
  * handler: (Request) → Response. Bun.serve wraps it for the network;
  * tests call it in-process. Same port, two adapters — Cockburn's symmetry.
  */
 import { errorResponse, healthResponse, jsonResponse, readyResponse, requireBearerToken } from "@danypops/daemon-kit/http";
-import { buildSearchQuery, clampLimit } from "./ports.ts";
-import type { InstalledPkg, Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome, UpdatesSnapshot } from "./ports.ts";
-import { TTLCache } from "./cache.ts";
-import { syncCatalog } from "./catalog.ts";
+import { buildSearchQuery, clampLimit } from "../shared/ports.ts";
+import type { InstalledPkg, Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome, UpdatesSnapshot } from "../shared/ports.ts";
+import { TTLCache } from "../shared/cache.ts";
+import { syncCatalog } from "../packages/catalog.ts";
 import { loadUpdates } from "./watcher.ts";
-import { readInstalledPackages, defaultPiHome } from "./installed.ts";
-import { openDb, searchLocal, catalogList, getSyncMeta, dbPath } from "./db.ts";
-import { SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT } from "./constants.ts";
-import { VERSION } from "./version.ts";
-import { createLogger } from "./log.ts";
-import { StaticPackageChecker, type CheckReport, type PackageChecker } from "./check.ts";
-import { NpmPackVerifier, type PackReport } from "./pack.ts";
-import { scoreTarget, type AdoptionReport } from "./score.ts";
-import { SetupManager, type SetupApplyResult, type SetupExportReport, type SetupPlan, type SetupUpdateReport } from "./setup.ts";
-import { listPackageResources, resolveToggleSettingsPath, toggleResource, RESOURCE_FIELDS, type PackageResources, type ResourceField } from "./resources.ts";
-import { checkPiVersion, type PiVersionReport } from "./pi-version.ts";
+import { readInstalledPackages, defaultPiHome } from "../packages/installed.ts";
+import { openDb, searchLocal, catalogList, getSyncMeta, dbPath } from "../packages/db.ts";
+import { SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT } from "../shared/constants.ts";
+import { VERSION } from "../shared/version.ts";
+import { createLogger } from "../shared/log.ts";
+import { StaticPackageChecker, type CheckReport, type PackageChecker } from "../adoption/check.ts";
+import { NpmPackVerifier, type PackReport } from "../adoption/pack.ts";
+import { scoreTarget, type AdoptionReport } from "../adoption/score.ts";
+import { SetupManager, type SetupApplyResult, type SetupExportReport, type SetupPlan, type SetupUpdateReport } from "../setup/setup.ts";
+import { listPackageResources, resolveToggleSettingsPath, toggleResource, RESOURCE_FIELDS, type PackageResources, type ResourceField } from "../packages/resources.ts";
+import { checkPiVersion, type PiVersionReport } from "../pi/pi-version.ts";
 import { formatCleanupSummary, runCleanup } from "./cleanup.ts";
-import { resolveInstalledDir } from "./resources.ts";
-import { scanInstalledPackages, resolveInstalledVersions, type AdvisoryReport } from "./advisories.ts";
+import { resolveInstalledDir } from "../packages/resources.ts";
+import { scanInstalledPackages, resolveInstalledVersions, type AdvisoryReport } from "../adoption/advisories.ts";
 import { join as joinPath } from "node:path";
 import { existsSync as fileExistsSync } from "node:fs";
 import { RealDaemonServiceInstaller, type DaemonServiceInstaller } from "./daemon-service.ts";
@@ -34,7 +34,7 @@ import {
 	writeSecuritySettings,
 	type MutationApproval,
 	type PackageOperation,
-} from "./security.ts";
+} from "../security/security.ts";
 
 const log = createLogger("service");
 

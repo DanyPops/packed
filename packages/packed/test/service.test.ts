@@ -2,12 +2,12 @@ import { describe, it, expect } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createApp, type Deps } from "../src/service.ts";
-import type { DaemonServiceInstaller } from "../src/daemon-service.ts";
+import { createApp, type Deps } from "../src/daemon/service.ts";
+import type { DaemonServiceInstaller } from "../src/daemon/daemon-service.ts";
 import type { ServiceSpec } from "@danypops/daemon-kit/service";
-import { saveUpdates } from "../src/watcher.ts";
-import { openDb, replaceAll, dbPath } from "../src/db.ts";
-import type { Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/ports.ts";
+import { saveUpdates } from "../src/daemon/watcher.ts";
+import { openDb, replaceAll, dbPath } from "../src/packages/db.ts";
+import type { Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/shared/ports.ts";
 
 class FakeRegistry implements Registry {
 	searchCalls = 0;
@@ -28,7 +28,7 @@ class FakeRegistry implements Registry {
 	async searchPage(): Promise<SearchPage> {
 		return { results: this.results, total: this.total };
 	}
-	async searchAll(): Promise<import("../src/ports.ts").Pkg[]> {
+	async searchAll(): Promise<import("../src/shared/ports.ts").Pkg[]> {
 		return this.results;
 	}
 	async info(name: string): Promise<PkgInfo> {

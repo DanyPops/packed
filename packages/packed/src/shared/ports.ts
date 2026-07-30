@@ -1,7 +1,8 @@
 /**
- * ports.ts — the hexagon's driven ports and lean domain types.
- * Driving adapters: HTTP service (service.ts), CLI (cli.ts), watcher,
- * tests. Driven adapters: registry.ts (npm), install.ts (pi exec).
+ * ports.ts — shared interfaces (ports) and lean domain types that decouple
+ * callers (the HTTP service, the CLI, the watcher, tests) from concrete
+ * implementations (registry/registry.ts talks to npm; packages/install.ts
+ * shells out to pi).
  */
 
 export type PackageVerification = "keyword-only" | "manifest" | "conventional";

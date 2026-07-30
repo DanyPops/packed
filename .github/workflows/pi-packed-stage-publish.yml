@@ -29,6 +29,10 @@ jobs:
         with:
           bun-version: "1.3.14"
       - run: bun install --frozen-lockfile --ignore-scripts
+      # --ignore-scripts skips @danypops/packed's own build; its dist/
+      # subpath exports (client.js, protocol.js) must exist before
+      # pi-packed can typecheck/test against them.
+      - run: bun run --cwd packages/packed build
       - name: Verify @danypops/packed@^0.1.0 is already published (core-first ordering)
         run: |
           version=$(node -p "require('./node_modules/@danypops/packed/package.json').version")

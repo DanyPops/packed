@@ -13,7 +13,8 @@
   },
   "dependencies": {
     "@danypops/packed": "^0.1.0",
-    "@danypops/daemon-kit": "^0.12.0"
+    "@danypops/vehicle-client": "^0.1.1",
+    "@danypops/vehicle-client-pi": "^0.1.5"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

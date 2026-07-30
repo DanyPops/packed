@@ -3,7 +3,7 @@
  * handler: (Request) → Response. Bun.serve wraps it for the network;
  * tests call it in-process. Same port, two adapters — Cockburn's symmetry.
  */
-import { errorResponse, healthResponse, jsonResponse, readyResponse, requireBearerToken } from "@danypops/daemon-kit/http";
+import { errorResponse, healthResponse, jsonResponse, readyResponse, requireBearerToken } from "@danypops/vehicle-server/rpc-http";
 import { buildSearchQuery, clampLimit } from "../shared/ports.ts";
 import type { InstalledPkg, Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome, UpdatesSnapshot } from "../shared/ports.ts";
 import { TTLCache } from "../shared/cache.ts";
@@ -27,7 +27,7 @@ import { scanInstalledPackages, resolveInstalledVersions, type AdvisoryReport } 
 import { join as joinPath } from "node:path";
 import { existsSync as fileExistsSync } from "node:fs";
 import { RealDaemonServiceInstaller, type DaemonServiceInstaller } from "./daemon-service.ts";
-import type { ServiceInstallResult, ServiceSpec } from "@danypops/daemon-kit/service";
+import type { ServiceInstallResult, ServiceSpec } from "@danypops/vehicle-server/service";
 import {
 	assertPackagePermission,
 	PackageApprovalRequiredError,

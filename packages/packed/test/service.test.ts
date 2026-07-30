@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, type Deps } from "../src/daemon/service.ts";
 import type { DaemonServiceInstaller } from "../src/daemon/daemon-service.ts";
-import type { ServiceSpec } from "@danypops/daemon-kit/service";
+import type { ServiceSpec } from "@danypops/vehicle-server/service";
 import { saveUpdates } from "../src/daemon/watcher.ts";
 import { openDb, replaceAll, dbPath } from "../src/packages/db.ts";
 import type { Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/shared/ports.ts";

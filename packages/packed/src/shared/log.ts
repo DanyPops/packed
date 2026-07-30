@@ -3,12 +3,12 @@ import {
 	type LogFields,
 	type LogLevel,
 	type Logger,
-} from "@danypops/daemon-kit/logging";
+} from "@danypops/vehicle-server/logging";
 
 export type { LogFields, LogLevel, Logger };
 export type LogSink = (line: string) => void;
 
-/** Keeps Packed's injectable test sink while delegating level handling and serialization to daemon-kit. */
+/** Keeps Packed's injectable test sink while delegating level handling and serialization to vehicle-server. */
 export function createLogger(component: string, sink?: LogSink, minLevel?: LogLevel): Logger {
 	const destination = sink
 		? { write(chunk: string) { sink(chunk.trimEnd()); return true; } }

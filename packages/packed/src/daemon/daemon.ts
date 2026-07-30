@@ -1,5 +1,5 @@
-import { startDaemon, runDaemonProcess, type MaintenanceTask, type RunningDaemon, type StartDaemonOptions } from "@danypops/daemon-kit/daemon";
-import { ensureAuthToken } from "@danypops/daemon-kit/paths";
+import { startDaemon, runDaemonProcess, type MaintenanceTask, type RunningDaemon, type StartDaemonOptions } from "@danypops/vehicle-server/daemon";
+import { ensureAuthToken } from "@danypops/vehicle-server/paths";
 import { createApp } from "./service.ts";
 import { HttpRegistry } from "../registry/registry.ts";
 import { ExecInstaller } from "../packages/install.ts";

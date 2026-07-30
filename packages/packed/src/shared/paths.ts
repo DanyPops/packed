@@ -1,7 +1,7 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { type DaemonPaths, type PathEnvironment, resolveDaemonPaths } from "@danypops/daemon-kit/paths";
+import { type DaemonPaths, type PathEnvironment, resolveDaemonPaths } from "@danypops/vehicle-server/paths";
 import { DB_FILE, ENV, SECURITY_FILE, SETTINGS_FILE, UPDATES_FILE } from "./constants.ts";
 
 const PATH_NAMES = {
@@ -72,7 +72,7 @@ function copyDatabaseIfMissing(source: string, destination: string): void {
 	}
 }
 
-/** Keeps existing installs usable while moving process discovery into daemon-kit's XDG split. */
+/** Keeps existing installs usable while moving process discovery into vehicle-server's XDG split. */
 export function migrateLegacyPackedState(paths: PackedPaths, legacyDirectory = legacyPackedStateDirectory()): void {
 	if (resolve(legacyDirectory) === resolve(paths.stateDirectory)) return;
 	copyDatabaseIfMissing(join(legacyDirectory, DB_FILE), paths.database);
@@ -83,6 +83,6 @@ export function migrateLegacyPackedState(paths: PackedPaths, legacyDirectory = l
 	try {
 		if (/^[a-f0-9]{64}$/.test(readFileSync(legacyToken, "utf8").trim())) copyIfMissing(legacyToken, paths.token);
 	} catch {
-		// Old Packed tokens were 128-bit. daemon-kit intentionally rotates them to 256-bit.
+		// Old Packed tokens were 128-bit. vehicle-server intentionally rotates them to 256-bit.
 	}
 }

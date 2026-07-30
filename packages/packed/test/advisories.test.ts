@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Server } from "bun";
-import { AuthenticatedRpcClient } from "@danypops/daemon-kit/rpc-client";
+import { AuthenticatedRpcClient } from "@danypops/vehicle-client/rpc-client";
 import { fetchBulkAdvisories, scanInstalledPackages, PATCHED_VERSION_FRESH_DAYS } from "../src/adoption/advisories.ts";
 import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/daemon/service.ts";
 import type { Installer, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/shared/ports.ts";

@@ -1,6 +1,6 @@
 /**
  * daemon-service.ts — resolves an installed npm package's own persistent-
- * daemon declaration into a real daemon-kit ServiceSpec, and installs it
+ * daemon declaration into a real vehicle-server ServiceSpec, and installs it
  * through the exact same systemd/launchd/Registry mechanism that
  * package's own `<bin> service install` command already uses (daemon-
  * kit's installUserService()), so the two are fully interchangeable for
@@ -28,8 +28,8 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { resolveDaemonPaths } from "@danypops/daemon-kit/paths";
-import { installUserService, type ServiceInstallDeps, type ServiceInstallResult, type ServiceSpec } from "@danypops/daemon-kit/service";
+import { resolveDaemonPaths } from "@danypops/vehicle-server/paths";
+import { installUserService, type ServiceInstallDeps, type ServiceInstallResult, type ServiceSpec } from "@danypops/vehicle-server/service";
 import { npmPackageName } from "../packages/installed.ts";
 
 export interface DaemonServiceManifest {
@@ -80,7 +80,7 @@ function firstBinPath(pkg: InstalledPackageJson): string | undefined {
 	return undefined;
 }
 
-/** @danypops/vehicle-server is the current substrate; @danypops/daemon-kit is the pre-absorption package name several real daemons (web-spider, packed, enigma) still depend on as of this module's introduction -- both are real, live signals, not just the current one. */
+/** @danypops/vehicle-server is the current substrate; @danypops/daemon-kit is the pre-absorption package name -- a real, live signal for any not-yet-migrated ecosystem package (or an older installed version of an already-migrated one), not just a historical artifact. */
 const VEHICLE_DEPENDENCY_NAMES = ["@danypops/vehicle-server", "@danypops/daemon-kit"];
 
 function dependsOnVehicle(pkg: InstalledPackageJson): boolean {
@@ -176,7 +176,7 @@ export function resolveDaemonServiceSpec(piHome: string, source: string): Resolv
 	return { ok: false, notADaemon: true, reason: `${packageName} does not declare a packed.daemonService manifest and no Vehicle-shaped daemon dependency was detected` };
 }
 
-/** Real (non-test) ServiceInstallDeps -- node:fs/node:child_process, mirroring the same shape daemon-kit's own service.test.ts fakes for tests. */
+/** Real (non-test) ServiceInstallDeps -- node:fs/node:child_process, mirroring the same shape vehicle-server's own service.test.ts fakes for tests. */
 export function realServiceInstallDeps(): ServiceInstallDeps {
 	return {
 		writeFile: (path, content) => writeFileSync(path, content, "utf8"),

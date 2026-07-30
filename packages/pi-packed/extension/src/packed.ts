@@ -5,11 +5,11 @@
  * `Bun`. All registry reads, SQLite access, and package mutations therefore
  * stay inside the supervised Bun daemon. A restarted daemon binds a new
  * port/token, which would otherwise leave a stale cached client behind for
- * the rest of the Pi session -- daemon-kit's createRetryingClient detects
+ * the rest of the Pi session -- vehicle-client's createRetryingClient detects
  * that on the failing call itself and reconnects, so the happy path reuses
  * one connected client instead of reconnecting on every single operation.
  */
-import { createRetryingClient } from "@danypops/daemon-kit/pi-client";
+import { createRetryingClient } from "@danypops/vehicle-client/daemon-client";
 import { ensurePackedClient, InstallServiceError, type PackedExtensionClient } from "@danypops/packed/client";
 import { PI_COMMAND_NAME, type InstalledPackage, type PackageInfo, type PackageResources, type PackageSummary, type PiStatus, type ResourceField, type SecuritySettings, type ServiceSpecSummary, type SetupApplyResult, type SetupPlan, type UpdateEntry, type UpdateOutcome } from "@danypops/packed/protocol";
 

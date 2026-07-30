@@ -2,9 +2,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AuthenticatedRpcClient } from "@danypops/daemon-kit/rpc-client";
-import { readDaemonHandle, resolveDaemonPaths } from "@danypops/daemon-kit/paths";
-import { isServiceInstalled as daemonKitIsServiceInstalled } from "@danypops/daemon-kit/service";
+import { AuthenticatedRpcClient } from "@danypops/vehicle-client/rpc-client";
+import { readDaemonHandle, resolveDaemonPaths } from "@danypops/vehicle-server/paths";
+import { isServiceInstalled as vehicleIsServiceInstalled } from "@danypops/vehicle-server/service";
 import type { ExtensionOperationInputs, ExtensionOperationName, ExtensionOperationOutputs, PackageInfo, PackageResources, PackageSummary, PiStatus, ResourceField, SecuritySettings, ServiceSpecSummary, SetupApplyResult, SetupPlan, UpdateEntry, UpdateOutcome } from "./protocol.js";
 
 /** notADaemon: the overwhelmingly common case for install() -- most Pi packages aren't daemons at all. Distinct from a real installService failure (systemctl unavailable, spec resolved but installation itself failed). */
@@ -50,7 +50,7 @@ export function resolvePackedClientPaths(options: PackedPathOptions = {}): Packe
 /** Real, file-existence-only check on Linux/macOS (Windows checks a
  * registry Run key instead) -- cheap, synchronous, no subprocess. */
 function isPackedServiceInstalled(serviceDescriptor: string): boolean {
-	return daemonKitIsServiceInstalled(
+	return vehicleIsServiceInstalled(
 		{ name: SERVICE_NAME, binPath: "", descriptorPath: serviceDescriptor },
 		{ fileExists: existsSync, writeFile: () => {}, readFile: () => null, removeFile: () => {}, mkdirp: () => {}, runCommand: () => ({ ok: false, output: "" }), which: () => false },
 	);
@@ -116,9 +116,9 @@ export interface EnsureClientDeps {
  * unit-testable without a real filesystem, subprocess, or network call.
  *
  * A real, confirmed hazard motivates the isServiceInstalled() branch: an
- * auto-spawned orphan gets daemon-kit's 30-minute idle budget (vs. a
+ * auto-spawned orphan gets vehicle-server's 30-minute idle budget (vs. a
  * supervised service's own, typically much shorter, policy), so it can
- * keep winning daemon-kit's single-instance lock race against every
+ * keep winning vehicle-server's single-instance lock race against every
  * subsequent supervised restart, invisibly, for up to half an hour. When a
  * service is installed, this never spawns a second, differently-supervised
  * process -- it retries the connection instead, on the assumption the

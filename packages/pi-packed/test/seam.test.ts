@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
-import { verifyLoadableUnderPi } from "@danypops/daemon-kit/pi-load-harness";
+import { verifyLoadableUnderPi } from "@danypops/vehicle-client-pi/pi-load-harness";
 import { filterRows, formatUpdateNotice, mergeRows, nextMode, visibleRows } from "../extension/src/model.ts";
 import { createNatives, type PackageDaemonPort, type PackageInfo } from "../extension/src/packed.ts";
 import type { SetupApplyResult, SetupPlan } from "@danypops/packed/protocol";

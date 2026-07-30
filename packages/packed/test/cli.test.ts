@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { cliRun, type CliDeps } from "../src/cli/cli.ts";
 import { DaemonRegistry, PackageDaemonClient, PackageDaemonInstaller, probe, resolveRegistry, type PackageDaemonPort } from "../src/daemon/client.ts";
-import { writeDaemonHandle } from "@danypops/daemon-kit/paths";
+import { writeDaemonHandle } from "@danypops/vehicle-server/paths";
 import { resolvePackedPaths, type PackedPaths } from "../src/shared/paths.ts";
 import { createApp } from "../src/daemon/service.ts";
 import { saveUpdates } from "../src/daemon/watcher.ts";

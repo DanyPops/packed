@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AuthenticatedRpcClient } from "@danypops/daemon-kit/rpc-client";
+import { AuthenticatedRpcClient } from "@danypops/vehicle-client/rpc-client";
 import { listPackageResources, toggleResource } from "../src/packages/resources.ts";
 import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/daemon/service.ts";
 import type { Installer, Registry, SearchPage, PkgInfo } from "../src/shared/ports.ts";

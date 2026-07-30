@@ -1,7 +1,7 @@
-/** Authenticated clients for Packed's daemon-kit operation registry. */
+/** Authenticated clients for Packed's vehicle-server operation registry. */
 import { readFileSync } from "node:fs";
-import { AuthenticatedRpcClient } from "@danypops/daemon-kit/rpc-client";
-import { readDaemonHandle } from "@danypops/daemon-kit/paths";
+import { AuthenticatedRpcClient } from "@danypops/vehicle-client/rpc-client";
+import { readDaemonHandle } from "@danypops/vehicle-server/paths";
 import type { InstalledPkg, Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateEntry, UpdateOutcome } from "../shared/ports.ts";
 import { HttpRegistry } from "../registry/registry.ts";
 import { INDEX_OPERATION_TIMEOUT_MS, MIRROR_OPERATION_TIMEOUT_MS, PROBE_TIMEOUT_MS, REGISTRY_FETCH_TIMEOUT_MS } from "../shared/constants.ts";

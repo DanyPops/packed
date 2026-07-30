@@ -14,7 +14,8 @@
     "serve": "bun src/cli/cli.ts serve"
   },
   "dependencies": {
-    "@danypops/daemon-kit": "^0.12.0",
+    "@danypops/vehicle-server": "^0.1.1",
+    "@danypops/vehicle-client": "^0.1.1",
     "jiti": "2.6.1",
     "publint": "0.3.22",
     "semver": "^7.8.5",

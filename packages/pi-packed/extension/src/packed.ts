@@ -11,11 +11,11 @@
  */
 import { createRetryingClient } from "@danypops/daemon-kit/pi-client";
 import { ensurePackedClient, InstallServiceError, type PackedExtensionClient } from "@danypops/packed/client";
-import type { InstalledPackage, PackageInfo, PackageResources, PackageSummary, ResourceField, SecuritySettings, ServiceSpecSummary, SetupApplyResult, SetupPlan, UpdateEntry, UpdateOutcome } from "@danypops/packed/protocol";
+import { PI_COMMAND_NAME, type InstalledPackage, type PackageInfo, type PackageResources, type PackageSummary, type PiStatus, type ResourceField, type SecuritySettings, type ServiceSpecSummary, type SetupApplyResult, type SetupPlan, type UpdateEntry, type UpdateOutcome } from "@danypops/packed/protocol";
 
-export { InstallServiceError };
+export { InstallServiceError, PI_COMMAND_NAME };
 
-export type { PackageInfo, PackageResources, ResourceField, UpdateEntry, UpdateOutcome };
+export type { PackageInfo, PackageResources, PiStatus, ResourceField, UpdateEntry, UpdateOutcome };
 export type InstalledPkg = InstalledPackage;
 export type PackageDaemonPort = PackedExtensionClient;
 type MutationApproval = SecuritySettings["mutationApproval"];
@@ -43,6 +43,7 @@ export interface Natives {
 	setupApply(manifestPath: string, approved?: boolean, prune?: boolean): Promise<SetupApplyResult>;
 	listResources(projectRoot?: string): Promise<{ global: PackageResources[]; project: PackageResources[] }>;
 	toggleResource(source: string, field: ResourceField, path: string, enabled: boolean, projectRoot?: string, approved?: boolean): Promise<string>;
+	piStatus(): Promise<PiStatus>;
 }
 
 export type PackageDaemonConnector = () => Promise<PackageDaemonPort>;
@@ -70,5 +71,6 @@ export async function createNatives(connect: PackageDaemonConnector = connectDef
 		setupApply: (manifestPath, approved, prune) => client.call((daemon) => daemon.setupApply(manifestPath, approved, prune)),
 		listResources: (projectRoot) => client.call((daemon) => daemon.listResources(projectRoot)),
 		toggleResource: (source, field, path, enabled, projectRoot, approved) => client.call((daemon) => daemon.toggleResource(source, field, path, enabled, projectRoot, approved)),
+		piStatus: () => client.call((daemon) => daemon.piStatus()),
 	};
 }

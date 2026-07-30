@@ -16,12 +16,21 @@ export type PackageResources = { source: string; name: string; scope: "global" |
 
 export interface ServiceSpecSummary { name: string; binPath: string; descriptorPath: string; }
 
-export type ExtensionOperationName = "package.search" | "package.info" | "package.installed" | "package.updates" | "package.security.get" | "package.security.set" | "package.install" | "package.install_service" | "package.remove" | "package.update" | "setup.plan" | "setup.apply" | "resources.list" | "resources.toggle";
+/** Mirrors packages/packed/src/pi/pi-version.ts's CURRENT_PI_PACKAGE_NAME
+ * literal -- not a shared import, since the public boundary deliberately
+ * stays free of internal runtime-specific modules. Keep the two in sync by hand. */
+export const PI_COMMAND_NAME = "@earendil-works/pi-coding-agent";
+
+/** Mirrors pi/pi-version.ts's PiVersionReport. */
+export interface PiStatus { current?: string; latest?: string; upToDate?: boolean; packageName?: string; note?: string; }
+
+export type ExtensionOperationName = "package.search" | "package.info" | "package.installed" | "package.updates" | "package.security.get" | "package.security.set" | "package.install" | "package.install_service" | "package.remove" | "package.update" | "setup.plan" | "setup.apply" | "resources.list" | "resources.toggle" | "pi.status";
 export interface ExtensionOperationInputs {
 	"package.search": { query: string; limit: number; offline?: boolean };
 	"package.info": { name: string };
 	"package.installed": Record<string, never>;
 	"package.updates": Record<string, never>;
+	"pi.status": Record<string, never>;
 	"package.security.get": Record<string, never>;
 	"package.security.set": { mutationApproval: SecuritySettings["mutationApproval"]; approved?: boolean };
 	"package.install": { source: string; approved?: boolean };
@@ -48,4 +57,5 @@ export interface ExtensionOperationOutputs {
 	"setup.apply": SetupApplyResult;
 	"resources.list": { global: PackageResources[]; project: PackageResources[] };
 	"resources.toggle": { ok: boolean; output: string };
+	"pi.status": PiStatus;
 }

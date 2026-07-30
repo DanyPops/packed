@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { installPackageWithPolicy, registerTools, removePackageWithPolicy, updatePackageWithPolicy } from "../extension/src/tools.ts";
-import { InstallServiceError, type Natives } from "../extension/src/packed.ts";
+import { InstallServiceError, PI_COMMAND_NAME, type Natives } from "../extension/src/packed.ts";
 
 /** The overwhelmingly common case: an ordinary test package that isn't a daemon at all. */
 async function notADaemonInstallService(): Promise<never> {
@@ -146,5 +146,33 @@ describe("native package mutation permission policy", () => {
 		const result = await search.execute("id", { query: "theme", limit: 10 });
 		expect(result.details.kind).toBe("search");
 		expect(result.content[0].text.length).toBeLessThanOrEqual(2_000);
+	});
+
+	it("pkg_info reports Pi's own local-vs-latest version when queried by its exact package name, in addition to the normal registry metadata", async () => {
+		const tools: any[] = [];
+		const natives = {
+			async info(name: string) { return { name, version: "0.83.0", description: "Coding agent" }; },
+			async piStatus() { return { current: "0.82.1", latest: "0.83.0", upToDate: false }; },
+		} as unknown as Natives;
+		registerTools({ registerTool(tool: unknown) { tools.push(tool); } } as any, natives);
+		const info = tools.find((tool) => tool.name === "pkg_info");
+		const result = await info.execute("id", { name: PI_COMMAND_NAME });
+		expect(result.content[0].text).toContain(`${PI_COMMAND_NAME}@0.83.0`); // normal registry line still present
+		expect(result.content[0].text).toContain("Pi runtime (not npm registry data)");
+		expect(result.content[0].text).toContain("currently running: 0.82.1");
+		expect(result.content[0].text).toContain("behind -- latest is 0.83.0, run pi update --self");
+	});
+
+	it("pkg_info leaves an ordinary package's output completely unaffected -- the special case is scoped to Pi's exact package name, never a general behavior change", async () => {
+		const tools: any[] = [];
+		const natives = {
+			async info(name: string) { return { name, version: "1.0.0", description: "an ordinary Pi extension" }; },
+			async piStatus() { throw new Error("must never be called for an ordinary package"); },
+		} as unknown as Natives;
+		registerTools({ registerTool(tool: unknown) { tools.push(tool); } } as any, natives);
+		const info = tools.find((tool) => tool.name === "pkg_info");
+		const result = await info.execute("id", { name: "pi-lsp" });
+		expect(result.content[0].text).toBe("pi-lsp@1.0.0\nan ordinary Pi extension");
+		expect(result.content[0].text).not.toContain("Pi runtime");
 	});
 });

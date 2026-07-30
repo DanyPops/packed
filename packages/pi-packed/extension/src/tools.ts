@@ -2,7 +2,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { packagePermissionDecision, type PackageOperation } from "./permission.js";
-import { InstallServiceError, type Natives } from "./packed.js";
+import { InstallServiceError, PI_COMMAND_NAME, type Natives } from "./packed.js";
 import { reloadWarning } from "./reload.js";
 import {
 	createInfoDetails,
@@ -142,7 +142,7 @@ export function registerTools(pi: ExtensionAPI, natives: Natives): void {
 	pi.registerTool({
 		name: "pkg_info",
 		label: "Pi Package Info",
-		description: "Show bounded metadata and declared Pi resources for one package.",
+		description: `Show bounded metadata and declared Pi resources for one package. Special case: querying ${PI_COMMAND_NAME} (Pi itself) also reports the locally running version against the latest published release -- a different question from, and in addition to, the generic npm registry metadata every other package gets.`,
 		parameters: Type.Object({ name: Type.String({ description: "npm package name" }) }),
 		renderCall(args, theme) { return renderPackageToolCall("Package info", args, theme); },
 		renderResult(result, options, theme, context) { return renderPackageToolResult(result, options, theme, context); },
@@ -158,6 +158,21 @@ export function registerTools(pi: ExtensionAPI, natives: Natives): void {
 					info.unpackedSize ? `size: ${(info.unpackedSize / 1024).toFixed(0)} KB` : "",
 					info.modified ? `modified: ${info.modified}` : "",
 				].filter(Boolean);
+				// Special-cased by package identity, not by any change in risk
+				// profile -- still a pure read, just answering a second, genuinely
+				// different question (what's actually running here, not what npm
+				// last published) that the generic registry lookup above cannot.
+				if (params.name === PI_COMMAND_NAME) {
+					const status = await natives.piStatus().catch(() => undefined);
+					if (status?.current) {
+						const comparison = status.latest === undefined
+							? "latest release unknown"
+							: status.upToDate === false
+								? `behind -- latest is ${status.latest}, run pi update --self`
+								: `up to date with the latest ${status.latest}`;
+						lines.push(`--- Pi runtime (not npm registry data) ---`, `currently running: ${status.current}`, comparison);
+					}
+				}
 				return text(lines.join("\n"), createInfoDetails(info));
 			} catch (error) {
 				throw new Error(`pkg_info failed: ${error instanceof Error ? error.message : error}`);

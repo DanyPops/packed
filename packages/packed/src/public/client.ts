@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { AuthenticatedRpcClient } from "@danypops/daemon-kit/rpc-client";
 import { readDaemonHandle, resolveDaemonPaths } from "@danypops/daemon-kit/paths";
 import { isServiceInstalled as daemonKitIsServiceInstalled } from "@danypops/daemon-kit/service";
-import type { ExtensionOperationInputs, ExtensionOperationName, ExtensionOperationOutputs, PackageInfo, PackageResources, PackageSummary, ResourceField, SecuritySettings, ServiceSpecSummary, SetupApplyResult, SetupPlan, UpdateEntry, UpdateOutcome } from "./protocol.js";
+import type { ExtensionOperationInputs, ExtensionOperationName, ExtensionOperationOutputs, PackageInfo, PackageResources, PackageSummary, PiStatus, ResourceField, SecuritySettings, ServiceSpecSummary, SetupApplyResult, SetupPlan, UpdateEntry, UpdateOutcome } from "./protocol.js";
 
 /** notADaemon: the overwhelmingly common case for install() -- most Pi packages aren't daemons at all. Distinct from a real installService failure (systemctl unavailable, spec resolved but installation itself failed). */
 export class InstallServiceError extends Error {
@@ -34,6 +34,7 @@ export interface PackedExtensionClient {
 	setupApply(manifestPath: string, approved?: boolean, prune?: boolean): Promise<SetupApplyResult>;
 	listResources(projectRoot?: string): Promise<{ global: PackageResources[]; project: PackageResources[] }>;
 	toggleResource(source: string, field: ResourceField, path: string, enabled: boolean, projectRoot?: string, approved?: boolean): Promise<string>;
+	piStatus(): Promise<PiStatus>;
 }
 
 export function resolvePackedClientPaths(options: PackedPathOptions = {}): PackedClientPaths {
@@ -82,6 +83,7 @@ export class PackedClient implements PackedExtensionClient {
 	setupApply(manifestPath: string, approved = false, prune = false) { return this.call("setup.apply", { manifestPath, approved, prune }); }
 	listResources(projectRoot?: string) { return this.call("resources.list", { projectRoot }); }
 	async toggleResource(source: string, field: ResourceField, path: string, enabled: boolean, projectRoot?: string, approved = false) { const result = await this.call("resources.toggle", { source, field, path, enabled, projectRoot, approved }); if (!result.ok) throw new Error(result.output); return result.output; }
+	piStatus() { return this.call("pi.status", {}); }
 }
 
 export async function connectPackedClient(paths = resolvePackedClientPaths(), transport: FetchTransport = fetch): Promise<PackedClient> {

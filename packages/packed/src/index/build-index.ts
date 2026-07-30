@@ -1,9 +1,11 @@
 /**
  * build-index.ts — batch-generates a versioned snapshot across the whole
- * local catalog (the createrepo/dpkg-scanpackages analog): one
- * assessRegistryAdoption() call per cataloged package, written to a single
- * JSON file. Local generation only -- publishing this file somewhere
- * public is a separate, later decision.
+ * local catalog (the createrepo/dpkg-scanpackages analog). Incremental:
+ * a package new to the catalog or whose npm date has advanced since it
+ * was last scored gets a real assessRegistryAdoption() call; a package
+ * whose catalog date hasn't moved is carried forward from the prior index
+ * untouched, at zero live-call cost. Local generation only -- publishing
+ * this file somewhere public is a separate, later decision.
  *
  * Deliberately never calls GitHub: assessRegistryAdoption()'s freshness
  * dimension only takes the git-commit-based path when a caller passes it
@@ -28,6 +30,14 @@ export interface PackageIndexEntry {
 	name: string;
 	version: string;
 	dimensions: AdoptionReport["dimensions"];
+	/** The catalog's own npm date this entry was scored against -- the
+	 * per-package staleness watermark the next run compares its current
+	 * catalog date to. Undefined when the catalog had no date for this
+	 * package at scoring time (rare; treated as "unknown, always rescore"
+	 * by the next run rather than assumed unchanged). A single global
+	 * generatedAt watermark would be wrong here: packages enter the catalog
+	 * and get scored at different times, so staleness must be per-package. */
+	date?: string;
 }
 
 export interface PackageIndex {
@@ -105,29 +115,71 @@ export function buildIndex(reg: Registry, catalogDir: string, options: BuildInde
 	return run;
 }
 
+/**
+ * Partitions the current catalog against the prior index (when one exists)
+ * into three groups -- New (never scored before), Changed (scored before,
+ * but the catalog's date for it has advanced since), and Unchanged (scored
+ * before, same date). Identity (name presence) decides New vs. known;
+ * date decides Changed vs. Unchanged among known packages -- these are
+ * deliberately different questions (see this module's own research Doc):
+ * a package can be old on npm but new to *our* catalog, so date alone
+ * can never answer "have we scored this before."
+ */
+function partitionAgainstPriorIndex(
+	catalogPkgs: Array<{ name: string; date?: string }>,
+	priorByName: Map<string, PackageIndexEntry>,
+): { toScore: string[]; unchanged: PackageIndexEntry[] } {
+	const toScore: string[] = [];
+	const unchanged: PackageIndexEntry[] = [];
+	for (const pkg of catalogPkgs) {
+		const prior = priorByName.get(pkg.name);
+		if (!prior) { toScore.push(pkg.name); continue; } // New
+		// Can't prove nothing changed without both dates -- rescore rather
+		// than assume, matching this codebase's "never guess" convention.
+		if (pkg.date === undefined || prior.date === undefined) { toScore.push(pkg.name); continue; }
+		if (Date.parse(pkg.date) > Date.parse(prior.date)) { toScore.push(pkg.name); continue; } // Changed
+		unchanged.push(prior); // Unchanged -- carried forward verbatim, zero live calls
+	}
+	return { toScore, unchanged };
+}
+
 async function buildIndexNow(reg: Registry, catalogDir: string, options: BuildIndexOptions): Promise<PackageIndex> {
 	const delayMs = options.delayMs ?? PAGE_DELAY_MS;
 	const currentPiVersion = options.currentPiVersion ?? resolveCurrentPiVersion;
 	const maxPackages = options.maxPackages ?? DEFAULT_MAX_PACKAGES;
 
 	const db = openDb(dbPath(catalogDir));
-	let allNames: string[];
+	let catalogPkgs: Array<{ name: string; date?: string }>;
 	try {
-		allNames = catalogList(db).map((p) => p.name);
+		catalogPkgs = catalogList(db).map((p) => ({ name: p.name, date: p.date }));
 	} finally {
 		db.close();
 	}
-	const truncated = allNames.length > maxPackages;
-	const names = allNames.slice(0, maxPackages);
-	if (truncated) log.warn("catalog exceeds maxPackages, truncating this run", { catalogSize: allNames.length, maxPackages });
 
-	const piVersion = await currentPiVersion();
+	const priorIndex = readIndex(indexPath(catalogDir));
+	const priorByName = new Map((priorIndex?.packages ?? []).map((entry) => [entry.name, entry]));
+	const { toScore, unchanged } = partitionAgainstPriorIndex(catalogPkgs, priorByName);
+	const catalogDateByName = new Map(catalogPkgs.map((p) => [p.name, p.date]));
+
+	// The bound applies to the live-call queue specifically, not the whole
+	// catalog -- Unchanged carry-forwards are cheap local copies and were
+	// never the resource this cap exists to protect.
+	const truncated = toScore.length > maxPackages;
+	const names = toScore.slice(0, maxPackages);
+	if (truncated) log.warn("new/changed queue exceeds maxPackages, truncating this run", { queueSize: toScore.length, maxPackages });
+
+	// Skip both lookups entirely when nothing needs live scoring this run --
+	// an all-Unchanged catalog should make zero network calls, not one.
+	let piVersion: string | undefined;
 	let piModified: string | undefined;
-	if (reg.modifiedAt) {
-		try { piModified = await reg.modifiedAt(PI_COMMAND_NAME); } catch { /* freshness stays explicitly unknown for every entry */ }
+	if (names.length > 0) {
+		piVersion = await currentPiVersion();
+		if (reg.modifiedAt) {
+			try { piModified = await reg.modifiedAt(PI_COMMAND_NAME); } catch { /* freshness stays explicitly unknown for every entry */ }
+		}
 	}
 
-	const packages: PackageIndexEntry[] = [];
+	const scored: PackageIndexEntry[] = [];
 	for (const name of names) {
 		try {
 			const info = await reg.info(name);
@@ -137,13 +189,13 @@ async function buildIndexNow(reg: Registry, catalogDir: string, options: BuildIn
 			// No candidateCommitAt argument here -- GitHub is never touched
 			// during bulk generation, by construction, not by omission.
 			const report = assessRegistryAdoption(info, piVersion, piModified);
-			packages.push({ name: info.name, version: info.version, dimensions: report.dimensions });
+			scored.push({ name: info.name, version: info.version, dimensions: report.dimensions, date: catalogDateByName.get(name) });
 		} catch (e) {
 			log.warn("index entry failed, skipping", { name, error: e instanceof Error ? e.message : String(e) });
 		}
 		if (delayMs > 0) await Bun.sleep(delayMs);
 	}
-	return { generatedAt: new Date().toISOString(), packages, truncated };
+	return { generatedAt: new Date().toISOString(), packages: [...unchanged, ...scored], truncated };
 }
 
 /** Atomic write -- tmp file + rename, same partial-write-safety convention

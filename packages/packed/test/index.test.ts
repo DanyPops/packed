@@ -168,6 +168,95 @@ describe("buildIndex bounds", () => {
 	});
 });
 
+describe("buildIndex incremental delta scanning", () => {
+	it("partitions the catalog into New/Changed/Unchanged against the prior index -- Unchanged makes zero live registry calls, New and Changed do", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "packed-index-delta-"));
+		const db = openDb(dbPath(dir));
+		replaceAll(db, [
+			{ name: "pi-new", version: "1.0.0", date: "2026-03-01T00:00:00.000Z" }, // absent from prior index
+			{ name: "pi-changed", version: "2.0.0", date: "2026-04-01T00:00:00.000Z" }, // date advanced since last scan
+			{ name: "pi-unchanged", version: "1.5.0", date: "2026-01-01T00:00:00.000Z" }, // date identical to last scan
+		], "test");
+		db.close();
+
+		const priorIndex = {
+			generatedAt: "2026-02-01T00:00:00.000Z",
+			packages: [
+				{ name: "pi-changed", version: "1.9.0", date: "2026-01-01T00:00:00.000Z", dimensions: { discoverability: { status: "ready" as const, met: 1, total: 1, evidence: ["stale"], actions: [] } } as never },
+				{ name: "pi-unchanged", version: "1.5.0", date: "2026-01-01T00:00:00.000Z", dimensions: { discoverability: { status: "ready" as const, met: 1, total: 1, evidence: ["carried forward"], actions: [] } } as never },
+			],
+			truncated: false,
+		};
+		writeIndex(indexPath(dir), priorIndex);
+
+		const calledInfo: string[] = [];
+		const server = Bun.serve({
+			port: 0,
+			fetch(req) {
+				const url = new URL(req.url);
+				if (url.pathname.endsWith("/latest")) {
+					const name = decodeURIComponent(url.pathname.replace(/^\//, "").replace(/\/latest$/, ""));
+					calledInfo.push(name);
+					return Response.json({ name, version: name === "pi-changed" ? "2.0.0" : "1.0.0", description: "real fixture" });
+				}
+				return new Response("not found", { status: 404 });
+			},
+		});
+		try {
+			const reg = new HttpRegistry(`http://127.0.0.1:${server.port}`, 250, 0, 1, `http://127.0.0.1:${server.port}`);
+			const index = await buildIndex(reg, dir, { delayMs: 0 });
+
+			// Unchanged never triggered a live info() call, and its prior
+			// dimensions/date are preserved verbatim.
+			expect(calledInfo.sort()).toEqual(["pi-changed", "pi-new"]);
+			const unchanged = index.packages.find((p) => p.name === "pi-unchanged")!;
+			expect(unchanged.dimensions.discoverability.evidence).toEqual(["carried forward"]);
+			expect(unchanged.date).toBe("2026-01-01T00:00:00.000Z");
+
+			// Changed and New both got a real, fresh score.
+			const changed = index.packages.find((p) => p.name === "pi-changed")!;
+			expect(changed.version).toBe("2.0.0");
+			expect(changed.date).toBe("2026-04-01T00:00:00.000Z");
+			const fresh = index.packages.find((p) => p.name === "pi-new")!;
+			expect(fresh.date).toBe("2026-03-01T00:00:00.000Z");
+			expect(index.packages).toHaveLength(3);
+		} finally {
+			server.stop(true);
+		}
+	});
+
+	it("maxPackages bounds only the New+Changed live-call queue -- Unchanged entries beyond that count still complete", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "packed-index-delta-bound-"));
+		const db = openDb(dbPath(dir));
+		// 5 unchanged entries alone already exceed maxPackages: 1 below.
+		replaceAll(db, [
+			{ name: "pi-a", version: "1.0.0", date: "2026-01-01T00:00:00.000Z" },
+			{ name: "pi-b", version: "1.0.0", date: "2026-01-01T00:00:00.000Z" },
+			{ name: "pi-c", version: "1.0.0", date: "2026-01-01T00:00:00.000Z" },
+			{ name: "pi-d", version: "1.0.0", date: "2026-01-01T00:00:00.000Z" },
+			{ name: "pi-e", version: "1.0.0", date: "2026-01-01T00:00:00.000Z" },
+		], "test");
+		db.close();
+		const priorIndex = {
+			generatedAt: "2026-01-01T00:00:00.000Z",
+			packages: ["pi-a", "pi-b", "pi-c", "pi-d", "pi-e"].map((name) => ({ name, version: "1.0.0", date: "2026-01-01T00:00:00.000Z", dimensions: {} as never })),
+			truncated: false,
+		};
+		writeIndex(indexPath(dir), priorIndex);
+		let liveCalls = 0;
+		const server = Bun.serve({ port: 0, fetch() { liveCalls++; return new Response("not found", { status: 404 }); } });
+		try {
+			const reg = new HttpRegistry(`http://127.0.0.1:${server.port}`, 250, 0, 1, `http://127.0.0.1:${server.port}`);
+			const index = await buildIndex(reg, dir, { delayMs: 0, maxPackages: 1 });
+			expect(index.packages).toHaveLength(5); // all 5 Unchanged carried forward despite maxPackages: 1
+			expect(index.truncated).toBe(false); // nothing needed live scoring, so nothing was truncated
+			expect(liveCalls).toBe(0);
+		} finally {
+			server.stop(true);
+		}
+	});
+});
+
 describe("index persistence", () => {
 	it("writes, reads, and reports staleness", () => {
 		const dir = mkdtempSync(join(tmpdir(), "packed-index-store-"));

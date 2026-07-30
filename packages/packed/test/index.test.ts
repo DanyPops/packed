@@ -96,6 +96,38 @@ describe("buildIndex", () => {
 	});
 });
 
+describe("buildIndex bounds", () => {
+	it("never calls downloads() -- confirmed live to trigger npm's 429s at real catalog scale -- and truncates past maxPackages, marking the result", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "packed-index-bounds-"));
+		const db = openDb(dbPath(dir));
+		replaceAll(db, [
+			{ name: "pi-one", version: "1.0.0" },
+			{ name: "pi-two", version: "1.0.0" },
+			{ name: "pi-three", version: "1.0.0" },
+		], "test");
+		db.close();
+		let downloadsCalled = false;
+		const server = Bun.serve({
+			port: 0,
+			fetch(req) {
+				const url = new URL(req.url);
+				if (url.pathname.startsWith("/downloads/")) { downloadsCalled = true; return Response.json({ downloads: 1 }); }
+				if (url.pathname.endsWith("/latest")) return Response.json({ name: url.pathname.split("/")[1], version: "1.0.0" });
+				return new Response("not found", { status: 404 });
+			},
+		});
+		try {
+			const reg = new HttpRegistry(`http://127.0.0.1:${server.port}`, 250, 0, 1, `http://127.0.0.1:${server.port}`);
+			const index = await buildIndex(reg, dir, { delayMs: 0, maxPackages: 2 });
+			expect(index.packages).toHaveLength(2); // 3 cataloged, bounded to 2
+			expect(index.truncated).toBe(true);
+			expect(downloadsCalled).toBe(false);
+		} finally {
+			server.stop(true);
+		}
+	});
+});
+
 describe("index persistence", () => {
 	it("writes, reads, and reports staleness", () => {
 		const dir = mkdtempSync(join(tmpdir(), "packed-index-store-"));
@@ -103,12 +135,12 @@ describe("index persistence", () => {
 		expect(readIndex(path)).toBeUndefined();
 		expect(indexStatus(path, 1_000).stale).toBe(true);
 
-		const index = { generatedAt: new Date().toISOString(), packages: [{ name: "pi-alpha", version: "1.0.0", dimensions: {} as never }] };
+		const index = { generatedAt: new Date().toISOString(), packages: [{ name: "pi-alpha", version: "1.0.0", dimensions: {} as never }], truncated: false };
 		writeIndex(path, index);
 		expect(readIndex(path)).toEqual(index);
 		expect(indexStatus(path, 60_000)).toMatchObject({ stale: false, packageCount: 1 });
 
-		const old = { generatedAt: new Date(Date.now() - 100_000).toISOString(), packages: [] };
+		const old = { generatedAt: new Date(Date.now() - 100_000).toISOString(), packages: [], truncated: false };
 		writeIndex(path, old);
 		expect(indexStatus(path, 1_000).stale).toBe(true);
 	});

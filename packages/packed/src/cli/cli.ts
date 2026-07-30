@@ -334,12 +334,12 @@ const commands: Record<string, { usage: string; run: Command }> = {
 			if (action === "build") {
 				const index = d.daemon ? await d.daemon.indexBuild() : await generateIndex(d.reg, dataDirectory(d), indexPath(dataDirectory(d)));
 				if (flags.json) return ok(JSON.stringify(index) + "\n");
-				return ok(`generated a static index of ${index.packages.length} packages (generatedAt ${index.generatedAt})\n`);
+				return ok(`generated a static index of ${index.packages.length} packages (generatedAt ${index.generatedAt})${index.truncated ? " -- truncated, the local catalog holds more entries than this run's bound" : ""}\n`);
 			}
 			const status = d.daemon ? await d.daemon.index() : readIndex(indexPath(dataDirectory(d)));
 			if (flags.json) return ok(JSON.stringify(status ?? null) + "\n");
 			if (!status) return ok("no local index generated yet -- run packed index build\n");
-			return ok(`local index: ${status.packages.length} packages, generated ${status.generatedAt}\n`);
+			return ok(`local index: ${status.packages.length} packages, generated ${status.generatedAt}${status.truncated ? " (truncated)" : ""}\n`);
 		},
 	},
 

@@ -33,12 +33,24 @@ export interface PackageIndexEntry {
 export interface PackageIndex {
 	generatedAt: string;
 	packages: PackageIndexEntry[];
+	/** True when the local catalog held more entries than maxPackages --
+	 * confirmed live against this project's own real catalog (5,250
+	 * keywords:pi-package matches, overwhelmingly false positives from the
+	 * search itself, a separate known issue): an unbounded run hit npm's
+	 * downloads API 149 times with 429s in under three minutes and would
+	 * have run for hours. Never silently incomplete -- always stated. */
+	truncated: boolean;
 }
+
+/** Generous for a real Pi-package catalog, still bounded against a
+ * polluted or adversarial one. */
+const DEFAULT_MAX_PACKAGES = 500;
 
 export interface IndexStatus {
 	stale: boolean;
 	generatedAt?: string;
 	packageCount?: number;
+	truncated?: boolean;
 }
 
 export interface BuildIndexOptions {
@@ -46,7 +58,13 @@ export interface BuildIndexOptions {
 	 * catalog.ts's PAGE_DELAY_MS. */
 	delayMs?: number;
 	currentPiVersion?: () => Promise<string | undefined>;
+	/** Explicit bound on how many cataloged packages one generation run will
+	 * process -- defaults to DEFAULT_MAX_PACKAGES. A run never silently
+	 * processes an unbounded catalog. */
+	maxPackages?: number;
 }
+
+
 
 /** Same per-directory-filename convention as db.ts's dbPath(). */
 export function indexPath(dir: string): string {
@@ -58,18 +76,31 @@ export function indexPath(dir: string): string {
  * data only, no GitHub. A single package failing its registry lookup
  * (removed, renamed, transient error) is skipped and logged rather than
  * failing the whole run.
+ *
+ * Deliberately never calls reg.downloads(): confirmed live against this
+ * project's own real catalog (5,250 entries, overwhelmingly false
+ * positives from the keywords:pi-package search itself, a separate known
+ * issue) that calling it per package hits npm's downloads API 429s within
+ * minutes -- two extra requests per package on top of info(). traction
+ * stays "unknown" for every bulk-generated entry, which is already the
+ * dimension's own honest fallback for missing download data, not a new
+ * failure mode.
  */
 export async function buildIndex(reg: Registry, catalogDir: string, options: BuildIndexOptions = {}): Promise<PackageIndex> {
 	const delayMs = options.delayMs ?? PAGE_DELAY_MS;
 	const currentPiVersion = options.currentPiVersion ?? resolveCurrentPiVersion;
+	const maxPackages = options.maxPackages ?? DEFAULT_MAX_PACKAGES;
 
 	const db = openDb(dbPath(catalogDir));
-	let names: string[];
+	let allNames: string[];
 	try {
-		names = catalogList(db).map((p) => p.name);
+		allNames = catalogList(db).map((p) => p.name);
 	} finally {
 		db.close();
 	}
+	const truncated = allNames.length > maxPackages;
+	const names = allNames.slice(0, maxPackages);
+	if (truncated) log.warn("catalog exceeds maxPackages, truncating this run", { catalogSize: allNames.length, maxPackages });
 
 	const piVersion = await currentPiVersion();
 	let piModified: string | undefined;
@@ -81,9 +112,6 @@ export async function buildIndex(reg: Registry, catalogDir: string, options: Bui
 	for (const name of names) {
 		try {
 			const info = await reg.info(name);
-			if (reg.downloads) {
-				try { info.downloads = await reg.downloads(name); } catch { /* traction stays explicitly unknown */ }
-			}
 			if (reg.modifiedAt) {
 				try { info.modified = await reg.modifiedAt(name); } catch { /* freshness proxy stays explicitly unknown */ }
 			}
@@ -96,7 +124,7 @@ export async function buildIndex(reg: Registry, catalogDir: string, options: Bui
 		}
 		if (delayMs > 0) await Bun.sleep(delayMs);
 	}
-	return { generatedAt: new Date().toISOString(), packages };
+	return { generatedAt: new Date().toISOString(), packages, truncated };
 }
 
 /** Atomic write -- tmp file + rename, same partial-write-safety convention
@@ -125,6 +153,7 @@ export function indexStatus(path: string, ttlMs: number): IndexStatus {
 		stale: Date.now() - Date.parse(index.generatedAt) > ttlMs,
 		generatedAt: index.generatedAt,
 		packageCount: index.packages.length,
+		truncated: index.truncated,
 	};
 }
 

@@ -38,5 +38,5 @@ jobs:
       - run: bunx --bun @danypops/packed@latest check packages/pi-packed
       - run: npm install --global npm@11.15.0
       - run: npm --version
-      - run: npm stage publish --access public --provenance --ignore-scripts
+      - run: npm publish --access public --provenance --ignore-scripts
         working-directory: packages/pi-packed

@@ -756,15 +756,22 @@ describe("daemon client", () => {
 });
 
 describe("packed service (systemd unit)", () => {
+	// Delegates to vehicle-server's shared generateSystemdUnit (see cli.ts's renderUnit) --
+	// ExecStart is now shell-quoted per argument, and Restart=on-failure became Restart=always
+	// (vehicle-server's restartOnFailure only supports "always" -- an intentional, documented
+	// tightening: Packed's own client never auto-spawns, so systemd is its only recovery path
+	// regardless of whether the prior exit was clean or a crash).
 	it("renders a user unit with runtime paths and idle disabled", async () => {
 		const d = deps({ execPath: "/usr/bin/bun", cliPath: "/opt/pi-packed/src/cli.ts", piBin: "/home/x/.cache/.bun/bin/pi" });
 		const { code, out } = await cliRun(["service"], d);
 		expect(code).toBe(0);
 		expect(out).toContain("[Service]");
-		expect(out).toContain("ExecStart=/usr/bin/bun /opt/pi-packed/src/cli.ts serve");
-		expect(out).toContain("Restart=on-failure");
-		expect(out).toContain("PI_PACKED_IDLE_SECS=0");
-		expect(out).toContain("Environment=PI_BIN=/home/x/.cache/.bun/bin/pi");
+		expect(out).toContain('ExecStart="/usr/bin/bun" "/opt/pi-packed/src/cli.ts" "serve"');
+		expect(out).toContain("Restart=always");
+		expect(out).toContain("RestartSec=2");
+		expect(out).toContain("NoNewPrivileges=true");
+		expect(out).toContain('Environment="PI_PACKED_IDLE_SECS=0"');
+		expect(out).toContain('Environment="PI_BIN=/home/x/.cache/.bun/bin/pi"');
 		expect(out).toContain("WantedBy=default.target");
 	});
 });

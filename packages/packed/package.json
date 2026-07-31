@@ -1,6 +1,6 @@
 {
   "name": "@danypops/packed",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Standalone package lifecycle, validation, catalog, setup, and daemon service for Pi packages",
   "type": "module",
   "bin": {
@@ -14,7 +14,7 @@
     "serve": "bun src/cli/cli.ts serve"
   },
   "dependencies": {
-    "@danypops/vehicle-server": "^0.2.1",
+    "@danypops/vehicle-server": "^0.3.2",
     "@danypops/vehicle-client": "^0.1.1",
     "jiti": "2.6.1",
     "publint": "0.3.22",

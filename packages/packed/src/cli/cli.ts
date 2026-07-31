@@ -33,6 +33,8 @@ import {
 	type SecuritySettingsPort,
 } from "../security/security.ts";
 import { runSelfUpdate, type SelfUpdateReport } from "../self-update/self-update.ts";
+import { generateSystemdUnit } from "@danypops/vehicle-server/service";
+import { resolvePackedPaths } from "../shared/paths.ts";
 
 /** A generated unit must never trust a bare "pi" resolving under systemd's
  * own restricted PATH just because it resolves in the shell that generated
@@ -627,26 +629,28 @@ const commands: Record<string, { usage: string; run: Command }> = {
 	},
 };
 
-/** systemd user unit. Idle self-exit is disabled — systemd owns the
- * lifecycle (Restart=on-failure takes over). */
+/** systemd user unit, delegating to vehicle-server's shared generateSystemdUnit -- idle self-exit
+ * is disabled (PI_PACKED_IDLE_SECS=0) since systemd's own Restart=always takes over lifecycle. This
+ * only ever prints (see the `service` command above); nothing here calls installUserService, so
+ * descriptorPath is never actually read/written -- required by ServiceSpec's shape regardless. */
 export function renderUnit(execPath: string, cliPath: string, piBin?: string): string {
 	// systemd does not read shell rc files: PI_BIN must be explicit so the
 	// daemon's install/remove execs can find the pi binary.
-	const piEnv = piBin ? `Environment=PI_BIN=${piBin}\n` : "";
-	return `[Unit]
-Description=pi-packed package service (Pi agent)
-
-[Service]
-Type=simple
-ExecStart=${execPath} ${cliPath} serve
-Restart=on-failure
-RestartSec=2
-Environment=PI_PACKED_IDLE_SECS=0
-${piEnv}NoNewPrivileges=true
-
-[Install]
-WantedBy=default.target
-`;
+	const env: Record<string, string> = { PI_PACKED_IDLE_SECS: "0" };
+	if (piBin) env["PI_BIN"] = piBin;
+	return generateSystemdUnit({
+		name: "pi-packed",
+		displayName: "pi-packed package service (Pi agent)",
+		binPath: execPath,
+		args: [cliPath, "serve"],
+		env,
+		descriptorPath: resolvePackedPaths().serviceDescriptor,
+		// Packed's own client (connectPackageDaemon) never auto-spawns -- "start packed.service"
+		// or this unit's own systemd supervision is its only recovery path.
+		restartOnFailure: true,
+		restartSec: 2,
+		noNewPrivileges: true,
+	});
 }
 
 export async function cliRun(args: string[], d: CliDeps): Promise<CliResult> {

@@ -14,26 +14,31 @@
  * was pinned 1 row below the absolute top on any terminal size). Enter
  * opens a second, smaller overlay action menu on top of it. U's batch
  * update stays on this same package list -- an indeterminate spinner
- * (Spinner, this package's own -- neither Malevich nor pi-tui exposes an
- * embeddable one) renders inline next to the row currently updating,
- * settling into a real ✓/✗ plus a bounded tail of that row's own actual
- * captured stdout/stderr once it finishes, never a determinate bar (a
- * single subprocess call has no knowable percentage). Rows render through
- * Malevich's Table (real column-aligned Package/Version/status cells,
- * per-row selection styling baked into each cell since Table's own
- * cellStyle is column-wide, not row-wide) inside this panel's own
- * scroll-window slice -- Table deliberately owns no pagination of its
- * own, so the visible-window-around-selectedIndex math stays here. Every
- * mutation that actually changes something asks confirmReload separately
- * from the earlier mutation-approval confirm -- declining defers the
- * reload (the mutation itself already happened) and keeps the panel open
- * with refreshed rows instead of ending the session. All
- * data flows through the packed CLI (thin seam).
+ * (Malevich's Spinner, extracted upstream from this panel's original need
+ * once no embeddable one existed anywhere) renders inline next to the row
+ * currently updating, settling into a real ✓/✗ plus a bounded tail of
+ * that row's own actual captured stdout/stderr once it finishes, never a
+ * determinate bar (a single subprocess call has no knowable percentage).
+ * Rows render through Malevich's Table (real column-aligned
+ * Package/Version/status cells, per-row selection styling baked into each
+ * cell since Table's own cellStyle is column-wide, not row-wide) inside
+ * this panel's own scroll-window slice -- Table deliberately owns no
+ * pagination of its own, so the visible-window-around-selectedIndex math
+ * stays here. u/x/d and the Enter action menu all run their whole
+ * approve+mutate+confirmReload flow inline, without ever closing this
+ * overlay first -- every confirm() along the way (mutation approval,
+ * confirmReload's separate reload gate) renders as a real Malevich Dialog
+ * on this SAME overlay, dispatched by literal y/n keys, instead of
+ * ctx.ui.confirm's own separate native dialog (arrow-select only, and a
+ * genuinely different overlay stacked on top -- confirmed live as a real
+ * user complaint). Declining a reload defers it: the mutation itself
+ * already happened, and the panel stays open with refreshed rows instead
+ * of ending the session. All data flows through the packed CLI (thin seam).
  */
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder, rawKeyHint } from "@earendil-works/pi-coding-agent";
 import { Container, Input, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { Envelope, Menu, Table, type MenuItem, type TableColumn, type TextMeasure } from "malevich-tui-components";
+import { Dialog, Envelope, Menu, Spinner, Table, type MenuItem, type TableColumn, type TextMeasure } from "malevich-tui-components";
 import { filterRows, mergeRows, nextMode, visibleRows } from "./model.js";
 import type { Row, ViewMode } from "./model.js";
 import type { Natives, PackageResources } from "./packed.js";
@@ -41,12 +46,11 @@ import { approvePackageOperation } from "./tools.js";
 import { showPackedSettings } from "./security-tui.js";
 import { showResourceConfig, applyResourceToggle } from "./resource-config.js";
 import { showDiscoverPanel } from "./discover.js";
-import { menuTheme } from "./menu-theme.js";
+import { dialogTheme, menuTheme } from "./menu-theme.js";
 import { confirmReload } from "./reload.js";
-import { Spinner } from "./spinner.js";
 
 interface PanelAction {
-	type: "update" | "remove" | "disable" | "config" | "find" | "refresh" | "settings";
+	type: "config" | "find" | "refresh" | "settings";
 	row?: Row;
 }
 
@@ -366,8 +370,10 @@ export async function showPackedPanel(ctx: ExtensionCommandContext, natives: Nat
 	}
 
 	// Panel loop: actions resolve the component, run outside it, then reopen.
-	// U/updateAll is handled entirely inside renderPanel itself (progress
-	// rendered on the same already-open overlay) and never reaches here.
+	// Every mutation (u/x/d, U, and whatever the Enter action menu picks) is
+	// handled entirely inside renderPanel itself -- approval and reload
+	// confirms render inline on the same already-open overlay -- and never
+	// reaches here; only non-mutation navigation resolves this loop.
 	for (;;) {
 		const action = await renderPanel(ctx, natives, rows);
 		if (!action) return; // closed
@@ -387,24 +393,8 @@ export async function showPackedPanel(ctx: ExtensionCommandContext, natives: Nat
 			continue; // a successful install already reloaded; a no-op returns here
 		}
 
-		if (action.type === "config") {
-			await showResourceConfig(ctx, natives, action.row?.name);
-			continue; // showResourceConfig already handles its own reload prompt
-		}
-
-		const row = action.row;
-		if (!row) continue;
-
-		if (action.type === "disable") {
-			const outcome = await applyDisableExtensions(row, natives, ctx);
-			if (outcome === "changed") return;
-			if (outcome === "deferred") await refreshRows();
-			continue;
-		}
-
-		const outcome = await applyPackageChoice(action.type === "update" ? `Update to ${row.latest}` : "Remove", row, natives, ctx);
-		if (outcome === "changed") return; // ctx.reload() already replaced the session
-		if (outcome === "deferred") await refreshRows();
+		await showResourceConfig(ctx, natives, action.row?.name);
+		// showResourceConfig already handles its own reload prompt
 	}
 }
 
@@ -434,6 +424,60 @@ function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows
 			selectedIndex = 0;
 		}
 
+		// A y/n decision rendered as this SAME overlay's own content (via a real
+		// Malevich Dialog, dispatched by literal key press) instead of
+		// ctx.ui.confirm's separate native dialog -- confirmed live as a real
+		// user complaint: ctx.ui.confirm opens as its own distinct overlay on
+		// top of this one ("a new window"), arrow-select only, no y/n keys.
+		let pendingDialog: Dialog | undefined;
+
+		function confirmInline(title: string, message: string): Promise<boolean> {
+			return new Promise((resolve) => {
+				const settle = (value: boolean) => {
+					pendingDialog = undefined;
+					tui.requestRender();
+					resolve(value);
+				};
+				pendingDialog = new Dialog({
+					title,
+					body: message,
+					actions: [
+						{ label: "Yes", key: "y", action: () => settle(true) },
+						{ label: "No", key: "n", action: () => settle(false) },
+					],
+					theme: dialogTheme(theme),
+				});
+				tui.requestRender();
+			});
+		}
+
+		// Every confirm() call inside a mutation flow driven from this open
+		// overlay (approvePackageOperation's own approval, confirmReload's
+		// separate reload gate) routes through confirmInline instead of the
+		// real ctx.ui.confirm -- notify/reload/etc. stay the genuine ctx.
+		const inlineCtx: ExtensionCommandContext = { ...ctx, hasUI: true, ui: { ...ctx.ui, confirm: confirmInline } };
+
+		/** u/x/d and the Enter action menu all funnel through here: approval and
+		 * reload confirms render inline (via inlineCtx/confirmInline) on this
+		 * same overlay, never closing it first the way done()-dispatch used to. */
+		async function runRowActionInline(action: { type: "update" | "remove" | "disable"; row: Row }): Promise<void> {
+			updatingRowName = action.row.name;
+			tui.requestRender();
+			const outcome = action.type === "disable"
+				? await applyDisableExtensions(action.row, natives, inlineCtx)
+				: await applyPackageChoice(action.type === "update" ? `Update to ${action.row.latest}` : "Remove", action.row, natives, inlineCtx);
+			updatingRowName = undefined;
+			if (outcome === "changed") {
+				done(undefined); // ctx.reload() already replaced the session
+				return;
+			}
+			const reloaded = await loadRows(natives);
+			if (reloaded.error) ctx.ui.notify(`refresh failed: ${reloaded.error}`, "error");
+			else rows = reloaded.rows;
+			applyFilter();
+			tui.requestRender();
+		}
+
 		/** U -- runs the whole approve+update+notify+reload flow without ever
 		 * closing this panel or replacing the list: each row's own settled
 		 * outcome (spinner while in flight, then a real ✓/✗ plus a bounded tail
@@ -443,7 +487,7 @@ function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows
 		async function runUpdateAllInline(): Promise<void> {
 			const outdated = rows.filter((row) => row.hasUpdate);
 			settled.clear();
-			const outcome = await approveAndRunUpdateAll(outdated, natives, ctx, (batch, approved) => {
+			const outcome = await approveAndRunUpdateAll(outdated, natives, inlineCtx, (batch, approved) => {
 				spinner.start(() => tui.requestRender());
 				return performUpdateAll(batch, natives, approved, (event) => {
 					updatingRowName = event.row.name;
@@ -583,11 +627,17 @@ function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows
 		return {
 			render(width: number): string[] {
 				envelope.setTitle(panelTitle());
+				envelope.setContent(pendingDialog ?? body);
 				return envelope.render(width);
 			},
 			invalidate: () => envelope.invalidate(),
 			handleInput(data: string) {
-				if (updatingRowName) return; // the installer owns input until it finishes
+				if (pendingDialog) {
+					pendingDialog.handleInput(data);
+					tui.requestRender();
+					return;
+				}
+				if (updatingRowName) return; // the mutation/installer owns input until it finishes
 
 				if (searchActive) {
 					if (data === "\x1b") {
@@ -632,17 +682,17 @@ function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows
 						return;
 					case "u": {
 						const row = filtered[selectedIndex];
-						if (row?.hasUpdate) done({ type: "update", row });
+						if (row?.hasUpdate) void runRowActionInline({ type: "update", row });
 						return;
 					}
 					case "x": {
 						const row = filtered[selectedIndex];
-						if (row) done({ type: "remove", row });
+						if (row) void runRowActionInline({ type: "remove", row });
 						return;
 					}
 					case "d": {
 						const row = filtered[selectedIndex];
-						if (row) done({ type: "disable", row });
+						if (row) void runRowActionInline({ type: "disable", row });
 						return;
 					}
 					case "c": {
@@ -655,9 +705,7 @@ function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows
 						if (!row) return;
 						void (async () => {
 							const choice = await showActionMenu(ctx, row);
-							if (choice === "update") done({ type: "update", row });
-							else if (choice === "remove") done({ type: "remove", row });
-							else if (choice === "disable") done({ type: "disable", row });
+							if (choice === "update" || choice === "remove" || choice === "disable") void runRowActionInline({ type: choice, row });
 							else if (choice === "config") done({ type: "config", row });
 						})();
 						return;

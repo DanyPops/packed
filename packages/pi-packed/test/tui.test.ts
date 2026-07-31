@@ -268,9 +268,14 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 						const tui = { requestRender() { renderedFrames.push(component.render(60).join("\n")); } };
 						const component = factory(tui, theme, {}, resolve);
 						component.handleInput("U");
+						// approval dialog, then (once the batch genuinely changed something) the separate reload dialog -- both inline now.
+						setTimeout(() => {
+							component.handleInput("y");
+							setTimeout(() => component.handleInput("y"), 0);
+						}, 0);
 					});
 				},
-				async confirm() { return true; },
+				async confirm() { throw new Error("must not be called -- confirms route through the inline Dialog"); },
 				notify() {},
 			},
 			async reload() {},
@@ -311,11 +316,15 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 						const tui = { requestRender() { renderedFrames.push(component.render(60).join("\n")); } };
 						const component = factory(tui, theme, {}, resolve);
 						component.handleInput("U");
-						// the failed batch stays open in list mode (never "changed") -- close it once settled.
-						setTimeout(() => component.handleInput("\x1b"), 0);
+						// approval only -- a fully-failed batch (changed === 0) never reaches
+						// the separate reload confirm at all. Then close once settled.
+						setTimeout(() => {
+							component.handleInput("y");
+							setTimeout(() => component.handleInput("\x1b"), 0);
+						}, 0);
 					});
 				},
-				async confirm() { return true; },
+				async confirm() { throw new Error("must not be called -- confirms route through the inline Dialog"); },
 				notify() {},
 			},
 			async reload() {},
@@ -349,9 +358,13 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 					return new Promise((resolve) => {
 						const component = factory({ requestRender() {} }, { fg: (_c: string, s: string) => s, bold: (s: string) => s }, {}, resolve);
 						component.handleInput("U");
+						setTimeout(() => {
+							component.handleInput("y"); // approval
+							setTimeout(() => component.handleInput("y"), 0); // reload
+						}, 0);
 					});
 				},
-				async confirm() { return true; },
+				async confirm() { throw new Error("must not be called -- confirms route through the inline Dialog"); },
 				notify() {},
 			},
 			async reload() {},
@@ -382,11 +395,15 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 					return new Promise((resolve) => {
 						const component = factory({ requestRender() { renderRequests += 1; } }, { fg: (_c: string, s: string) => s, bold: (s: string) => s }, {}, resolve);
 						component.handleInput("U");
-						// after the inline update settles (nothing changed, back in list mode), press esc to close
-						setTimeout(() => component.handleInput("\x1b"), 0);
+						// approval only -- nothing changed (changed === 0) never reaches the
+						// separate reload confirm. Then, back in list mode, press esc to close.
+						setTimeout(() => {
+							component.handleInput("y");
+							setTimeout(() => component.handleInput("\x1b"), 0);
+						}, 0);
 					});
 				},
-				async confirm() { return true; },
+				async confirm() { throw new Error("must not be called -- confirms route through the inline Dialog"); },
 				notify() {},
 			},
 			async reload() {},
@@ -458,20 +475,72 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		expect(customCallCount).toBe(3);
 	});
 
-	it("dispatches disable and returns without reopening once toggling something actually reloaded", async () => {
+	it("renders its approval and reload confirms as an inline Dialog on this SAME overlay, dispatched by literal y/n keys -- never a separate ctx.ui.confirm", async () => {
+		// mutationApproval "never" skips the approval step entirely, leaving
+		// confirmReload as the one dialog to interact with -- isolates the
+		// exact behavior a real user reported: ctx.ui.confirm opened as its
+		// own distinct overlay ("a new window"), arrow-select only, no y/n.
+		let nativeConfirmCalled = false;
 		let customCallCount = 0;
+		let removed = 0;
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom() { customCallCount += 1; return { type: "disable", row }; },
-				async confirm() { return true; },
+				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
+					customCallCount += 1;
+					return new Promise((resolve) => {
+						const theme = { fg: (_c: string, s: string) => s, bold: (s: string) => s };
+						const component = factory({ requestRender() {} }, theme, {}, resolve);
+						component.handleInput("x");
+						setTimeout(() => {
+							// the inline dialog is genuinely part of THIS SAME component's own render output.
+							expect(component.render(60).join("\n")).toContain("Reload Pi now?");
+							component.handleInput("y");
+						}, 0);
+					});
+				},
+				async confirm() { nativeConfirmCalled = true; return true; }, // must never be reached
 				notify() {},
 			},
 			async reload() {},
 		} as unknown as ExtensionCommandContext;
-		const toggled: string[] = [];
 		const natives = {
-			async installed() { return []; },
+			async installed() { return [{ name: "pi-lsp", installed: "1.0.0" }]; },
+			async updates() { return []; },
+			async security() { return { mutationApproval: "never" as const }; },
+			async remove(name: string) { expect(name).toBe("pi-lsp"); removed += 1; return ""; },
+		} as unknown as Natives;
+
+		await showPackedPanel(ctx, natives);
+
+		expect(removed).toBe(1);
+		expect(nativeConfirmCalled).toBe(false); // routed inline, never the native dialog
+		expect(customCallCount).toBe(1); // one overlay throughout -- never closed and reopened
+	});
+
+	it("d disables extensions inline via its own approval+reload dialogs, closing this same overlay once it actually reloaded", async () => {
+		let customCallCount = 0;
+		const toggled: string[] = [];
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { handleInput(data: string): void }) {
+					customCallCount += 1;
+					return new Promise((resolve) => {
+						const component = factory({ requestRender() {} }, { fg: (_c: string, s: string) => s, bold: (s: string) => s }, {}, resolve);
+						component.handleInput("d");
+						setTimeout(() => {
+							component.handleInput("y"); // per-item toggle approval
+							setTimeout(() => component.handleInput("y"), 0); // reload confirm
+						}, 0);
+					});
+				},
+				notify() {},
+			},
+			async reload() {},
+		} as unknown as ExtensionCommandContext;
+		const natives = {
+			async installed() { return [{ name: "pi-lsp", installed: "1.0.0" }]; },
 			async updates() { return []; },
 			async security() { return { mutationApproval: "always" as const }; },
 			async listResources() { return { global: [{ source: "npm:pi-lsp", name: "pi-lsp", scope: "global" as const, extensions: [{ path: "extension/index.ts", enabled: true }], skills: [], prompts: [], themes: [] }], project: [] }; },
@@ -481,29 +550,35 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		await showPackedPanel(ctx, natives);
 
 		expect(toggled).toEqual(["extension/index.ts"]);
-		expect(customCallCount).toBe(1);
+		expect(customCallCount).toBe(1); // one overlay throughout -- confirms rendered inline, not stacked
 	});
 
-	it("refreshes rows and stays open (does not close) when a toggle's reload is deferred rather than declined outright", async () => {
+	it("refreshes rows and stays open (never reopens) when a toggle's reload is deferred rather than declined outright", async () => {
 		let customCallCount = 0;
-		let confirmCalls = 0;
 		let installedCalls = 0;
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom() {
+				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { handleInput(data: string): void }) {
 					customCallCount += 1;
-					// 1st open: dispatch disable. 2nd open (after the deferred refresh): close.
-					return customCallCount === 1 ? { type: "disable", row } : undefined;
+					return new Promise((resolve) => {
+						const component = factory({ requestRender() {} }, { fg: (_c: string, s: string) => s, bold: (s: string) => s }, {}, resolve);
+						component.handleInput("d");
+						setTimeout(() => {
+							component.handleInput("y"); // per-item toggle approval
+							setTimeout(() => {
+								component.handleInput("n"); // reload gate -- decline, defer
+								setTimeout(() => component.handleInput("\x1b"), 0); // close once settled, back in list mode
+							}, 0);
+						}, 0);
+					});
 				},
-				// 1st call: per-item toggle approval (yes). 2nd call: reload gate (no, defer).
-				async confirm() { confirmCalls += 1; return confirmCalls === 1; },
 				notify() {},
 			},
 			async reload() { throw new Error("must not reload -- this test defers"); },
 		} as unknown as ExtensionCommandContext;
 		const natives = {
-			async installed() { installedCalls += 1; return []; },
+			async installed() { installedCalls += 1; return [{ name: "pi-lsp", installed: "1.0.0" }]; },
 			async updates() { return []; },
 			async security() { return { mutationApproval: "always" as const }; },
 			async listResources() { return { global: [{ source: "npm:pi-lsp", name: "pi-lsp", scope: "global" as const, extensions: [{ path: "extension/index.ts", enabled: true }], skills: [], prompts: [], themes: [] }], project: [] }; },
@@ -512,7 +587,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 
 		await showPackedPanel(ctx, natives);
 
-		expect(customCallCount).toBe(2); // reopened instead of closing after the deferred toggle
+		expect(customCallCount).toBe(1); // never reopened a second overlay -- stayed on the same one throughout
 		expect(installedCalls).toBe(2); // initial load + the deferred-outcome refresh
 	});
 });

@@ -40,7 +40,7 @@
     },
     "packages/pi-packed": {
       "name": "@danypops/pi-packed",
-      "version": "0.16.0",
+      "version": "0.16.1",
       "dependencies": {
         "@danypops/packed": "^0.2.0",
         "@danypops/vehicle-client": "^0.1.1",

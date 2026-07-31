@@ -422,6 +422,50 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		expect(renderRequests).toBeGreaterThan(0); // switched into and back out of installer mode, not a silent no-op
 	});
 
+	it("shows 'already up to date' inline on the row itself, not only as a scrollback toast -- real bug, screenshot-reported", async () => {
+		// Confirmed live: pressing u on a row whose update call reports
+		// alreadyUpToDate produces ONLY a ctx.ui.notify toast (scrollback) --
+		// the panel's own rendered row gives zero indication anything happened,
+		// unlike a genuine update or failure (both settle into a real ✓/✗
+		// inline via the batch path's `settled` map, which runRowActionInline
+		// never populates for single-row actions at all).
+		const renderedFrames: string[] = [];
+		const notices: string[] = [];
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
+					return new Promise((resolve) => {
+						const theme = { fg: (_c: string, s: string) => s, bold: (s: string) => s };
+						const tui = { requestRender() { renderedFrames.push(component.render(70).join("\n")); } };
+						const component = factory(tui, theme, {}, resolve);
+						component.handleInput("u");
+						// "unchanged" never closes the panel (matches the batch path's own
+						// behavior) -- close it once settled, back in list mode.
+						setTimeout(() => component.handleInput("\x1b"), 0);
+					});
+				},
+				async confirm() { throw new Error("must not be called -- mutationApproval is never"); },
+				notify(m: string) { notices.push(m); },
+			},
+			async reload() { throw new Error("must not reload -- nothing changed"); },
+		} as unknown as ExtensionCommandContext;
+		const natives = {
+			async installed() { return [{ name: "pi-tickets", installed: "0.14.0" }]; },
+			async updates() { return [{ name: "pi-tickets", installed: "0.14.0", latest: "0.9.4" }]; }, // stale mirror, but that's a separate bug
+			async security() { return { mutationApproval: "never" as const }; },
+			async update() { return { output: "", reloadRequired: false, alreadyUpToDate: true, pinned: false, currentVersion: "0.14.0" }; },
+		} as unknown as Natives;
+
+		await showPackedPanel(ctx, natives);
+
+		// The toast still fires (scrollback is fine for that) --
+		expect(notices.some((n) => n.includes("already up to date at 0.14.0"))).toBe(true);
+		// -- but the panel itself must ALSO show it inline, next to the row.
+		const settledFrame = renderedFrames.find((frame) => frame.includes("pi-tickets") && frame.includes("already up to date"));
+		expect(settledFrame).toBeDefined();
+	});
+
 	it("dispatches config to showResourceConfig, scoped to the selected row, then returns to the same panel", async () => {
 		let customCallCount = 0;
 		let listResourcesCalled = false;

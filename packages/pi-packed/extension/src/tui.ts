@@ -33,7 +33,12 @@
  * genuinely different overlay stacked on top -- confirmed live as a real
  * user complaint). Declining a reload defers it: the mutation itself
  * already happened, and the panel stays open with refreshed rows instead
- * of ending the session. All data flows through the packed CLI (thin seam).
+ * of ending the session. Every non-"changed" settle point (already up to
+ * date, pinned, deferred, a genuine failure) shows its own real reason on
+ * that row too via the same settled map U's batch path uses, not only as
+ * a scrollback toast -- confirmed live as a real bug: a single-row update
+ * that turned out to be a no-op gave zero acknowledgment on the panel
+ * itself. All data flows through the packed CLI (thin seam).
  */
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder, rawKeyHint } from "@earendil-works/pi-coding-agent";
@@ -63,11 +68,19 @@ interface PanelAction {
  * "unchanged"/"cancelled" mean the panel keeps running as-is. */
 export type PackageChoiceOutcome = "changed" | "unchanged" | "cancelled" | "deferred";
 
+/** A non-"changed" settle point's own detail -- the exact reason nothing
+ * (or only a partial thing) happened, so a caller with somewhere to show
+ * it inline (a row's own status cell) isn't limited to the scrollback
+ * toast every outcome already gets via ctx.ui.notify. "changed" never
+ * calls this: ctx.reload() already replaces the session by then. */
+export interface PackageChoiceSettled { ok: boolean; message: string; }
+
 export async function applyPackageChoice(
 	choice: string | undefined,
 	row: Row,
 	natives: Natives,
 	ctx: ExtensionCommandContext,
+	onSettled?: (settled: PackageChoiceSettled) => void,
 ): Promise<PackageChoiceOutcome> {
 	if (choice?.startsWith("Update")) {
 		try {
@@ -84,18 +97,22 @@ export async function applyPackageChoice(
 					? `pinned to ${version ?? "an exact version"} -- pi update intentionally leaves pinned packages unchanged`
 					: `already up to date${version ? ` at ${version}` : ""}`;
 				ctx.ui.notify(`${row.name} is ${reason}.`, "info");
+				onSettled?.({ ok: true, message: reason });
 				return "unchanged";
 			}
 			const transition = outcome.previousVersion && outcome.currentVersion ? ` (${outcome.previousVersion} → ${outcome.currentVersion})` : "";
 			if (!(await confirmReload(ctx))) {
 				ctx.ui.notify(`Updated ${row.name}${transition}; reload pending -- run /reload when ready.`, "warning");
+				onSettled?.({ ok: true, message: `updated${transition}; reload pending` });
 				return "deferred";
 			}
 			ctx.ui.notify(`Updated ${row.name}${transition}; reloading Pi resources.`, "info");
 			await ctx.reload();
 			return "changed";
 		} catch (e) {
-			ctx.ui.notify(`update failed: ${e instanceof Error ? e.message : e}`, "error");
+			const message = e instanceof Error ? e.message : String(e);
+			ctx.ui.notify(`update failed: ${message}`, "error");
+			onSettled?.({ ok: false, message });
 			return "cancelled";
 		}
 	}
@@ -109,13 +126,16 @@ export async function applyPackageChoice(
 			await natives.remove(row.name, approval.approved);
 			if (!(await confirmReload(ctx))) {
 				ctx.ui.notify(`Removed ${row.name}; reload pending -- run /reload when ready.`, "warning");
+				onSettled?.({ ok: true, message: "removed; reload pending" });
 				return "deferred";
 			}
 			ctx.ui.notify(`Removed ${row.name}; reloading Pi resources.`, "info");
 			await ctx.reload();
 			return "changed";
 		} catch (e) {
-			ctx.ui.notify(`remove failed: ${e instanceof Error ? e.message : e}`, "error");
+			const message = e instanceof Error ? e.message : String(e);
+			ctx.ui.notify(`remove failed: ${message}`, "error");
+			onSettled?.({ ok: false, message });
 			return "cancelled";
 		}
 	}
@@ -463,9 +483,15 @@ function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows
 		async function runRowActionInline(action: { type: "update" | "remove" | "disable"; row: Row }): Promise<void> {
 			updatingRowName = action.row.name;
 			tui.requestRender();
+			// A non-"changed" settle point (already up to date, pinned, deferred,
+			// a genuine failure) shows its own real reason on this row, the same
+			// settled map U's batch path already renders -- not just a scrollback
+			// toast, which was the whole bug: nothing on the panel itself ever
+			// acknowledged that a single-row action had even run.
+			const onSettled = (result: PackageChoiceSettled) => settled.set(action.row.name, { ok: result.ok, tail: result.message });
 			const outcome = action.type === "disable"
 				? await applyDisableExtensions(action.row, natives, inlineCtx)
-				: await applyPackageChoice(action.type === "update" ? `Update to ${action.row.latest}` : "Remove", action.row, natives, inlineCtx);
+				: await applyPackageChoice(action.type === "update" ? `Update to ${action.row.latest}` : "Remove", action.row, natives, inlineCtx, onSettled);
 			updatingRowName = undefined;
 			if (outcome === "changed") {
 				done(undefined); // ctx.reload() already replaced the session

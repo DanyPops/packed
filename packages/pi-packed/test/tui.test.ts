@@ -83,16 +83,71 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		expect(securityCalled).toBe(false);
 	});
 
-	it("dispatches updateAll and returns without reopening once the batch actually changed something", async () => {
+	it("opens as a real overlay, not a full-screen takeover", async () => {
+		let capturedOptions: unknown;
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom(_factory: unknown, options: unknown) {
+					capturedOptions = options;
+					return undefined; // esc
+				},
+				notify() {},
+			},
+		} as unknown as ExtensionCommandContext;
+		const natives = { async installed() { return []; }, async updates() { return []; } } as unknown as Natives;
+
+		await showPackedPanel(ctx, natives);
+
+		expect(capturedOptions).toMatchObject({ overlay: true });
+	});
+
+	it("renders the installer's own progress bar inline in the same panel while U is running", async () => {
+		const renderedFrames: string[] = [];
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
+					return new Promise((resolve) => {
+						const theme = { fg: (_c: string, s: string) => s, bold: (s: string) => s };
+						const tui = { requestRender() { renderedFrames.push(component.render(60).join("\n")); } };
+						const component = factory(tui, theme, {}, resolve);
+						component.handleInput("U");
+					});
+				},
+				async confirm() { return true; },
+				notify() {},
+			},
+			async reload() {},
+		} as unknown as ExtensionCommandContext;
+		const natives = {
+			async installed() { return [{ name: "pi-a", installed: "1.0.0" }]; },
+			async updates() { return [{ name: "pi-a", installed: "1.0.0", latest: "1.1.0" }]; },
+			async security() { return { mutationApproval: "always" as const }; },
+			async update() { return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false }; },
+		} as unknown as Natives;
+
+		await showPackedPanel(ctx, natives);
+
+		expect(renderedFrames.some((frame) => frame.includes("Updating packages"))).toBe(true);
+		expect(renderedFrames.some((frame) => frame.includes("pi-a"))).toBe(true);
+		expect(renderedFrames.some((frame) => frame.includes("100%"))).toBe(true);
+	});
+
+	it("U runs the installer inline on the same overlay and closes once the batch actually changed something", async () => {
+		// U is handled entirely inside renderPanel's own component now -- no
+		// second ctx.ui.custom call for progress. Simulate the real keypress
+		// on the real returned component instead of scripting a canned action.
 		let customCallCount = 0;
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => unknown) {
+				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { handleInput(data: string): void }) {
 					customCallCount += 1;
-					// 1st: packages panel dispatch. 2nd: applyUpdateAll's own progress overlay -- run for real.
-					if (customCallCount === 1) return { type: "updateAll" };
-					return new Promise((resolve) => factory({ requestRender() {} }, { fg: (_c: string, s: string) => s, bold: (s: string) => s }, {}, resolve));
+					return new Promise((resolve) => {
+						const component = factory({ requestRender() {} }, { fg: (_c: string, s: string) => s, bold: (s: string) => s }, {}, resolve);
+						component.handleInput("U");
+					});
 				},
 				async confirm() { return true; },
 				notify() {},
@@ -110,7 +165,42 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		await showPackedPanel(ctx, natives);
 
 		expect(updated).toEqual(["npm:pi-a"]);
-		expect(customCallCount).toBe(2); // 1: panel dispatch, 2: the progress overlay -- returned instead of reopening since reload already ended the session
+		expect(customCallCount).toBe(1); // one overlay throughout: list -> installer -> closed
+	});
+
+	it("U refreshes rows in place and stays open on the same overlay when nothing actually changed", async () => {
+		let customCallCount = 0;
+		const updateCalls: string[] = [];
+		let renderRequests = 0;
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { handleInput(data: string): void }) {
+					customCallCount += 1;
+					return new Promise((resolve) => {
+						const component = factory({ requestRender() { renderRequests += 1; } }, { fg: (_c: string, s: string) => s, bold: (s: string) => s }, {}, resolve);
+						component.handleInput("U");
+						// after the inline update settles (nothing changed, back in list mode), press esc to close
+						setTimeout(() => component.handleInput("\x1b"), 0);
+					});
+				},
+				async confirm() { return true; },
+				notify() {},
+			},
+			async reload() {},
+		} as unknown as ExtensionCommandContext;
+		const natives = {
+			async installed() { return [{ name: "pi-a", installed: "1.0.0" }]; },
+			async updates() { return [{ name: "pi-a", installed: "1.0.0", latest: "1.1.0" }]; },
+			async security() { return { mutationApproval: "always" as const }; },
+			async update(source: string) { updateCalls.push(source); return { output: "", reloadRequired: false, alreadyUpToDate: true, pinned: false }; },
+		} as unknown as Natives;
+
+		await showPackedPanel(ctx, natives);
+
+		expect(updateCalls).toEqual(["npm:pi-a"]); // the installer genuinely ran
+		expect(customCallCount).toBe(1); // never reopened a second overlay -- ran inline, returned to the list, closed on esc
+		expect(renderRequests).toBeGreaterThan(0); // switched into and back out of installer mode, not a silent no-op
 	});
 
 	it("dispatches config to showResourceConfig, scoped to the selected row, then returns to the same panel", async () => {

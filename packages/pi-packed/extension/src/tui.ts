@@ -6,9 +6,12 @@
  * only (x remove -- there is no safe "remove every installed package"
  * bulk analog, so no X is bound). Adds d disable/enable this package's
  * extensions, c jump to full resource config, f find/install new
- * packages, s settings. Enter opens a floating (`ctx.ui.custom` with
- * overlay:true) action menu instead of a full-screen prompt, so the list
- * underneath never disappears. All data flows through the packed CLI
+ * packages, s settings. The panel itself is a floating overlay
+ * (`ctx.ui.custom` with overlay:true), and Enter opens a second, smaller
+ * overlay action menu on top of it. U's batch update renders its progress
+ * bar inline on this same overlay instead of opening a separate one --
+ * the list flips to a progress view, then back (or closes, if a reload
+ * already replaced the session). All data flows through the packed CLI
  * (thin seam).
  */
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
@@ -25,7 +28,7 @@ import { showDiscoverPanel } from "./discover.js";
 import { menuTheme } from "./menu-theme.js";
 
 interface PanelAction {
-	type: "update" | "updateAll" | "remove" | "disable" | "config" | "find" | "refresh" | "settings";
+	type: "update" | "remove" | "disable" | "config" | "find" | "refresh" | "settings";
 	row?: Row;
 }
 
@@ -88,11 +91,73 @@ export async function applyPackageChoice(
 
 interface UpdateAllResult { changed: number; failedNames: string[]; }
 
-/** Floats a live progress bar over the still-open panel while the batch
- * runs sequentially -- the lazy.nvim-style "Updating N package(s)" window,
- * instead of one static toast with no visible progress until it's all
- * done. Resolves on its own once the last package finishes; nothing the
- * user presses closes it early. */
+interface UpdateProgressEvent { row: Row; index: number; total: number; phase: "start" | "done"; }
+
+/** The core sequential-update loop, with no UI of its own -- reports each
+ * step via onProgress so any host surface (a floating overlay, or the
+ * packages panel's own body) can render it however fits. */
+async function performUpdateAll(
+	outdated: Row[],
+	natives: Natives,
+	approved: boolean | undefined,
+	onProgress?: (event: UpdateProgressEvent) => void,
+): Promise<UpdateAllResult> {
+	let changed = 0;
+	const failedNames: string[] = [];
+	for (let i = 0; i < outdated.length; i++) {
+		const row = outdated[i]!;
+		onProgress?.({ row, index: i, total: outdated.length, phase: "start" });
+		try {
+			const outcome = await natives.update(`npm:${row.name}`, approved);
+			if (outcome.reloadRequired) changed += 1;
+		} catch (e) {
+			failedNames.push(`${row.name}: ${e instanceof Error ? e.message : e}`);
+		}
+		onProgress?.({ row, index: i, total: outdated.length, phase: "done" });
+	}
+	return { changed, failedNames };
+}
+
+/** Approves once for the whole batch, runs it via whatever runBatch does
+ * (a floating overlay for applyUpdateAll's own public API, or renderPanel's
+ * embedded progress bar), then reports the combined result -- shared so
+ * both surfaces stay behaviorally identical. */
+async function approveAndRunUpdateAll(
+	outdated: Row[],
+	natives: Natives,
+	ctx: ExtensionCommandContext,
+	runBatch: (outdated: Row[], approved: boolean | undefined) => Promise<UpdateAllResult>,
+): Promise<PackageChoiceOutcome> {
+	if (outdated.length === 0) {
+		ctx.ui.notify("Nothing to update.", "info");
+		return "unchanged";
+	}
+	const approval = await approvePackageOperation(
+		"update",
+		`pi update --extension ${outdated.map((row) => `npm:${row.name}`).join(" ")}`,
+		natives,
+		ctx,
+	);
+	if (!approval.allowed) {
+		ctx.ui.notify(approval.message ?? "update denied", "warning");
+		return "cancelled";
+	}
+	const { changed, failedNames } = await runBatch(outdated, approval.approved);
+	for (const failure of failedNames) ctx.ui.notify(`update failed: ${failure}`, "error");
+	if (changed === 0) {
+		ctx.ui.notify(failedNames.length > 0 ? `No packages updated; ${failedNames.length} failed.` : "All packages already up to date.", failedNames.length > 0 ? "warning" : "info");
+		return failedNames.length > 0 ? "cancelled" : "unchanged";
+	}
+	ctx.ui.notify(`Updated ${changed} package(s)${failedNames.length > 0 ? `, ${failedNames.length} failed` : ""}; reloading Pi resources.`, "info");
+	await ctx.reload();
+	return "changed";
+}
+
+/** Floats its own progress-bar overlay over the still-open panel -- kept
+ * for applyUpdateAll's own public API (and anything calling it directly,
+ * outside the packages panel). renderPanel's own U key does not use this;
+ * it renders the same progress bar inline on its own already-open overlay
+ * instead of stacking a second one. */
 async function runUpdatesWithProgress(
 	outdated: Row[],
 	natives: Natives,
@@ -112,24 +177,11 @@ async function runUpdatesWithProgress(
 			container.addChild(new Spacer(1));
 			container.addChild(border());
 
-			void (async () => {
-				let changed = 0;
-				const failedNames: string[] = [];
-				for (let i = 0; i < outdated.length; i++) {
-					const row = outdated[i]!;
-					bar.setLabel(`${row.name} (${i + 1}/${outdated.length})`);
-					tui.requestRender();
-					try {
-						const outcome = await natives.update(`npm:${row.name}`, approved);
-						if (outcome.reloadRequired) changed += 1;
-					} catch (e) {
-						failedNames.push(`${row.name}: ${e instanceof Error ? e.message : e}`);
-					}
-					bar.setValue(i + 1);
-					tui.requestRender();
-				}
-				done({ changed, failedNames });
-			})();
+			performUpdateAll(outdated, natives, approved, (event) => {
+				bar.setLabel(`${event.row.name} (${event.index + 1}/${event.total})`);
+				if (event.phase === "done") bar.setValue(event.index + 1);
+				tui.requestRender();
+			}).then(done);
 
 			return { render: (width: number) => container.render(width), invalidate: () => container.invalidate(), handleInput() {} };
 		},
@@ -139,32 +191,12 @@ async function runUpdatesWithProgress(
 
 /** U -- update every outdated row with one combined approval and one
  * reload, instead of applyPackageChoice's own per-call reload (which
- * would end the session after the first successful update). */
+ * would end the session after the first successful update). Public API:
+ * opens its own progress overlay. renderPanel's own U key instead renders
+ * progress inline via approveAndRunUpdateAll + performUpdateAll directly. */
 export async function applyUpdateAll(rows: Row[], natives: Natives, ctx: ExtensionCommandContext): Promise<PackageChoiceOutcome> {
 	const outdated = rows.filter((row) => row.hasUpdate);
-	if (outdated.length === 0) {
-		ctx.ui.notify("Nothing to update.", "info");
-		return "unchanged";
-	}
-	const approval = await approvePackageOperation(
-		"update",
-		`pi update --extension ${outdated.map((row) => `npm:${row.name}`).join(" ")}`,
-		natives,
-		ctx,
-	);
-	if (!approval.allowed) {
-		ctx.ui.notify(approval.message ?? "update denied", "warning");
-		return "cancelled";
-	}
-	const { changed, failedNames } = await runUpdatesWithProgress(outdated, natives, approval.approved, ctx);
-	for (const failure of failedNames) ctx.ui.notify(`update failed: ${failure}`, "error");
-	if (changed === 0) {
-		ctx.ui.notify(failedNames.length > 0 ? `No packages updated; ${failedNames.length} failed.` : "All packages already up to date.", failedNames.length > 0 ? "warning" : "info");
-		return failedNames.length > 0 ? "cancelled" : "unchanged";
-	}
-	ctx.ui.notify(`Updated ${changed} package(s)${failedNames.length > 0 ? `, ${failedNames.length} failed` : ""}; reloading Pi resources.`, "info");
-	await ctx.reload();
-	return "changed";
+	return approveAndRunUpdateAll(outdated, natives, ctx, (batch, approved) => runUpdatesWithProgress(batch, natives, approved, ctx));
 }
 
 /** d -- toggles every declared extension of this package on or off in one
@@ -248,8 +280,10 @@ export async function showPackedPanel(ctx: ExtensionCommandContext, natives: Nat
 	}
 
 	// Panel loop: actions resolve the component, run outside it, then reopen.
+	// U/updateAll is handled entirely inside renderPanel itself (progress
+	// rendered on the same already-open overlay) and never reaches here.
 	for (;;) {
-		const action = await renderPanel(ctx, rows);
+		const action = await renderPanel(ctx, natives, rows);
 		if (!action) return; // closed
 
 		if (action.type === "refresh") {
@@ -266,12 +300,6 @@ export async function showPackedPanel(ctx: ExtensionCommandContext, natives: Nat
 		if (action.type === "find") {
 			await showDiscoverPanel(ctx, natives);
 			continue; // a successful install already reloaded; a no-op returns here
-		}
-
-		if (action.type === "updateAll") {
-			const outcome = await applyUpdateAll(rows, natives, ctx);
-			if (outcome === "changed") return; // ctx.reload() already replaced the session
-			continue;
 		}
 
 		if (action.type === "config") {
@@ -293,19 +321,51 @@ export async function showPackedPanel(ctx: ExtensionCommandContext, natives: Nat
 	}
 }
 
-function renderPanel(ctx: ExtensionCommandContext, rows: Row[]): Promise<PanelAction | undefined> {
+function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows: Row[]): Promise<PanelAction | undefined> {
 	return ctx.ui.custom<PanelAction | undefined>((tui, theme, _kb, done) => {
+		let rows = initialRows;
 		let mode: ViewMode = "all";
 		const searchInput = new Input();
 		let searchActive = false;
 		let filtered = visibleRows(rows, mode);
 		let selectedIndex = 0;
+		// Set only while U's batch update is running -- the installer, rendered
+		// inline on this same still-open overlay instead of a second one.
+		let installing: ProgressBar | undefined;
 
 		const maxVisible = 20;
 
 		function applyFilter(): void {
 			filtered = filterRows(visibleRows(rows, mode), searchInput.getValue());
 			selectedIndex = 0;
+		}
+
+		/** U -- runs the whole approve+update+notify+reload flow without ever
+		 * closing this panel: progress renders on the same overlay via
+		 * `installing`, and rows refresh in place afterward unless a reload
+		 * already ended the session. */
+		async function runUpdateAllInline(): Promise<void> {
+			const outdated = rows.filter((row) => row.hasUpdate);
+			const outcome = await approveAndRunUpdateAll(outdated, natives, ctx, (batch, approved) => {
+				const bar = new ProgressBar({ value: 0, max: batch.length, label: `${batch[0]?.name ?? ""} (1/${batch.length})`, style: (s) => theme.fg("accent", s) });
+				installing = bar;
+				tui.requestRender();
+				return performUpdateAll(batch, natives, approved, (event) => {
+					bar.setLabel(`${event.row.name} (${event.index + 1}/${event.total})`);
+					if (event.phase === "done") bar.setValue(event.index + 1);
+					tui.requestRender();
+				});
+			});
+			installing = undefined;
+			if (outcome === "changed") {
+				done(undefined); // ctx.reload() already replaced the session
+				return;
+			}
+			const reloaded = await loadRows(natives);
+			if (reloaded.error) ctx.ui.notify(`refresh failed: ${reloaded.error}`, "error");
+			else rows = reloaded.rows;
+			applyFilter();
+			tui.requestRender();
 		}
 
 		const header = {
@@ -371,20 +431,38 @@ function renderPanel(ctx: ExtensionCommandContext, rows: Row[]): Promise<PanelAc
 		};
 
 		const border = () => new DynamicBorder((s) => theme.fg("border", s));
-		const container = new Container();
-		container.addChild(new Spacer(1));
-		container.addChild(border());
-		container.addChild(new Spacer(1));
-		container.addChild(header);
-		container.addChild(new Spacer(1));
-		container.addChild(list);
-		container.addChild(new Spacer(1));
-		container.addChild(border());
+
+		function buildListContainer(): Container {
+			const container = new Container();
+			container.addChild(new Spacer(1));
+			container.addChild(border());
+			container.addChild(new Spacer(1));
+			container.addChild(header);
+			container.addChild(new Spacer(1));
+			container.addChild(list);
+			container.addChild(new Spacer(1));
+			container.addChild(border());
+			return container;
+		}
+
+		function buildInstallingContainer(bar: ProgressBar): Container {
+			const container = new Container();
+			container.addChild(new Spacer(1));
+			container.addChild(border());
+			container.addChild({ invalidate() {}, render: (_width: number) => [theme.bold("Updating packages")] });
+			container.addChild(new Spacer(1));
+			container.addChild(bar);
+			container.addChild(new Spacer(1));
+			container.addChild(border());
+			return container;
+		}
 
 		return {
-			render: (width: number) => container.render(width),
-			invalidate: () => container.invalidate(),
+			render: (width: number) => (installing ? buildInstallingContainer(installing) : buildListContainer()).render(width),
+			invalidate: () => (installing ? buildInstallingContainer(installing) : buildListContainer()).invalidate(),
 			handleInput(data: string) {
+				if (installing) return; // the installer owns the panel until it finishes
+
 				if (searchActive) {
 					if (data === "\x1b") {
 						searchActive = false;
@@ -424,7 +502,7 @@ function renderPanel(ctx: ExtensionCommandContext, rows: Row[]): Promise<PanelAc
 						done({ type: "find" });
 						return;
 					case "U":
-						done({ type: "updateAll" });
+						void runUpdateAllInline();
 						return;
 					case "u": {
 						const row = filtered[selectedIndex];
@@ -467,5 +545,5 @@ function renderPanel(ctx: ExtensionCommandContext, rows: Row[]): Promise<PanelAc
 				tui.requestRender();
 			},
 		};
-	});
+	}, { overlay: true, overlayOptions: { width: "70%", maxHeight: "70%", anchor: "center" } });
 }

@@ -6,18 +6,19 @@
  * only (x remove -- there is no safe "remove every installed package"
  * bulk analog, so no X is bound). Adds d disable/enable this package's
  * extensions, c jump to full resource config, f find/install new
- * packages, s settings. The panel itself is a floating overlay
- * (`ctx.ui.custom` with overlay:true), and Enter opens a second, smaller
- * overlay action menu on top of it. U's batch update renders its progress
- * bar inline on this same overlay instead of opening a separate one --
- * the list flips to a progress view, then back (or closes, if a reload
- * already replaced the session). All data flows through the packed CLI
- * (thin seam).
+ * packages, s settings. The panel itself is a real bordered (rounded)
+ * floating overlay (`ctx.ui.custom` with overlay:true, Malevich's
+ * Envelope for the box), anchored to the top so its header stays put and
+ * only the footer moves as content height changes. Enter opens a second,
+ * smaller overlay action menu on top of it. U's batch update stays on
+ * this same package list -- progress renders inline next to the row
+ * currently being updated, not as a separate screen. All data flows
+ * through the packed CLI (thin seam).
  */
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder, rawKeyHint } from "@earendil-works/pi-coding-agent";
-import { Container, Input, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { Menu, ProgressBar, type MenuItem } from "malevich-tui-components";
+import { Container, Input, Spacer, truncateToWidth } from "@earendil-works/pi-tui";
+import { Envelope, Menu, ProgressBar, type MenuItem } from "malevich-tui-components";
 import { filterRows, mergeRows, nextMode, visibleRows } from "./model.js";
 import type { Row, ViewMode } from "./model.js";
 import type { Natives, PackageResources } from "./packed.js";
@@ -329,9 +330,11 @@ function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows
 		let searchActive = false;
 		let filtered = visibleRows(rows, mode);
 		let selectedIndex = 0;
-		// Set only while U's batch update is running -- the installer, rendered
-		// inline on this same still-open overlay instead of a second one.
-		let installing: ProgressBar | undefined;
+		// Set only while U's batch update is running. The list stays fully
+		// visible throughout -- this just names which row the shared bar
+		// (below) is currently sitting next to.
+		let updatingRowName: string | undefined;
+		const updatingBar = new ProgressBar({ value: 0, max: 1, width: 10, style: (s) => theme.fg("accent", s) });
 
 		const maxVisible = 20;
 
@@ -341,22 +344,23 @@ function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows
 		}
 
 		/** U -- runs the whole approve+update+notify+reload flow without ever
-		 * closing this panel: progress renders on the same overlay via
-		 * `installing`, and rows refresh in place afterward unless a reload
-		 * already ended the session. */
+		 * closing this panel or replacing the list: each step's progress
+		 * appears inline next to the row currently being updated, via
+		 * updatingRowName/updatingBar, which list's own render checks. Rows
+		 * refresh in place afterward unless a reload already ended the
+		 * session. */
 		async function runUpdateAllInline(): Promise<void> {
 			const outdated = rows.filter((row) => row.hasUpdate);
 			const outcome = await approveAndRunUpdateAll(outdated, natives, ctx, (batch, approved) => {
-				const bar = new ProgressBar({ value: 0, max: batch.length, label: `${batch[0]?.name ?? ""} (1/${batch.length})`, style: (s) => theme.fg("accent", s) });
-				installing = bar;
-				tui.requestRender();
+				updatingBar.setValue(0);
+				updatingBar.setMax(batch.length);
 				return performUpdateAll(batch, natives, approved, (event) => {
-					bar.setLabel(`${event.row.name} (${event.index + 1}/${event.total})`);
-					if (event.phase === "done") bar.setValue(event.index + 1);
+					updatingRowName = event.row.name;
+					if (event.phase === "done") updatingBar.setValue(event.index + 1);
 					tui.requestRender();
 				});
 			});
-			installing = undefined;
+			updatingRowName = undefined;
 			if (outcome === "changed") {
 				done(undefined); // ctx.reload() already replaced the session
 				return;
@@ -368,12 +372,15 @@ function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows
 			tui.requestRender();
 		}
 
+		function panelTitle(): string {
+			if (updatingRowName) return "Packages · updating…";
+			const outdated = rows.filter((r) => r.hasUpdate).length;
+			return outdated > 0 ? `Packages · ${outdated} update(s)` : "Packages";
+		}
+
 		const header = {
 			invalidate() {},
 			render(width: number): string[] {
-				const title = theme.bold("Packages");
-				const outdated = rows.filter((r) => r.hasUpdate).length;
-				const badge = outdated > 0 ? theme.fg("warning", ` ${outdated} update(s)`) : "";
 				const hint = searchActive
 					? rawKeyHint("esc", "clear")
 					: rawKeyHint("enter", "menu") +
@@ -391,8 +398,7 @@ function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows
 						rawKeyHint("s", "settings") +
 						theme.fg("muted", " · ") +
 						rawKeyHint("esc", "close");
-				const spacing = Math.max(1, width - visibleWidth(title) - visibleWidth(badge) - visibleWidth(hint));
-				const line1 = truncateToWidth(`${title}${badge}${" ".repeat(spacing)}${hint}`, width, "");
+				const line1 = truncateToWidth(hint, width, "");
 				const dot = "·";
 				const line2 = truncateToWidth(
 					theme.fg("muted", `view: ${mode} ${dot} / filter ${dot} tab view ${dot} r refresh ${dot} ${rows.length} installed`),
@@ -421,7 +427,10 @@ function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows
 					const cursor = selected ? theme.fg("accent", "❯") : " ";
 					const name = selected ? theme.bold(row.name) : row.name;
 					const ver = theme.fg("dim", `@${row.version}`);
-					const upd = row.hasUpdate ? theme.fg("warning", ` ↑${row.latest}`) : "";
+					const isUpdating = updatingRowName === row.name;
+					const upd = isUpdating
+						? theme.fg("accent", `  ${updatingBar.format(10)} updating…`)
+						: row.hasUpdate ? theme.fg("warning", ` ↑${row.latest}`) : "";
 					lines.push(truncateToWidth(`${cursor} ${name}${ver}${upd}`, width, ""));
 				}
 				const hasScroll = start > 0 || end < filtered.length;
@@ -430,38 +439,30 @@ function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows
 			},
 		};
 
-		const border = () => new DynamicBorder((s) => theme.fg("border", s));
-
-		function buildListContainer(): Container {
-			const container = new Container();
-			container.addChild(new Spacer(1));
-			container.addChild(border());
-			container.addChild(new Spacer(1));
-			container.addChild(header);
-			container.addChild(new Spacer(1));
-			container.addChild(list);
-			container.addChild(new Spacer(1));
-			container.addChild(border());
-			return container;
-		}
-
-		function buildInstallingContainer(bar: ProgressBar): Container {
-			const container = new Container();
-			container.addChild(new Spacer(1));
-			container.addChild(border());
-			container.addChild({ invalidate() {}, render: (_width: number) => [theme.bold("Updating packages")] });
-			container.addChild(new Spacer(1));
-			container.addChild(bar);
-			container.addChild(new Spacer(1));
-			container.addChild(border());
-			return container;
-		}
+		// Real bordered box (rounded corners), not just a horizontal rule --
+		// title carries the live update badge/status instead of a header line.
+		const envelope = new Envelope({
+			title: panelTitle(),
+			borderStyle: "rounded",
+			style: (s) => theme.fg("border", s),
+			titleStyle: (s) => theme.bold(theme.fg("accent", s)),
+		});
+		const body = {
+			invalidate() { header.invalidate(); list.invalidate(); },
+			render(width: number): string[] {
+				return [...header.render(width), "", ...list.render(width)];
+			},
+		};
+		envelope.setContent(body);
 
 		return {
-			render: (width: number) => (installing ? buildInstallingContainer(installing) : buildListContainer()).render(width),
-			invalidate: () => (installing ? buildInstallingContainer(installing) : buildListContainer()).invalidate(),
+			render(width: number): string[] {
+				envelope.setTitle(panelTitle());
+				return envelope.render(width);
+			},
+			invalidate: () => envelope.invalidate(),
 			handleInput(data: string) {
-				if (installing) return; // the installer owns the panel until it finishes
+				if (updatingRowName) return; // the installer owns input until it finishes
 
 				if (searchActive) {
 					if (data === "\x1b") {
@@ -545,5 +546,5 @@ function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows
 				tui.requestRender();
 			},
 		};
-	}, { overlay: true, overlayOptions: { width: "70%", maxHeight: "70%", anchor: "center" } });
+	}, { overlay: true, overlayOptions: { width: "70%", maxHeight: "70%", anchor: "top-center", offsetY: 1 } });
 }

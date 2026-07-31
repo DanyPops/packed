@@ -1,8 +1,15 @@
 import { describe, expect, it } from "bun:test";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { initTheme } from "@earendil-works/pi-coding-agent";
 import { applyDisableExtensions, applyPackageChoice, applyUpdateAll, showPackedPanel } from "../extension/src/tui.ts";
 import type { Natives, PackageResources } from "../extension/src/packed.ts";
 import type { Row } from "../extension/src/model.ts";
+
+// rawKeyHint (used by the panel's own header) reads pi-coding-agent's global
+// theme singleton directly, the same as DynamicBorder -- a real Pi session
+// always initializes this before extension code runs; tests that actually
+// call render() must do the same or it throws.
+initTheme();
 
 const row: Row = { name: "pi-lsp", version: "1.0.0", latest: "1.1.0", hasUpdate: true };
 
@@ -83,7 +90,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		expect(securityCalled).toBe(false);
 	});
 
-	it("opens as a real overlay, not a full-screen takeover", async () => {
+	it("opens as a real overlay anchored to the top, not centered -- so its own header height never shifts as content height changes", async () => {
 		let capturedOptions: unknown;
 		const ctx = {
 			hasUI: true,
@@ -99,10 +106,37 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 
 		await showPackedPanel(ctx, natives);
 
-		expect(capturedOptions).toMatchObject({ overlay: true });
+		expect(capturedOptions).toMatchObject({ overlay: true, overlayOptions: { anchor: "top-center" } });
 	});
 
-	it("renders the installer's own progress bar inline in the same panel while U is running", async () => {
+	it("renders a real bordered box with rounded corners, not just a horizontal rule", async () => {
+		let rendered: string[] = [];
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[] }) {
+					return new Promise((resolve) => {
+						const theme = { fg: (_c: string, s: string) => s, bold: (s: string) => s };
+						const component = factory({ requestRender() {} }, theme, {}, resolve);
+						rendered = component.render(60);
+						resolve(undefined);
+					});
+				},
+				notify() {},
+			},
+		} as unknown as ExtensionCommandContext;
+		const natives = { async installed() { return [{ name: "pi-a", installed: "1.0.0" }]; }, async updates() { return []; } } as unknown as Natives;
+
+		await showPackedPanel(ctx, natives);
+
+		expect(rendered[0]).toStartWith("╭"); // rounded top-left corner
+		expect(rendered[0]).toContain("╮"); // rounded top-right corner
+		expect(rendered.at(-1)).toStartWith("╰"); // rounded bottom-left corner
+		expect(rendered.at(-1)).toEndWith("╯"); // rounded bottom-right corner
+		expect(rendered.some((line) => line.startsWith("│") && line.endsWith("│"))).toBe(true); // real vertical sides, not just top/bottom rules
+	});
+
+	it("renders the installer's own progress bar inline next to the updating row, without replacing the rest of the package list", async () => {
 		const renderedFrames: string[] = [];
 		const ctx = {
 			hasUI: true,
@@ -121,7 +155,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 			async reload() {},
 		} as unknown as ExtensionCommandContext;
 		const natives = {
-			async installed() { return [{ name: "pi-a", installed: "1.0.0" }]; },
+			async installed() { return [{ name: "pi-a", installed: "1.0.0" }, { name: "pi-b", installed: "2.0.0" }]; },
 			async updates() { return [{ name: "pi-a", installed: "1.0.0", latest: "1.1.0" }]; },
 			async security() { return { mutationApproval: "always" as const }; },
 			async update() { return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false }; },
@@ -129,9 +163,15 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 
 		await showPackedPanel(ctx, natives);
 
-		expect(renderedFrames.some((frame) => frame.includes("Updating packages"))).toBe(true);
-		expect(renderedFrames.some((frame) => frame.includes("pi-a"))).toBe(true);
-		expect(renderedFrames.some((frame) => frame.includes("100%"))).toBe(true);
+		// A frame captured mid-update: the updating row carries an inline bar
+		// (progress glyphs + "updating…"), and the OTHER, non-updating row is
+		// still rendered in the same frame -- the list was never replaced.
+		const midUpdate = renderedFrames.find((frame) => frame.includes("updating…"));
+		expect(midUpdate).toBeDefined();
+		expect(midUpdate).toContain("pi-a");
+		expect(midUpdate).toContain("pi-b");
+		expect(midUpdate).toMatch(/[\u2588\u2591]/); // the bar's own filled/empty glyphs
+		expect(renderedFrames.every((frame) => !frame.includes("Updating packages"))).toBe(true); // no separate full-screen swap
 	});
 
 	it("U runs the installer inline on the same overlay and closes once the batch actually changed something", async () => {

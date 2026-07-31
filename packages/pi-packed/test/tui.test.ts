@@ -136,6 +136,49 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		expect(rendered.some((line) => line.startsWith("│") && line.endsWith("│"))).toBe(true); // real vertical sides, not just top/bottom rules
 	});
 
+	it("renders the package list as a real column-aligned table (Malevich's Table), not ad hoc concatenated strings", async () => {
+		let rendered: string[] = [];
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[] }) {
+					return new Promise((resolve) => {
+						const theme = { fg: (_c: string, s: string) => s, bold: (s: string) => s };
+						const component = factory({ requestRender() {} }, theme, {}, resolve);
+						rendered = component.render(90);
+						resolve(undefined);
+					});
+				},
+				notify() {},
+			},
+		} as unknown as ExtensionCommandContext;
+		const natives = {
+			async installed() {
+				return [
+					{ name: "pi-lsp", installed: "1.0.0" },
+					{ name: "@scope/pi-longer-package-name", installed: "0.3.12" },
+				];
+			},
+			async updates() { return [{ name: "pi-lsp", installed: "1.0.0", latest: "1.1.0" }]; },
+		} as unknown as Natives;
+
+		await showPackedPanel(ctx, natives);
+
+		const text = rendered.join("\n");
+		expect(text).toContain("Package"); // a real table header, not a bare list
+		expect(text).toContain("Version");
+		const nameLine = rendered.find((line) => line.includes("@scope/pi-longer-package-name"));
+		const versionLine = rendered.find((line) => line.includes("pi-lsp") && line.includes("1.0.0"));
+		expect(nameLine).toBeDefined();
+		expect(versionLine).toBeDefined();
+		// Real column alignment: the version cell starts at the same character
+		// column on both rows regardless of how long each package name is --
+		// impossible with the old `${cursor} ${name}@${version}` concatenation.
+		const longNameVersionCol = nameLine!.indexOf("0.3.12");
+		const shortNameVersionCol = versionLine!.indexOf("1.0.0");
+		expect(longNameVersionCol).toBe(shortNameVersionCol);
+	});
+
 	it("renders the installer's own progress bar inline next to the updating row, without replacing the rest of the package list", async () => {
 		const renderedFrames: string[] = [];
 		const ctx = {

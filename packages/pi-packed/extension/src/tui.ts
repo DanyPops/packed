@@ -12,13 +12,18 @@
  * only the footer moves as content height changes. Enter opens a second,
  * smaller overlay action menu on top of it. U's batch update stays on
  * this same package list -- progress renders inline next to the row
- * currently being updated, not as a separate screen. All data flows
- * through the packed CLI (thin seam).
+ * currently being updated, not as a separate screen. Rows render through
+ * Malevich's Table (real column-aligned Package/Version/status cells,
+ * per-row selection styling baked into each cell since Table's own
+ * cellStyle is column-wide, not row-wide) inside this panel's own
+ * scroll-window slice -- Table deliberately owns no pagination of its
+ * own, so the visible-window-around-selectedIndex math stays here. All
+ * data flows through the packed CLI (thin seam).
  */
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder, rawKeyHint } from "@earendil-works/pi-coding-agent";
-import { Container, Input, Spacer, truncateToWidth } from "@earendil-works/pi-tui";
-import { Envelope, Menu, ProgressBar, type MenuItem } from "malevich-tui-components";
+import { Container, Input, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Envelope, Menu, ProgressBar, Table, type MenuItem, type TableColumn, type TextMeasure } from "malevich-tui-components";
 import { filterRows, mergeRows, nextMode, visibleRows } from "./model.js";
 import type { Row, ViewMode } from "./model.js";
 import type { Natives, PackageResources } from "./packed.js";
@@ -409,6 +414,19 @@ function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows
 			},
 		};
 
+		// pi-tui's own visibleWidth/truncateToWidth are ANSI-aware (they strip
+		// escape codes for measurement, matching the pair Malevich's TextMeasure
+		// port expects) -- rows below bake selection/status styling directly
+		// into each cell's text since Table's own cellStyle is column-wide, not
+		// per-row.
+		const measure: TextMeasure = { visibleWidth, truncateToWidth };
+		const columns: TableColumn[] = [
+			{ header: "Package", key: "name" },
+			{ header: "Version", key: "version" },
+			{ header: "", key: "status" },
+		];
+		const table = new Table({ columns, rows: [], measure, headerStyle: (s) => theme.fg("muted", s) });
+
 		const list = {
 			invalidate() {},
 			render(width: number): string[] {
@@ -419,20 +437,25 @@ function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows
 					lines.push(theme.fg("muted", "  No packages"));
 					return lines;
 				}
+				// No scrolling of its own (Malevich's Table is deliberately
+				// unopinionated about pagination) -- the visible window around
+				// selectedIndex stays this panel's own job, same as before.
 				const start = Math.max(0, Math.min(selectedIndex - Math.floor(maxVisible / 2), filtered.length - maxVisible));
 				const end = Math.min(start + maxVisible, filtered.length);
-				for (let i = start; i < end; i++) {
-					const row = filtered[i]!;
-					const selected = i === selectedIndex;
-					const cursor = selected ? theme.fg("accent", "❯") : " ";
-					const name = selected ? theme.bold(row.name) : row.name;
-					const ver = theme.fg("dim", `@${row.version}`);
-					const isUpdating = updatingRowName === row.name;
-					const upd = isUpdating
-						? theme.fg("accent", `  ${updatingBar.format(10)} updating…`)
-						: row.hasUpdate ? theme.fg("warning", ` ↑${row.latest}`) : "";
-					lines.push(truncateToWidth(`${cursor} ${name}${ver}${upd}`, width, ""));
-				}
+				table.setRows(
+					filtered.slice(start, end).map((row, offset) => {
+						const i = start + offset;
+						const selected = i === selectedIndex;
+						const cursor = selected ? theme.fg("accent", "❯ ") : "  ";
+						const name = selected ? theme.bold(row.name) : row.name;
+						const isUpdating = updatingRowName === row.name;
+						const status = isUpdating
+							? theme.fg("accent", `${updatingBar.format(10)} updating…`)
+							: row.hasUpdate ? theme.fg("warning", `↑${row.latest}`) : "";
+						return { name: `${cursor}${name}`, version: theme.fg("dim", row.version), status };
+					}),
+				);
+				lines.push(...table.render(width));
 				const hasScroll = start > 0 || end < filtered.length;
 				lines.push(theme.fg("dim", `  ${hasScroll ? `${selectedIndex + 1}/${filtered.length} ` : ""}${mode}`));
 				return lines;

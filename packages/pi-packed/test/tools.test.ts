@@ -14,6 +14,7 @@ describe("native package mutation permission policy", () => {
 		const result = await installPackageWithPolicy("npm:pkg", {
 			async security() { return { mutationApproval: "always" }; },
 			async install(_source, approved) { expect(approved).toBe(true); installs += 1; return "installed"; },
+			async installService() { throw new Error("must not be called -- confirm is declined before install ever runs"); },
 		}, {
 			hasUI: true,
 			ui: { async confirm() { confirms += 1; return false; } },
@@ -59,6 +60,7 @@ describe("native package mutation permission policy", () => {
 		const result = await installPackageWithPolicy("npm:pkg", {
 			async security() { return { mutationApproval: "always" }; },
 			async install() { throw new Error("must not install"); },
+			async installService() { throw new Error("must not be called -- approval is refused before install ever runs"); },
 		}, {
 			hasUI: false,
 			ui: { async confirm() { return false; } },
@@ -71,6 +73,7 @@ describe("native package mutation permission policy", () => {
 		await expect(installPackageWithPolicy("npm:pkg", {
 			async security() { return { mutationApproval: "never" }; },
 			async install() { throw new Error("daemon unavailable"); },
+			async installService() { throw new Error("must not be called -- install itself already failed"); },
 		}, {
 			hasUI: false,
 			ui: { async confirm() { return false; } },

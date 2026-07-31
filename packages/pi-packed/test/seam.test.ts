@@ -106,6 +106,16 @@ class FakePackageDaemon implements PackageDaemonPort {
 		this.calls.push({ operation: "update", input: { source, approved } });
 		return { output: `Updated ${source}`, reloadRequired: true, alreadyUpToDate: false, pinned: false };
 	}
+
+	async installService(source: string, approved = false) {
+		this.calls.push({ operation: "installService", input: { source, approved } });
+		return { output: `Registered service for ${source}` };
+	}
+
+	async piStatus() {
+		this.calls.push({ operation: "piStatus" });
+		return { current: "1.0.0", latest: "1.0.0", upToDate: true };
+	}
 }
 
 describe("packed extension seam", () => {

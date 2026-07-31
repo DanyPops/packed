@@ -1,6 +1,6 @@
 {
   "name": "@danypops/pi-packed",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Pi package tools, commands, profiles, and TUI for the Packed daemon",
   "type": "module",
   "keywords": ["pi-package"],
@@ -14,7 +14,8 @@
   "dependencies": {
     "@danypops/packed": "^0.2.0",
     "@danypops/vehicle-client": "^0.1.1",
-    "@danypops/vehicle-client-pi": "^0.1.5"
+    "@danypops/vehicle-client-pi": "^0.1.5",
+    "malevich-tui-components": "^0.7.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

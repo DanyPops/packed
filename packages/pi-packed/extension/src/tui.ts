@@ -11,9 +11,10 @@
  * underneath never disappears. All data flows through the packed CLI
  * (thin seam).
  */
-import type { ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder, rawKeyHint } from "@earendil-works/pi-coding-agent";
-import { Container, Input, SelectList, type SelectItem, type SelectListTheme, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Container, Input, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Menu, type MenuItem } from "malevich-tui-components";
 import { filterRows, mergeRows, nextMode, visibleRows } from "./model.js";
 import type { Row, ViewMode } from "./model.js";
 import type { Natives, PackageResources } from "./packed.js";
@@ -21,6 +22,7 @@ import { approvePackageOperation } from "./tools.js";
 import { showPackedSettings } from "./security-tui.js";
 import { showResourceConfig, applyResourceToggle } from "./resource-config.js";
 import { showDiscoverPanel } from "./discover.js";
+import { menuTheme } from "./menu-theme.js";
 
 interface PanelAction {
 	type: "update" | "updateAll" | "remove" | "disable" | "config" | "find" | "refresh" | "settings";
@@ -173,32 +175,20 @@ async function loadRows(natives: Natives): Promise<{ rows: Row[]; error?: string
 	}
 }
 
-function selectListTheme(theme: Theme): SelectListTheme {
-	return {
-		selectedPrefix: (text) => theme.fg("accent", text),
-		selectedText: (text) => theme.fg("accent", text),
-		description: (text) => theme.fg("muted", text),
-		scrollInfo: (text) => theme.fg("muted", text),
-		noMatch: (text) => theme.fg("muted", text),
-	};
-}
-
 /** Enter's action menu, floated on top of the still-open packages panel
  * via ctx.ui.custom's own overlay:true -- no full-screen teardown, unlike
  * the ctx.ui.select this replaced. */
 async function showActionMenu(ctx: ExtensionCommandContext, row: Row): Promise<"update" | "remove" | "disable" | "config" | undefined> {
-	const items: SelectItem[] = [
-		...(row.hasUpdate ? [{ value: "update", label: `Update to ${row.latest}` }] : []),
-		{ value: "disable", label: "Disable/enable extensions" },
-		{ value: "config", label: "Configure resources" },
-		{ value: "remove", label: "Remove" },
-	];
-	return ctx.ui.custom<"update" | "remove" | "disable" | "config" | undefined>(
+	type Choice = "update" | "remove" | "disable" | "config";
+	return ctx.ui.custom<Choice | undefined>(
 		(_tui, theme, _kb, done) => {
-			const list = new SelectList(items, items.length, selectListTheme(theme));
-			list.onSelect = (item) => done(item.value as "update" | "remove" | "disable" | "config");
-			list.onCancel = () => done(undefined);
-			return list;
+			const items: MenuItem[] = [
+				...(row.hasUpdate ? [{ label: `Update to ${row.latest}`, action: () => done("update" as Choice) }] : []),
+				{ label: "Disable/enable extensions", action: () => done("disable") },
+				{ label: "Configure resources", action: () => done("config") },
+				{ label: "Remove", action: () => done("remove") },
+			];
+			return new Menu({ items, theme: menuTheme(theme), onClose: () => done(undefined) });
 		},
 		{ overlay: true, overlayOptions: { width: 40, anchor: "center" } },
 	);

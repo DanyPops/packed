@@ -5,13 +5,15 @@
  * itself never mutates; only Install/Cancel (behind the standard
  * approval) does.
  */
-import type { ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder, rawKeyHint } from "@earendil-works/pi-coding-agent";
-import { Container, Input, SelectList, type SelectItem, type SelectListTheme, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Container, Input, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Menu, type MenuItem } from "malevich-tui-components";
 import { shouldSearch } from "./discover-model.js";
 import type { Natives, PackageSummary } from "./packed.js";
 import { InstallServiceError } from "./packed.js";
 import { approvePackageOperation } from "./tools.js";
+import { menuTheme } from "./menu-theme.js";
 
 const SEARCH_LIMIT = 20;
 
@@ -51,28 +53,17 @@ export async function applyInstall(result: PackageSummary, natives: Natives, ctx
 	}
 }
 
-function selectListTheme(theme: Theme): SelectListTheme {
-	return {
-		selectedPrefix: (text) => theme.fg("accent", text),
-		selectedText: (text) => theme.fg("accent", text),
-		description: (text) => theme.fg("muted", text),
-		scrollInfo: (text) => theme.fg("muted", text),
-		noMatch: (text) => theme.fg("muted", text),
-	};
-}
-
 async function showInstallMenu(ctx: ExtensionCommandContext, result: PackageSummary): Promise<boolean> {
-	const items: SelectItem[] = [{ value: "install", label: `Install ${result.name}@${result.version}` }, { value: "cancel", label: "Cancel" }];
-	const choice = await ctx.ui.custom<"install" | "cancel" | undefined>(
+	return ctx.ui.custom<boolean>(
 		(_tui, theme, _kb, done) => {
-			const list = new SelectList(items, items.length, selectListTheme(theme));
-			list.onSelect = (item) => done(item.value as "install" | "cancel");
-			list.onCancel = () => done(undefined);
-			return list;
+			const items: MenuItem[] = [
+				{ label: `Install ${result.name}@${result.version}`, action: () => done(true) },
+				{ label: "Cancel", action: () => done(false) },
+			];
+			return new Menu({ items, theme: menuTheme(theme), onClose: () => done(false) });
 		},
 		{ overlay: true, overlayOptions: { width: 40, anchor: "center" } },
 	);
-	return choice === "install";
 }
 
 export async function showDiscoverPanel(ctx: ExtensionCommandContext, natives: Natives): Promise<void> {

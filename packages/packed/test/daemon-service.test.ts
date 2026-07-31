@@ -101,6 +101,25 @@ describe("resolveDaemonServiceSpec", () => {
 		expect(result.spec.name).toBe("papyrus");
 	});
 
+	it("falls back to detection via npm's hoisted top-level node_modules, not just a nested one -- the real on-disk layout for a flat npm install", () => {
+		const piHome = fakePiHome();
+		const extDir = join(piHome, "npm", "node_modules", "@danypops/pi-papyrus");
+		writeRawPackage(extDir, { name: "@danypops/pi-papyrus", version: "1.0.0", dependencies: { "@danypops/papyrus": "^0.38.0" } });
+		// Hoisted to the SAME top-level node_modules as pi-papyrus itself, not nested under it --
+		// confirmed live as the real layout npm produces for a flat single-root install (Packed's
+		// own piHome/npm install target), as opposed to the nested-dependency layout the prior test
+		// exercises. Both are real, both must resolve.
+		const depDir = join(piHome, "npm", "node_modules", "@danypops/papyrus");
+		writeRawPackage(depDir, { name: "@danypops/papyrus", version: "0.38.0", bin: { papyrus: "src/cli.ts" }, dependencies: { "@danypops/vehicle-server": "^0.1.0" } });
+
+		const result = resolveDaemonServiceSpec(piHome, "npm:@danypops/pi-papyrus");
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error("expected ok");
+		expect(result.spec.binPath).toBe(join(depDir, "src/cli.ts"));
+		expect(result.spec.args).toEqual(["serve"]);
+		expect(result.spec.name).toBe("papyrus");
+	});
+
 	it("also detects the legacy @danypops/daemon-kit dependency name, not just vehicle-server", () => {
 		const piHome = fakePiHome();
 		const dir = join(piHome, "npm", "node_modules", "@danypops/web-spider-daemon");

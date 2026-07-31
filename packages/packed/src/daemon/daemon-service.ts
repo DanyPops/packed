@@ -94,13 +94,19 @@ function dependsOnVehicle(pkg: InstalledPackageJson): boolean {
  * @danypops/papyrus installed directly), then one level into its own
  * `dependencies` (the common case: a Pi extension like @danypops/
  * pi-papyrus has no daemon of its own, but npm already resolved its real
- * daemon dependency into its own node_modules during `pi install`).
+ * daemon dependency during `pi install`). That dependency can land in
+ * either of two real, both-observed-live layouts: nested directly under
+ * the installing package's own node_modules, or hoisted by npm to the
+ * single flat node_modules root every Packed-managed install shares --
+ * confirmed live for @danypops/pi-papyrus + @danypops/papyrus, which npm
+ * hoists to siblings rather than nesting. `hoistedNodeModulesDir` (when
+ * given) is checked as a fallback whenever the nested path misses.
  * `args` defaults to `["serve"]` -- confirmed as a real, universal
  * convention across every daemon-backed package checked (papyrus,
  * web-spider, packed, enigma all expose a `serve` subcommand on the same
  * bin their `service install` command already points at).
  */
-export function detectVehicleDaemonService(packageDir: string, fallbackName: string): ResolvedDaemonEntrypoint | undefined {
+export function detectVehicleDaemonService(packageDir: string, fallbackName: string, hoistedNodeModulesDir?: string): ResolvedDaemonEntrypoint | undefined {
 	const own = readPackageJson(packageDir);
 	if (!own) return undefined;
 
@@ -110,12 +116,14 @@ export function detectVehicleDaemonService(packageDir: string, fallbackName: str
 	}
 
 	for (const depName of Object.keys(own.dependencies ?? {})) {
-		const depDir = join(packageDir, "node_modules", depName);
-		const dep = readPackageJson(depDir);
-		if (!dep) continue;
-		const depBin = firstBinPath(dep);
-		if (depBin && dependsOnVehicle(dep)) {
-			return { binPath: join(depDir, depBin), args: ["serve"], name: unscopedName(dep.name ?? depName) };
+		const candidateDirs = [join(packageDir, "node_modules", depName), ...(hoistedNodeModulesDir ? [join(hoistedNodeModulesDir, depName)] : [])];
+		for (const depDir of candidateDirs) {
+			const dep = readPackageJson(depDir);
+			if (!dep) continue;
+			const depBin = firstBinPath(dep);
+			if (depBin && dependsOnVehicle(dep)) {
+				return { binPath: join(depDir, depBin), args: ["serve"], name: unscopedName(dep.name ?? depName) };
+			}
 		}
 	}
 	return undefined;
@@ -169,7 +177,7 @@ export function resolveDaemonServiceSpec(piHome: string, source: string): Resolv
 		};
 	}
 
-	const detected = detectVehicleDaemonService(packageDir, packageName);
+	const detected = detectVehicleDaemonService(packageDir, packageName, join(piHome, "npm", "node_modules"));
 	if (detected) return { ok: true, spec: buildSpec(detected) };
 
 	return { ok: false, notADaemon: true, reason: `${packageName} does not declare a packed.daemonService manifest and no Vehicle-shaped daemon dependency was detected` };

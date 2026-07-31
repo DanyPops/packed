@@ -175,6 +175,31 @@ describe("checkUpdates (mirror-based)", () => {
 		const updates = checkUpdates(latest, [{ name: "papyrus", pinned: "0.21.2", scope: "project" }]);
 		expect(updates).toEqual([{ name: "papyrus", installed: "0.21.2", latest: "0.38.1", detectedAt: updates[0]!.detectedAt, scope: "project" }]);
 	});
+
+	// Real, screenshot-confirmed bug: the mirror's own "latest" can lag
+	// behind what's actually installed (a stale sync, or the installed
+	// package genuinely jumped ahead). A plain !== check can't tell that
+	// apart from real drift and flags a permanent, un-clearable "update"
+	// pointing at an OLDER version than what's already installed.
+	it("never flags a package whose installed version is already ahead of the mirrored latest", () => {
+		const latest = (name: string) => ({ "pi-papyrus": "0.38.4" })[name];
+		const updates = checkUpdates(latest, [{ name: "pi-papyrus", installed: "0.41.0" }]);
+		expect(updates).toEqual([]);
+	});
+
+	it("still flags a genuine downgrade-to-latest scenario correctly using real semver ordering, not string equality", () => {
+		// 0.9.0 vs 0.10.0 -- string comparison would call these "different"
+		// either way, but semver must recognize 0.10.0 as newer, not just "not equal".
+		const latest = (name: string) => ({ "pi-lsp": "0.10.0" })[name];
+		const updates = checkUpdates(latest, [{ name: "pi-lsp", installed: "0.9.0" }]);
+		expect(updates).toEqual([{ name: "pi-lsp", installed: "0.9.0", latest: "0.10.0", detectedAt: updates[0]!.detectedAt }]);
+	});
+
+	it("falls back to inequality for non-semver values (a git ref or a literal dist-tag) since they aren't comparable at all", () => {
+		const latest = (name: string) => ({ "pi-git-pkg": "latest" })[name];
+		const updates = checkUpdates(latest, [{ name: "pi-git-pkg", installed: "latest" }]);
+		expect(updates).toEqual([]); // same non-semver string -- not different, not flagged
+	});
 });
 
 class NoopRegistry implements Registry {

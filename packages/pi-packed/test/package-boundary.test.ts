@@ -11,7 +11,7 @@ function sourceFiles(directory: string): string[] {
 describe("pi-packed package boundary", () => {
 	it("is an independent Pi package depending only on public Packed exports", () => {
 		const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-		expect(manifest).toMatchObject({ name: "@danypops/pi-packed", version: "0.6.1", pi: { extensions: ["extension/src/index.ts"] }, dependencies: { "@danypops/packed": "^0.2.0" } });
+		expect(manifest).toMatchObject({ name: "@danypops/pi-packed", version: "0.6.2", pi: { extensions: ["extension/src/index.ts"] }, dependencies: { "@danypops/packed": "^0.2.0" } });
 		expect(manifest.bin).toBeUndefined();
 		for (const file of sourceFiles(join(root, "extension"))) {
 			const source = readFileSync(file, "utf8");

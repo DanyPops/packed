@@ -15,7 +15,7 @@ import { PI_COMMAND_NAME, type InstalledPackage, type PackageInfo, type PackageR
 
 export { InstallServiceError, PI_COMMAND_NAME };
 
-export type { PackageInfo, PackageResources, PiStatus, ResourceField, UpdateEntry, UpdateOutcome };
+export type { PackageInfo, PackageResources, PackageSummary, PiStatus, ResourceField, UpdateEntry, UpdateOutcome };
 export type InstalledPkg = InstalledPackage;
 export type PackageDaemonPort = PackedExtensionClient;
 type MutationApproval = SecuritySettings["mutationApproval"];

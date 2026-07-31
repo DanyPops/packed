@@ -95,7 +95,7 @@ export async function handleResourceConfigCommand(args: string, ctx: ExtensionCo
 	return true;
 }
 
-export async function showResourceConfig(ctx: ExtensionCommandContext, natives: Natives): Promise<void> {
+export async function showResourceConfig(ctx: ExtensionCommandContext, natives: Natives, initialFilter?: string): Promise<void> {
 	if (!ctx.hasUI) {
 		ctx.ui.notify("/packed config requires interactive mode", "warning");
 		return;
@@ -109,9 +109,11 @@ export async function showResourceConfig(ctx: ExtensionCommandContext, natives: 
 
 	let scope: Scope = "global";
 	let pendingReload = false;
+	let filter = initialFilter ?? "";
 
 	for (;;) {
-		const action = await renderConfig(ctx, data, scope);
+		const action = await renderConfig(ctx, data, scope, filter);
+		filter = ""; // only seeds the very first open -- a later refresh/switch starts unfiltered
 		if (action.type === "close") break;
 		if (action.type === "switch") { scope = scope === "global" ? "project" : "global"; continue; }
 		if (action.type === "refresh") {
@@ -135,12 +137,13 @@ export async function showResourceConfig(ctx: ExtensionCommandContext, natives: 
 	else ctx.ui.notify("Extension changes pending -- run /reload when ready.", "warning");
 }
 
-function renderConfig(ctx: ExtensionCommandContext, data: { global: PackageResources[]; project: PackageResources[] }, scope: Scope): Promise<PanelAction> {
+function renderConfig(ctx: ExtensionCommandContext, data: { global: PackageResources[]; project: PackageResources[] }, scope: Scope, initialFilter = ""): Promise<PanelAction> {
 	return ctx.ui.custom<PanelAction>((tui, theme, _kb, done) => {
 		const searchInput = new Input();
+		if (initialFilter) searchInput.setValue(initialFilter);
 		let searchActive = false;
 		const items = flatten(scope === "global" ? data.global : data.project, scope);
-		let filtered = items;
+		let filtered = initialFilter ? filterItems(items, initialFilter) : items;
 		let selectedIndex = 0;
 		const maxVisible = 20;
 

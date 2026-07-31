@@ -1,23 +1,29 @@
 /**
- * tui.ts — /packed's default panel. Follows the pi-extension-manager idiom:
- * ctx.ui.custom with Container/DynamicBorder layout, header hints,
- * type-to-filter (/), Tab view modes, Enter → actions, r refresh, s
- * settings, esc close. Packages is the landing page; s opens settings
- * (mutation approval) as a sub-flow and returns to the same panel
- * afterward, rather than a second rendered page. All data flows through
- * the packed CLI (thin seam).
+ * tui.ts — /packed's default panel. Mnemonics follow lazy.nvim's own
+ * convention (folke/lazy.nvim lua/lazy/view/config.lua): uppercase acts on
+ * every row, lowercase acts on the row under the cursor -- U/u update,
+ * X/x was lazy's delete key (clean); here that pairing is single-target
+ * only (x remove -- there is no safe "remove every installed package"
+ * bulk analog, so no X is bound). Adds d disable/enable this package's
+ * extensions, c jump to full resource config, f find/install new
+ * packages, s settings. Enter opens a floating (`ctx.ui.custom` with
+ * overlay:true) action menu instead of a full-screen prompt, so the list
+ * underneath never disappears. All data flows through the packed CLI
+ * (thin seam).
  */
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder, rawKeyHint } from "@earendil-works/pi-coding-agent";
-import { Container, Input, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Container, Input, SelectList, type SelectItem, type SelectListTheme, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { filterRows, mergeRows, nextMode, visibleRows } from "./model.js";
 import type { Row, ViewMode } from "./model.js";
-import type { Natives } from "./packed.js";
+import type { Natives, PackageResources } from "./packed.js";
 import { approvePackageOperation } from "./tools.js";
 import { showPackedSettings } from "./security-tui.js";
+import { showResourceConfig, applyResourceToggle } from "./resource-config.js";
+import { showDiscoverPanel } from "./discover.js";
 
 interface PanelAction {
-	type: "menu" | "refresh" | "settings";
+	type: "update" | "updateAll" | "remove" | "disable" | "config" | "find" | "refresh" | "settings";
 	row?: Row;
 }
 
@@ -78,6 +84,83 @@ export async function applyPackageChoice(
 	return "cancelled";
 }
 
+/** U -- update every outdated row with one combined approval and one
+ * reload, instead of applyPackageChoice's own per-call reload (which
+ * would end the session after the first successful update). */
+export async function applyUpdateAll(rows: Row[], natives: Natives, ctx: ExtensionCommandContext): Promise<PackageChoiceOutcome> {
+	const outdated = rows.filter((row) => row.hasUpdate);
+	if (outdated.length === 0) {
+		ctx.ui.notify("Nothing to update.", "info");
+		return "unchanged";
+	}
+	const approval = await approvePackageOperation(
+		"update",
+		`pi update --extension ${outdated.map((row) => `npm:${row.name}`).join(" ")}`,
+		natives,
+		ctx,
+	);
+	if (!approval.allowed) {
+		ctx.ui.notify(approval.message ?? "update denied", "warning");
+		return "cancelled";
+	}
+	ctx.ui.notify(`Updating ${outdated.length} package(s)…`, "info");
+	let changed = 0;
+	let failed = 0;
+	for (const row of outdated) {
+		try {
+			const outcome = await natives.update(`npm:${row.name}`, approval.approved);
+			if (outcome.reloadRequired) changed += 1;
+		} catch (e) {
+			failed += 1;
+			ctx.ui.notify(`${row.name} update failed: ${e instanceof Error ? e.message : e}`, "error");
+		}
+	}
+	if (changed === 0) {
+		ctx.ui.notify(failed > 0 ? `No packages updated; ${failed} failed.` : "All packages already up to date.", failed > 0 ? "warning" : "info");
+		return failed > 0 ? "cancelled" : "unchanged";
+	}
+	ctx.ui.notify(`Updated ${changed} package(s)${failed > 0 ? `, ${failed} failed` : ""}; reloading Pi resources.`, "info");
+	await ctx.reload();
+	return "changed";
+}
+
+/** d -- toggles every declared extension of this package on or off in one
+ * step (disables if any are enabled, otherwise re-enables all). Reuses
+ * applyResourceToggle per item for its own tested approval/mutation path
+ * rather than a bespoke bulk mutation -- the common case is one extension
+ * per package, so this rarely shows more than a single confirm. */
+export async function applyDisableExtensions(row: Row, natives: Natives, ctx: ExtensionCommandContext): Promise<PackageChoiceOutcome> {
+	let data: { global: PackageResources[]; project: PackageResources[] };
+	try {
+		data = await natives.listResources();
+	} catch (e) {
+		ctx.ui.notify(`packed unavailable: ${e instanceof Error ? e.message : e}`, "error");
+		return "cancelled";
+	}
+	const group = data.global.find((candidate) => candidate.name === row.name);
+	const extensions = group?.extensions ?? [];
+	if (!group || extensions.length === 0) {
+		ctx.ui.notify(`${row.name} declares no extensions to disable.`, "info");
+		return "unchanged";
+	}
+	const disabling = extensions.some((item) => item.enabled);
+	const targets = extensions.filter((item) => item.enabled === disabling);
+	let toggled = 0;
+	for (const item of targets) {
+		const outcome = await applyResourceToggle(
+			{ scope: "global", source: group.source, packageName: group.name, field: "extensions", path: item.path, enabled: item.enabled },
+			natives,
+			ctx,
+		);
+		if (outcome === "toggled") toggled += 1;
+		else if (outcome === "cancelled") return toggled > 0 ? "changed" : "cancelled";
+	}
+	if (toggled === 0) return "unchanged";
+	ctx.ui.notify(`${disabling ? "Disabled" : "Enabled"} ${toggled} extension(s) for ${row.name}; reloading Pi resources.`, "info");
+	await ctx.reload();
+	return "changed";
+}
+
 async function loadRows(natives: Natives): Promise<{ rows: Row[]; error?: string }> {
 	try {
 		const [installed, updates] = await Promise.all([
@@ -88,6 +171,37 @@ async function loadRows(natives: Natives): Promise<{ rows: Row[]; error?: string
 	} catch (e) {
 		return { rows: [], error: e instanceof Error ? e.message : String(e) };
 	}
+}
+
+function selectListTheme(theme: Theme): SelectListTheme {
+	return {
+		selectedPrefix: (text) => theme.fg("accent", text),
+		selectedText: (text) => theme.fg("accent", text),
+		description: (text) => theme.fg("muted", text),
+		scrollInfo: (text) => theme.fg("muted", text),
+		noMatch: (text) => theme.fg("muted", text),
+	};
+}
+
+/** Enter's action menu, floated on top of the still-open packages panel
+ * via ctx.ui.custom's own overlay:true -- no full-screen teardown, unlike
+ * the ctx.ui.select this replaced. */
+async function showActionMenu(ctx: ExtensionCommandContext, row: Row): Promise<"update" | "remove" | "disable" | "config" | undefined> {
+	const items: SelectItem[] = [
+		...(row.hasUpdate ? [{ value: "update", label: `Update to ${row.latest}` }] : []),
+		{ value: "disable", label: "Disable/enable extensions" },
+		{ value: "config", label: "Configure resources" },
+		{ value: "remove", label: "Remove" },
+	];
+	return ctx.ui.custom<"update" | "remove" | "disable" | "config" | undefined>(
+		(_tui, theme, _kb, done) => {
+			const list = new SelectList(items, items.length, selectListTheme(theme));
+			list.onSelect = (item) => done(item.value as "update" | "remove" | "disable" | "config");
+			list.onCancel = () => done(undefined);
+			return list;
+		},
+		{ overlay: true, overlayOptions: { width: 40, anchor: "center" } },
+	);
 }
 
 export async function showPackedPanel(ctx: ExtensionCommandContext, natives: Natives): Promise<void> {
@@ -118,19 +232,32 @@ export async function showPackedPanel(ctx: ExtensionCommandContext, natives: Nat
 			continue; // settings never changes package rows -- reopen as-is
 		}
 
+		if (action.type === "find") {
+			await showDiscoverPanel(ctx, natives);
+			continue; // a successful install already reloaded; a no-op returns here
+		}
+
+		if (action.type === "updateAll") {
+			const outcome = await applyUpdateAll(rows, natives, ctx);
+			if (outcome === "changed") return; // ctx.reload() already replaced the session
+			continue;
+		}
+
+		if (action.type === "config") {
+			await showResourceConfig(ctx, natives, action.row?.name);
+			continue; // showResourceConfig already handles its own reload prompt
+		}
+
 		const row = action.row;
 		if (!row) continue;
 
-		const choice = await ctx.ui.select(
-			`${row.name}@${row.version}${row.hasUpdate ? `  →  ${row.latest}` : ""}`,
-			[
-				...(row.hasUpdate ? [`Update to ${row.latest}`] : []),
-				"Remove",
-				"Cancel",
-			],
-		);
+		if (action.type === "disable") {
+			const outcome = await applyDisableExtensions(row, natives, ctx);
+			if (outcome === "changed") return;
+			continue;
+		}
 
-		const outcome = await applyPackageChoice(choice, row, natives, ctx);
+		const outcome = await applyPackageChoice(action.type === "update" ? `Update to ${row.latest}` : "Remove", row, natives, ctx);
 		if (outcome === "changed") return; // ctx.reload() already replaced the session
 	}
 }
@@ -158,11 +285,17 @@ function renderPanel(ctx: ExtensionCommandContext, rows: Row[]): Promise<PanelAc
 				const badge = outdated > 0 ? theme.fg("warning", ` ${outdated} update(s)`) : "";
 				const hint = searchActive
 					? rawKeyHint("esc", "clear")
-					: rawKeyHint("enter", "actions") +
+					: rawKeyHint("enter", "menu") +
 						theme.fg("muted", " · ") +
-						rawKeyHint("/", "filter") +
+						rawKeyHint("u/U", "update/all") +
 						theme.fg("muted", " · ") +
-						rawKeyHint("tab", "view") +
+						rawKeyHint("x", "remove") +
+						theme.fg("muted", " · ") +
+						rawKeyHint("d", "disable") +
+						theme.fg("muted", " · ") +
+						rawKeyHint("c", "config") +
+						theme.fg("muted", " · ") +
+						rawKeyHint("f", "find") +
 						theme.fg("muted", " · ") +
 						rawKeyHint("s", "settings") +
 						theme.fg("muted", " · ") +
@@ -171,7 +304,7 @@ function renderPanel(ctx: ExtensionCommandContext, rows: Row[]): Promise<PanelAc
 				const line1 = truncateToWidth(`${title}${badge}${" ".repeat(spacing)}${hint}`, width, "");
 				const dot = "·";
 				const line2 = truncateToWidth(
-					theme.fg("muted", `view: ${mode} ${dot} r refresh ${dot} ${rows.length} installed`),
+					theme.fg("muted", `view: ${mode} ${dot} / filter ${dot} tab view ${dot} r refresh ${dot} ${rows.length} installed`),
 					width,
 					"",
 				);
@@ -255,9 +388,42 @@ function renderPanel(ctx: ExtensionCommandContext, rows: Row[]): Promise<PanelAc
 					case "s":
 						done({ type: "settings" });
 						return;
+					case "f":
+						done({ type: "find" });
+						return;
+					case "U":
+						done({ type: "updateAll" });
+						return;
+					case "u": {
+						const row = filtered[selectedIndex];
+						if (row?.hasUpdate) done({ type: "update", row });
+						return;
+					}
+					case "x": {
+						const row = filtered[selectedIndex];
+						if (row) done({ type: "remove", row });
+						return;
+					}
+					case "d": {
+						const row = filtered[selectedIndex];
+						if (row) done({ type: "disable", row });
+						return;
+					}
+					case "c": {
+						const row = filtered[selectedIndex];
+						if (row) done({ type: "config", row });
+						return;
+					}
 					case "\r": {
 						const row = filtered[selectedIndex];
-						if (row) done({ type: "menu", row });
+						if (!row) return;
+						void (async () => {
+							const choice = await showActionMenu(ctx, row);
+							if (choice === "update") done({ type: "update", row });
+							else if (choice === "remove") done({ type: "remove", row });
+							else if (choice === "disable") done({ type: "disable", row });
+							else if (choice === "config") done({ type: "config", row });
+						})();
 						return;
 					}
 					case "\x1b":

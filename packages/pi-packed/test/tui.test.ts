@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { applyPackageChoice, showPackedPanel } from "../extension/src/tui.ts";
-import type { Natives } from "../extension/src/packed.ts";
+import { applyDisableExtensions, applyPackageChoice, applyUpdateAll, showPackedPanel } from "../extension/src/tui.ts";
+import type { Natives, PackageResources } from "../extension/src/packed.ts";
 import type { Row } from "../extension/src/model.ts";
 
 const row: Row = { name: "pi-lsp", version: "1.0.0", latest: "1.1.0", hasUpdate: true };
@@ -70,6 +70,110 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		await showPackedPanel(ctx, natives);
 
 		expect(securityCalled).toBe(false);
+	});
+
+	it("dispatches updateAll and returns without reopening once the batch actually changed something", async () => {
+		let customCallCount = 0;
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom() { customCallCount += 1; return { type: "updateAll" }; },
+				async confirm() { return true; },
+				notify() {},
+			},
+			async reload() {},
+		} as unknown as ExtensionCommandContext;
+		const updated: string[] = [];
+		const natives = {
+			async installed() { return [{ name: "pi-a", installed: "1.0.0" }]; },
+			async updates() { return [{ name: "pi-a", installed: "1.0.0", latest: "1.1.0" }]; },
+			async security() { return { mutationApproval: "always" as const }; },
+			async update(source: string) { updated.push(source); return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false }; },
+		} as unknown as Natives;
+
+		await showPackedPanel(ctx, natives);
+
+		expect(updated).toEqual(["npm:pi-a"]);
+		expect(customCallCount).toBe(1); // returned instead of reopening -- reload already ended the session
+	});
+
+	it("dispatches config to showResourceConfig, scoped to the selected row, then returns to the same panel", async () => {
+		let customCallCount = 0;
+		let listResourcesCalled = false;
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom() {
+					customCallCount += 1;
+					// 1st: packages panel -> "config". 2nd: showResourceConfig's own panel -> close. 3rd: packages panel reopened -> close.
+					if (customCallCount === 1) return { type: "config", row };
+					if (customCallCount === 2) return { type: "close" };
+					return undefined;
+				},
+				notify() {},
+			},
+		} as unknown as ExtensionCommandContext;
+		const natives = {
+			async installed() { return []; },
+			async updates() { return []; },
+			async listResources() { listResourcesCalled = true; return { global: [], project: [] }; },
+		} as unknown as Natives;
+
+		await showPackedPanel(ctx, natives);
+
+		expect(listResourcesCalled).toBe(true);
+		expect(customCallCount).toBe(3);
+	});
+
+	it("dispatches find to showDiscoverPanel, then returns to the same panel when nothing was installed", async () => {
+		let customCallCount = 0;
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom() {
+					customCallCount += 1;
+					// 1st: packages panel -> "find". 2nd: showDiscoverPanel's own panel -> close. 3rd: packages panel reopened -> close.
+					if (customCallCount === 1) return { type: "find" };
+					if (customCallCount === 2) return { type: "close" };
+					return undefined;
+				},
+				notify() {},
+			},
+		} as unknown as ExtensionCommandContext;
+		const natives = {
+			async installed() { return []; },
+			async updates() { return []; },
+		} as unknown as Natives;
+
+		await showPackedPanel(ctx, natives);
+
+		expect(customCallCount).toBe(3);
+	});
+
+	it("dispatches disable and returns without reopening once toggling something actually reloaded", async () => {
+		let customCallCount = 0;
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom() { customCallCount += 1; return { type: "disable", row }; },
+				async confirm() { return true; },
+				notify() {},
+			},
+			async reload() {},
+		} as unknown as ExtensionCommandContext;
+		const toggled: string[] = [];
+		const natives = {
+			async installed() { return []; },
+			async updates() { return []; },
+			async security() { return { mutationApproval: "always" as const }; },
+			async listResources() { return { global: [{ source: "npm:pi-lsp", name: "pi-lsp", scope: "global" as const, extensions: [{ path: "extension/index.ts", enabled: true }], skills: [], prompts: [], themes: [] }], project: [] }; },
+			async toggleResource(_s: string, _f: string, path: string) { toggled.push(path); return "ok"; },
+		} as unknown as Natives;
+
+		await showPackedPanel(ctx, natives);
+
+		expect(toggled).toEqual(["extension/index.ts"]);
+		expect(customCallCount).toBe(1);
 	});
 });
 
@@ -162,5 +266,187 @@ describe("applyPackageChoice (/packed panel mutation + reload honesty)", () => {
 
 		expect(outcome).toBe("cancelled");
 		expect(reloads.count).toBe(0);
+	});
+});
+
+describe("applyUpdateAll (U -- one combined approval and one reload, not N)", () => {
+	const outdated: Row[] = [
+		{ name: "pi-a", version: "1.0.0", latest: "1.1.0", hasUpdate: true },
+		{ name: "pi-b", version: "2.0.0", latest: "2.1.0", hasUpdate: true },
+		{ name: "pi-c", version: "3.0.0", hasUpdate: false },
+	];
+
+	it("does nothing and never confirms when nothing is outdated", async () => {
+		const notices: string[] = [];
+		const reloads = { count: 0 };
+		let confirmCalled = false;
+		const natives = { async security() { return { mutationApproval: "always" as const }; } } as unknown as Natives;
+		const ctx = { hasUI: true, ui: { async confirm() { confirmCalled = true; return true; }, notify(m: string) { notices.push(m); } }, async reload() { reloads.count += 1; } } as unknown as ExtensionCommandContext;
+
+		const outcome = await applyUpdateAll([{ name: "pi-c", version: "1.0.0", hasUpdate: false }], natives, ctx);
+
+		expect(outcome).toBe("unchanged");
+		expect(confirmCalled).toBe(false);
+		expect(reloads.count).toBe(0);
+	});
+
+	it("confirms once for every outdated package, updates each, and reloads exactly once", async () => {
+		const notices: string[] = [];
+		const reloads = { count: 0 };
+		const confirmMessages: string[] = [];
+		const updated: string[] = [];
+		const natives = {
+			async security() { return { mutationApproval: "always" as const }; },
+			async update(source: string) { updated.push(source); return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false }; },
+		} as unknown as Natives;
+		const ctx = {
+			hasUI: true,
+			ui: { async confirm(_t: string, message: string) { confirmMessages.push(message); return true; }, notify(m: string) { notices.push(m); } },
+			async reload() { reloads.count += 1; },
+		} as unknown as ExtensionCommandContext;
+
+		const outcome = await applyUpdateAll(outdated, natives, ctx);
+
+		expect(outcome).toBe("changed");
+		expect(confirmMessages).toHaveLength(1);
+		expect(confirmMessages[0]).toContain("npm:pi-a");
+		expect(confirmMessages[0]).toContain("npm:pi-b");
+		expect(confirmMessages[0]).not.toContain("npm:pi-c"); // not outdated, never included
+		expect(updated).toEqual(["npm:pi-a", "npm:pi-b"]);
+		expect(reloads.count).toBe(1);
+	});
+
+	it("reports partial failure without losing the packages that did succeed", async () => {
+		const notices: string[] = [];
+		const reloads = { count: 0 };
+		const natives = {
+			async security() { return { mutationApproval: "always" as const }; },
+			async update(source: string) {
+				if (source === "npm:pi-a") throw new Error("registry unavailable");
+				return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false };
+			},
+		} as unknown as Natives;
+		const ctx = { hasUI: true, ui: { async confirm() { return true; }, notify(m: string) { notices.push(m); } }, async reload() { reloads.count += 1; } } as unknown as ExtensionCommandContext;
+
+		const outcome = await applyUpdateAll(outdated, natives, ctx);
+
+		expect(outcome).toBe("changed");
+		expect(reloads.count).toBe(1);
+		expect(notices.some((n) => n.includes("pi-a") && n.includes("registry unavailable"))).toBe(true);
+		expect(notices.some((n) => n.includes("1 failed"))).toBe(true);
+	});
+
+	it("never reloads when every update in the batch fails", async () => {
+		const reloads = { count: 0 };
+		const notices: string[] = [];
+		const natives = {
+			async security() { return { mutationApproval: "always" as const }; },
+			async update() { throw new Error("boom"); },
+		} as unknown as Natives;
+		const ctx = { hasUI: true, ui: { async confirm() { return true; }, notify(m: string) { notices.push(m); } }, async reload() { reloads.count += 1; } } as unknown as ExtensionCommandContext;
+
+		const outcome = await applyUpdateAll(outdated, natives, ctx);
+
+		expect(outcome).toBe("cancelled");
+		expect(reloads.count).toBe(0);
+	});
+
+	it("never mutates or reloads when the combined approval is declined", async () => {
+		const reloads = { count: 0 };
+		let updateCalled = false;
+		const natives = {
+			async security() { return { mutationApproval: "always" as const }; },
+			async update() { updateCalled = true; return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false }; },
+		} as unknown as Natives;
+		const ctx = { hasUI: true, ui: { async confirm() { return false; }, notify() {} }, async reload() { reloads.count += 1; } } as unknown as ExtensionCommandContext;
+
+		const outcome = await applyUpdateAll(outdated, natives, ctx);
+
+		expect(outcome).toBe("cancelled");
+		expect(updateCalled).toBe(false);
+		expect(reloads.count).toBe(0);
+	});
+});
+
+describe("applyDisableExtensions (d -- toggles this package's own extensions on or off)", () => {
+	function resourceGroup(overrides: Partial<PackageResources> = {}): PackageResources {
+		return { source: "npm:pi-lsp", name: "pi-lsp", scope: "global", extensions: [], skills: [], prompts: [], themes: [], ...overrides };
+	}
+
+	it("reports nothing to disable when the package declares no extensions", async () => {
+		const natives = { async listResources() { return { global: [resourceGroup()], project: [] }; } } as unknown as Natives;
+		const notices: string[] = [];
+		const ctx = { hasUI: true, ui: { notify(m: string) { notices.push(m); } } } as unknown as ExtensionCommandContext;
+
+		const outcome = await applyDisableExtensions(row, natives, ctx);
+
+		expect(outcome).toBe("unchanged");
+		expect(notices.some((n) => n.includes("no extensions"))).toBe(true);
+	});
+
+	it("disables every currently-enabled extension, confirms once per item, and reloads once", async () => {
+		const toggled: Array<{ path: string; enabled: boolean }> = [];
+		const natives = {
+			async listResources() {
+				return { global: [resourceGroup({ extensions: [{ path: "extension/index.ts", enabled: true }] })], project: [] };
+			},
+			async security() { return { mutationApproval: "always" as const }; },
+			async toggleResource(_source: string, _field: string, path: string, enabled: boolean) { toggled.push({ path, enabled }); return "ok"; },
+		} as unknown as Natives;
+		const notices: string[] = [];
+		const reloads = { count: 0 };
+		const ctx = { hasUI: true, ui: { async confirm() { return true; }, notify(m: string) { notices.push(m); } }, async reload() { reloads.count += 1; } } as unknown as ExtensionCommandContext;
+
+		const outcome = await applyDisableExtensions(row, natives, ctx);
+
+		expect(outcome).toBe("changed");
+		expect(toggled).toEqual([{ path: "extension/index.ts", enabled: false }]);
+		expect(reloads.count).toBe(1);
+		expect(notices.some((n) => n.includes("Disabled"))).toBe(true);
+	});
+
+	it("re-enables every currently-disabled extension when all are already off", async () => {
+		const toggled: Array<{ path: string; enabled: boolean }> = [];
+		const natives = {
+			async listResources() {
+				return { global: [resourceGroup({ extensions: [{ path: "extension/index.ts", enabled: false }] })], project: [] };
+			},
+			async security() { return { mutationApproval: "always" as const }; },
+			async toggleResource(_source: string, _field: string, path: string, enabled: boolean) { toggled.push({ path, enabled }); return "ok"; },
+		} as unknown as Natives;
+		const reloads = { count: 0 };
+		const ctx = { hasUI: true, ui: { async confirm() { return true; }, notify() {} }, async reload() { reloads.count += 1; } } as unknown as ExtensionCommandContext;
+
+		const outcome = await applyDisableExtensions(row, natives, ctx);
+
+		expect(outcome).toBe("changed");
+		expect(toggled).toEqual([{ path: "extension/index.ts", enabled: true }]);
+	});
+
+	it("never mutates or reloads when the per-item confirmation is declined", async () => {
+		const natives = {
+			async listResources() {
+				return { global: [resourceGroup({ extensions: [{ path: "extension/index.ts", enabled: true }] })], project: [] };
+			},
+			async security() { return { mutationApproval: "always" as const }; },
+		} as unknown as Natives;
+		const reloads = { count: 0 };
+		const ctx = { hasUI: true, ui: { async confirm() { return false; }, notify() {} }, async reload() { reloads.count += 1; } } as unknown as ExtensionCommandContext;
+
+		const outcome = await applyDisableExtensions(row, natives, ctx);
+
+		expect(outcome).toBe("cancelled");
+		expect(reloads.count).toBe(0);
+	});
+
+	it("is unaffected by an unrelated package with no matching resource group", async () => {
+		const natives = { async listResources() { return { global: [], project: [] }; } } as unknown as Natives;
+		const notices: string[] = [];
+		const ctx = { hasUI: true, ui: { notify(m: string) { notices.push(m); } } } as unknown as ExtensionCommandContext;
+
+		const outcome = await applyDisableExtensions(row, natives, ctx);
+
+		expect(outcome).toBe("unchanged");
+		expect(notices.some((n) => n.includes("no extensions"))).toBe(true);
 	});
 });

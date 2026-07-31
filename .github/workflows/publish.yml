@@ -2,10 +2,10 @@ name: Publish Package
 
 # Trusted publishing (OIDC): no long-lived npm tokens. npm CLI detects the
 # OIDC environment automatically (requires npm >= 11.5.1). Both packages'
-# npmjs.com Trusted Publisher configs already expect this exact filename
-# (org=DanyPops repo=pi-packed workflow=publish.yml, and repo=packed
-# workflow=publish.yml) -- one shared file dispatching by tag prefix matches
-# what's already configured, instead of reconfiguring npmjs.com per package.
+# npmjs.com Trusted Publisher configs point at this one repo (org=DanyPops
+# repo=packed) and this exact workflow filename (publish.yml) -- one shared
+# file dispatching by tag prefix matches what's configured, instead of
+# reconfiguring npmjs.com per package.
 
 on:
   push:

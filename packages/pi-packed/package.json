@@ -23,7 +23,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/DanyPops/pi-packed.git",
+    "url": "git+https://github.com/DanyPops/packed.git",
     "directory": "packages/pi-packed"
   },
   "files": ["extension", "setup", "README.md"]

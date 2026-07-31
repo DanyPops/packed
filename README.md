@@ -223,3 +223,5 @@ The first run copies missing data from the former `~/.cache/pi-packed/` layout. 
 bun test
 bunx tsc --noEmit
 ```
+
+`bun install` configures a pre-commit hook (`.githooks/pre-commit`) that runs `bun run typecheck` and `bun run test`, blocking the commit if either fails. Bypass only with a real reason: `git commit --no-verify`.

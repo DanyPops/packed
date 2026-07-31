@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { applyPackageChoice } from "../extension/src/tui.ts";
+import { applyPackageChoice, showPackedPanel } from "../extension/src/tui.ts";
 import type { Natives } from "../extension/src/packed.ts";
 import type { Row } from "../extension/src/model.ts";
 
@@ -20,7 +20,60 @@ function fakeCtx(confirm: boolean, notices: string[], reloads: { count: number }
 	} as unknown as ExtensionCommandContext;
 }
 
-describe("applyPackageChoice (/packages panel mutation + reload honesty)", () => {
+describe("showPackedPanel (/packed folds packages + settings into one panel)", () => {
+	it("opens on the packages panel, and pressing s returns to it afterward instead of exiting", async () => {
+		// ctx.ui.custom is faked directly rather than simulating keypresses --
+		// asserts the panel loop's own dispatch, not the real TUI's rendering.
+		const customCalls: unknown[] = [];
+		let customCallCount = 0;
+		const securityCalls: string[] = [];
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom(_factory: unknown) {
+					customCallCount += 1;
+					customCalls.push(_factory);
+					// First open: settings. Second open (after settings returns): close.
+					return customCallCount === 1 ? { type: "settings" } : undefined;
+				},
+				async select() { return "Cancel"; },
+				notify() {},
+			},
+		} as unknown as ExtensionCommandContext;
+		const natives = {
+			async installed() { return []; },
+			async updates() { return []; },
+			async security() { securityCalls.push("security"); return { mutationApproval: "always" as const }; },
+		} as unknown as Natives;
+
+		await showPackedPanel(ctx, natives);
+
+		expect(customCallCount).toBe(2); // packages panel opened, then reopened after settings
+		expect(securityCalls).toEqual(["security"]); // settings flow actually ran once
+	});
+
+	it("closes without ever touching settings when the panel itself is dismissed", async () => {
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom() { return undefined; }, // esc
+				notify() {},
+			},
+		} as unknown as ExtensionCommandContext;
+		let securityCalled = false;
+		const natives = {
+			async installed() { return []; },
+			async updates() { return []; },
+			async security() { securityCalled = true; return { mutationApproval: "always" as const }; },
+		} as unknown as Natives;
+
+		await showPackedPanel(ctx, natives);
+
+		expect(securityCalled).toBe(false);
+	});
+});
+
+describe("applyPackageChoice (/packed panel mutation + reload honesty)", () => {
 	it("warns inline before running, in the same confirm dialog every other mutation surface shares", async () => {
 		const notices: string[] = [];
 		const reloads = { count: 0 };

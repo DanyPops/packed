@@ -1,5 +1,5 @@
 /**
- * model.ts — pure row logic for the /packages panel. No I/O: vitest drives
+ * model.ts — pure row logic for the /packed panel. No I/O: vitest drives
  * this directly (the TUI component is a thin shell over these functions).
  */
 import type { InstalledPkg, UpdateEntry } from "./packed.js";

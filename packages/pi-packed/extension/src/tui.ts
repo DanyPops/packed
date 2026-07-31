@@ -1,8 +1,11 @@
 /**
- * tui.ts — /packages interactive panel. Follows the pi-extension-manager
- * idiom: ctx.ui.custom with Container/DynamicBorder layout, header hints,
- * type-to-filter (/), Tab view modes, Enter → actions, r refresh, esc close.
- * All data flows through the packed CLI (thin seam).
+ * tui.ts — /packed's default panel. Follows the pi-extension-manager idiom:
+ * ctx.ui.custom with Container/DynamicBorder layout, header hints,
+ * type-to-filter (/), Tab view modes, Enter → actions, r refresh, s
+ * settings, esc close. Packages is the landing page; s opens settings
+ * (mutation approval) as a sub-flow and returns to the same panel
+ * afterward, rather than a second rendered page. All data flows through
+ * the packed CLI (thin seam).
  */
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder, rawKeyHint } from "@earendil-works/pi-coding-agent";
@@ -11,9 +14,10 @@ import { filterRows, mergeRows, nextMode, visibleRows } from "./model.js";
 import type { Row, ViewMode } from "./model.js";
 import type { Natives } from "./packed.js";
 import { approvePackageOperation } from "./tools.js";
+import { showPackedSettings } from "./security-tui.js";
 
 interface PanelAction {
-	type: "menu" | "refresh";
+	type: "menu" | "refresh" | "settings";
 	row?: Row;
 }
 
@@ -86,9 +90,9 @@ async function loadRows(natives: Natives): Promise<{ rows: Row[]; error?: string
 	}
 }
 
-export async function showPackages(ctx: ExtensionCommandContext, natives: Natives): Promise<void> {
+export async function showPackedPanel(ctx: ExtensionCommandContext, natives: Natives): Promise<void> {
 	if (!ctx.hasUI) {
-		ctx.ui.notify("/packages requires interactive mode", "warning");
+		ctx.ui.notify("/packed requires interactive mode", "warning");
 		return;
 	}
 
@@ -107,6 +111,11 @@ export async function showPackages(ctx: ExtensionCommandContext, natives: Native
 			({ rows, error } = await loadRows(natives));
 			if (error) ctx.ui.notify(`refresh failed: ${error}`, "error");
 			continue;
+		}
+
+		if (action.type === "settings") {
+			await showPackedSettings(ctx, natives);
+			continue; // settings never changes package rows -- reopen as-is
 		}
 
 		const row = action.row;
@@ -154,6 +163,8 @@ function renderPanel(ctx: ExtensionCommandContext, rows: Row[]): Promise<PanelAc
 						rawKeyHint("/", "filter") +
 						theme.fg("muted", " · ") +
 						rawKeyHint("tab", "view") +
+						theme.fg("muted", " · ") +
+						rawKeyHint("s", "settings") +
 						theme.fg("muted", " · ") +
 						rawKeyHint("esc", "close");
 				const spacing = Math.max(1, width - visibleWidth(title) - visibleWidth(badge) - visibleWidth(hint));
@@ -240,6 +251,9 @@ function renderPanel(ctx: ExtensionCommandContext, rows: Row[]): Promise<PanelAc
 						break;
 					case "r":
 						done({ type: "refresh" });
+						return;
+					case "s":
+						done({ type: "settings" });
 						return;
 					case "\r": {
 						const row = filtered[selectedIndex];

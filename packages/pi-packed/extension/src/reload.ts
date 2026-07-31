@@ -1,7 +1,7 @@
 /**
  * reload.ts — one shared decision for whether a Pi package mutation needs a
  * reload to take effect, and the exact wording every mutation surface
- * (native tools, the /packages panel, and the resource overlay) uses to
+ * (native tools, the /packed panel, and the resource overlay) uses to
  * warn about it. Keeps three independent implementations from drifting
  * apart on when and how they say a reload is coming.
  */

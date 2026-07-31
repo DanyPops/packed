@@ -2,7 +2,7 @@
  * pi-packed — Pi extension seam.
  *
  * Thin by design: registers agent tools (pkg_search/pkg_info/pkg_install/pkg_update/pkg_remove),
- * the /packages command, and a session_start update notification. ALL logic
+ * the /packed command, and a session_start update notification. ALL logic
  * lives in the Bun service (src/): registry access, caching, watcher,
  * catalog sync, install execution.
  *
@@ -10,10 +10,9 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerTools } from "./tools.js";
-import { showPackages } from "./tui.js";
+import { showPackedPanel } from "./tui.js";
 import { createNatives } from "./packed.js";
 import { formatUpdateNotice } from "./model.js";
-import { showPackedSettings } from "./security-tui.js";
 import { registerProfiles } from "./profile.js";
 import { handleSetupCommand } from "./setup-command.js";
 import { handleResourceConfigCommand } from "./resource-config.js";
@@ -26,18 +25,11 @@ export default async function (pi: ExtensionAPI) {
 	registerTools(pi, natives);
 
 	pi.registerCommand("packed", {
-		description: "Configure pi-packed security settings, run setup plan/apply, or manage resources with config",
+		description: "Browse and manage installed Pi packages; press s for settings, or run setup plan/apply or config directly",
 		handler: async (args, ctx) => {
 			if (await handleSetupCommand(args, ctx, natives)) return;
 			if (await handleResourceConfigCommand(args, ctx, natives)) return;
-			await showPackedSettings(ctx, natives);
-		},
-	});
-
-	pi.registerCommand("packages", {
-		description: "Browse and manage installed Pi packages (pi-packed)",
-		handler: async (_args, ctx) => {
-			await showPackages(ctx, natives);
+			await showPackedPanel(ctx, natives);
 		},
 	});
 
@@ -47,7 +39,7 @@ export default async function (pi: ExtensionAPI) {
 		try {
 			const updates = await natives.updates();
 			if (updates.length) {
-				ctx.ui.notify(`${formatUpdateNotice(updates)} — /packages to review`, "info");
+				ctx.ui.notify(`${formatUpdateNotice(updates)} — /packed to review`, "info");
 			}
 		} catch {
 			// mirror missing or unreadable — stay silent, never block startup.

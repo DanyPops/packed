@@ -14,3 +14,33 @@ function packageVersion(): string {
 
 /** Runtime package version; package.json is the single release source of truth. */
 export const VERSION = packageVersion();
+
+export interface VersionReport {
+	installed: string;
+	/** Undefined when no daemon is reachable at all -- not a drift concern. */
+	daemon?: { version: string; stale: boolean };
+}
+
+export function buildVersionReport(installed: string, daemonVersion: string | undefined): VersionReport {
+	return {
+		installed,
+		...(daemonVersion !== undefined ? { daemon: { version: daemonVersion, stale: daemonVersion !== installed } } : {}),
+	};
+}
+
+/** A running daemon holding stale in-memory code is otherwise invisible --
+ * it stays reachable and correctly answers every RPC, just with whatever
+ * logic was current when it started. Confirmed live: an 11-hour-old daemon
+ * kept flagging false "update available" rows from a same-day comparison
+ * fix it predated. */
+export function formatVersionReport(report: VersionReport): string {
+	const lines = [`packed ${report.installed} (installed)`];
+	if (report.daemon) {
+		lines.push(
+			report.daemon.stale
+				? `daemon running v${report.daemon.version} -- STALE, restart required to pick up v${report.installed} (e.g. systemctl --user restart pi-packed.service)`
+				: `daemon running v${report.daemon.version} -- up to date`,
+		);
+	}
+	return `${lines.join("\n")}\n`;
+}

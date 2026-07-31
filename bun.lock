@@ -19,7 +19,7 @@
     },
     "packages/packed": {
       "name": "@danypops/packed",
-      "version": "0.3.1",
+      "version": "0.3.2",
       "bin": {
         "packed": "src/cli/cli.ts",
       },

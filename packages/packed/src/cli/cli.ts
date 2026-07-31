@@ -50,7 +50,7 @@ function defaultPiBinForUnit(): string | undefined {
 import {
 	SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT, NPM_REGISTRY_BASE, SEARCH_PAGE_SIZE, MIRROR_PAGE_DELAY_MS,
 } from "../shared/constants.ts";
-import { VERSION } from "../shared/version.ts";
+import { VERSION, buildVersionReport, formatVersionReport } from "../shared/version.ts";
 
 const SOURCE_RE = /^(npm:[A-Za-z0-9@._/-]+|git:[A-Za-z0-9@:._/-]+|https:\/\/[A-Za-z0-9@:._/?=&%~-]+)$/;
 
@@ -97,6 +97,10 @@ export interface CliDeps {
 	execPath?: string; // bun binary (defaults to process.execPath)
 	cliPath?: string; // this CLI's entry file (for the systemd unit)
 	piBin?: string; // pi binary path to pin into the unit's Environment
+	/** Reads the reachable daemon's own live-reported version, or undefined
+	 * when none is reachable. Defaults to a real probe() over HTTP -- injectable
+	 * so tests never depend on this machine's actual daemon state. */
+	daemonVersionCheck?: () => Promise<string | undefined>;
 	packer?: { verify(path: string): Promise<PackReport> };
 	scorer?: { score(target: string): Promise<AdoptionReport> };
 	publisher?: {
@@ -622,9 +626,17 @@ const commands: Record<string, { usage: string; run: Command }> = {
 	},
 
 	version: {
-		usage: "packed version",
-		async run() {
-			return ok(VERSION + "\n");
+		usage: "packed version [--json]",
+		async run(rest, d) {
+			const json = rest.includes("--json");
+			const daemonVersion = d.daemonVersionCheck
+				? await d.daemonVersionCheck()
+				: await (async () => {
+					const { probe } = await import("../daemon/client.ts");
+					return (await probe())?.version;
+				})();
+			const report = buildVersionReport(VERSION, daemonVersion);
+			return ok(json ? `${JSON.stringify(report)}\n` : formatVersionReport(report));
 		},
 	},
 };

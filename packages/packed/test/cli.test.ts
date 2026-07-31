@@ -13,6 +13,7 @@ import { openDb, replaceAll, dbPath, catalogList } from "../src/packages/db.ts";
 import { HttpRegistry } from "../src/registry/registry.ts";
 import type { Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/shared/ports.ts";
 import type { Server } from "bun";
+import { VERSION } from "../src/shared/version.ts";
 
 class FakeRegistry implements Registry {
 	constructor(private results: Pkg[] = [], private versions: Record<string, string> = {}) {}
@@ -629,6 +630,24 @@ describe("CLI", () => {
 		expect(human.out).toContain('CONFLICT tool "tasks"');
 	});
 
+	it("version reports just the installed version when no daemon is reachable", async () => {
+		const { code, out } = await cliRun(["version", "--json"], deps({ daemonVersionCheck: async () => undefined }));
+		expect(code).toBe(0);
+		expect(JSON.parse(out)).toEqual({ installed: VERSION });
+	});
+
+	it("version reports a matching daemon as up to date", async () => {
+		const { out } = await cliRun(["version", "--json"], deps({ daemonVersionCheck: async () => VERSION }));
+		expect(JSON.parse(out)).toEqual({ installed: VERSION, daemon: { version: VERSION, stale: false } });
+	});
+
+	it("version flags a stale daemon clearly, with a concrete restart suggestion, human-readable", async () => {
+		const { out } = await cliRun(["version"], deps({ daemonVersionCheck: async () => "0.0.1" }));
+		expect(out).toContain("STALE");
+		expect(out).toContain("0.0.1");
+		expect(out).toContain("systemctl --user restart pi-packed.service");
+	});
+
 	it("unknown command → usage, code 2", async () => {
 		const { code, out } = await cliRun(["frobnicate"], deps());
 		expect(code).toBe(2);
@@ -676,6 +695,16 @@ describe("daemon client", () => {
 		const found = await probe(daemonPaths);
 		expect(found).toBeDefined();
 		expect(found?.token).toBe(daemonToken);
+	});
+
+	// Real bug, diagnosed live: a daemon process can run for hours holding
+	// stale in-memory code while its own source/package.json moves on --
+	// ps+git-log correlation was the only way to notice. probe() surfacing
+	// the daemon's own live-reported version (from its real /health
+	// endpoint, not a guess) is the durable, scriptable replacement for that.
+	it("probe reports the live daemon's own real version from its /health endpoint", async () => {
+		const found = await probe(daemonPaths);
+		expect(found?.version).toBe(VERSION); // this test daemon runs the current on-disk code
 	});
 
 	it("probe rejects dead state", async () => {

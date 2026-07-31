@@ -264,7 +264,13 @@ export class DaemonRegistry implements Registry {
 	info(name: string): Promise<PkgInfo> { return this.client.info(name); }
 }
 
-export interface DaemonHandle { base: string; token: string }
+/** version is the daemon's own live-reported version (its real /health
+ * response, not a guess) -- an auto-spawned or supervised daemon process
+ * can outlive the source/package it was started from, silently serving
+ * stale code for as long as it stays reachable. Confirmed live: an 11-
+ * hour-old daemon kept flagging false "update available" rows because it
+ * predated a same-day fix to the exact comparison logic deciding that. */
+export interface DaemonHandle { base: string; token: string; version: string }
 
 export async function probe(paths: PackedPaths = resolvePackedPaths()): Promise<DaemonHandle | undefined> {
 	const handle = readDaemonHandle(paths.handle);
@@ -282,8 +288,8 @@ export async function probe(paths: PackedPaths = resolvePackedPaths()): Promise<
 			label: "Packed",
 			transport: timeoutTransport(fetch, PROBE_TIMEOUT_MS),
 		});
-		await rpc.health();
-		return { base, token };
+		const health = await rpc.health();
+		return { base, token, version: health.version };
 	} catch {
 		return undefined;
 	}

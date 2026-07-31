@@ -464,11 +464,18 @@ function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows
 
 		// Real bordered box (rounded corners), not just a horizontal rule --
 		// title carries the live update badge/status instead of a header line.
+		// measure must be explicit: Envelope's own default is ASCII-only (raw
+		// .length, blind to ANSI escape codes) and every line below is styled
+		// through theme.fg/theme.bold -- without this, Envelope pads each line
+		// against its own escape-code-inflated "length" instead of its real
+		// visible width, so the right border lands at a different column on
+		// every line depending on how much styling that particular line has.
 		const envelope = new Envelope({
 			title: panelTitle(),
 			borderStyle: "rounded",
 			style: (s) => theme.fg("border", s),
 			titleStyle: (s) => theme.bold(theme.fg("accent", s)),
+			measure,
 		});
 		const body = {
 			invalidate() { header.invalidate(); list.invalidate(); },

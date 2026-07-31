@@ -40,7 +40,7 @@
     },
     "packages/pi-packed": {
       "name": "@danypops/pi-packed",
-      "version": "0.13.0",
+      "version": "0.13.1",
       "dependencies": {
         "@danypops/packed": "^0.2.0",
         "@danypops/vehicle-client": "^0.1.1",
@@ -325,7 +325,7 @@
 
     "lru-cache": ["lru-cache@11.5.2", "", {}, "sha512-4pfM1Ff0x50o0tQwb5ucw/RzNyD0/YJME6IVcStalZuMWxdt3sR3huStTtxz4PUmvZfRguvDejasvQ2kifR11g=="],
 
-    "malevich-tui-components": ["malevich-tui-components@0.8.0", "", {}, "sha512-vmYaJ9XB/DNAUhCtAzVjry6W8oJqwvtaJ2J18s7hnvivlBV7NXM4dIE1AWnidh8TBIw6N4YmCpI9sWSMvd7Kdg=="],
+    "malevich-tui-components": ["malevich-tui-components@0.8.1", "", {}, "sha512-Ag07DOdYqNDAKd3syXWcJ8ngAvHrOfujYN3DEPYgEUrujxcX9T9vlWpo7gv0kdiSDtkgVcNwxsbg/TLMVFtREA=="],
 
     "marked": ["marked@18.0.5", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-S6GcvALHg6K4ohtu4E7x0a1AqhAjp6cV8KhLSyN9qVapnzJkusVBxZRcIU9AeYsbe6P1hKDusSbEOzGyyuce6w=="],
 

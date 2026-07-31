@@ -13,6 +13,24 @@ initTheme();
 
 const row: Row = { name: "pi-lsp", version: "1.0.0", latest: "1.1.0", hasUpdate: true };
 
+// A theme that wraps text in genuine ANSI SGR codes, the way every real pi
+// theme does -- unlike the identity-passthrough fake theme (`fg: (_c, s) =>
+// s`) every other test below uses, which cannot exercise any bug that only
+// shows up once content actually contains escape sequences. Confirmed live:
+// the panel's own border landed at a different column on every row because
+// Envelope's default measure counts ANSI escape bytes as visible characters.
+const ANSI_ORANGE = "\u001b[38;5;208m";
+const ANSI_BOLD = "\u001b[1m";
+const ANSI_RESET = "\u001b[0m";
+const ANSI_ESCAPE_PATTERN = /\u001b\[[0-9;]*m/g;
+const realishTheme = {
+	fg: (_color: string, s: string) => `${ANSI_ORANGE}${s}${ANSI_RESET}`,
+	bold: (s: string) => `${ANSI_BOLD}${s}${ANSI_RESET}`,
+};
+function stripAnsi(s: string): string {
+	return s.replace(ANSI_ESCAPE_PATTERN, "");
+}
+
 function fakeCtx(confirm: boolean, notices: string[], reloads: { count: number }): ExtensionCommandContext {
 	return {
 		hasUI: true,
@@ -177,6 +195,43 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		const longNameVersionCol = nameLine!.indexOf("0.3.12");
 		const shortNameVersionCol = versionLine!.indexOf("1.0.0");
 		expect(longNameVersionCol).toBe(shortNameVersionCol);
+	});
+
+	it("keeps every rendered line at the exact same real (ANSI-stripped) width, under genuine theme styling, not a plain fake theme", async () => {
+		// This is the actual regression test for a real, screenshot-reported
+		// bug: every other test in this file uses an identity-passthrough fake
+		// theme (`fg: (_c, s) => s`), which can never exercise a bug that only
+		// shows up once content contains real ANSI escape codes -- exactly why
+		// it shipped and was only caught by eye, not by any of these tests.
+		let rendered: string[] = [];
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[] }) {
+					return new Promise((resolve) => {
+						const component = factory({ requestRender() {} }, realishTheme, {}, resolve);
+						rendered = component.render(90);
+						resolve(undefined);
+					});
+				},
+				notify() {},
+			},
+		} as unknown as ExtensionCommandContext;
+		const natives = {
+			async installed() {
+				return [
+					{ name: "pi-lsp", installed: "1.0.0" },
+					{ name: "@scope/pi-longer-package-name", installed: "0.3.12" },
+					{ name: "pi-x", installed: "10.20.30-beta.1" },
+				];
+			},
+			async updates() { return [{ name: "pi-lsp", installed: "1.0.0", latest: "1.1.0" }]; },
+		} as unknown as Natives;
+
+		await showPackedPanel(ctx, natives);
+
+		const widths = new Set(rendered.map((line) => stripAnsi(line).length));
+		expect(widths).toEqual(new Set([90])); // every line, every column -- not a mix of 60/75/90
 	});
 
 	it("renders the installer's own progress bar inline next to the updating row, without replacing the rest of the package list", async () => {

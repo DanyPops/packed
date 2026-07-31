@@ -1,6 +1,7 @@
 /** install.ts — driven adapter: pi CLI mutations via Bun.spawn. */
 import { defaultPiHome, isPinnedNpmSource, readResolvedVersion } from "./installed.ts";
 import type { Installer, UpdateOutcome } from "../shared/ports.ts";
+import { HeadlessInstallValidator, type InstallValidator } from "../adoption/install-validation.ts";
 
 /** Bare npm package name (for `packed remove`). */
 export const NAME_RE = /^(@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._-]+$/;
@@ -13,6 +14,7 @@ export class ExecInstaller implements Installer {
 	constructor(
 		private bin = defaultPiBin(),
 		private piHome = defaultPiHome(),
+		private validator: InstallValidator = new HeadlessInstallValidator(),
 	) {}
 
 	private async run(args: string[]): Promise<string> {
@@ -27,7 +29,12 @@ export class ExecInstaller implements Installer {
 		return out;
 	}
 
-	install(source: string, options?: { approved?: boolean; local?: boolean }): Promise<string> {
+	async install(source: string, options?: { approved?: boolean; local?: boolean }): Promise<string> {
+		const validation = await this.validator.validate(source);
+		if (!validation.ok) {
+			const detail = validation.extensions.filter((extension) => !extension.ok).map((extension) => `${extension.path}: ${extension.message}`).join("; ");
+			throw new Error(`install refused -- ${detail || validation.message || "extension failed a headless load check"}`);
+		}
 		return this.run(["install", ...(options?.local ? ["-l"] : []), source]);
 	}
 

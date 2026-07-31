@@ -24,8 +24,11 @@
         "packed": "src/cli/cli.ts",
       },
       "dependencies": {
+        "@danypops/pi-extension-harness": "^0.2.0",
         "@danypops/vehicle-client": "^0.1.1",
         "@danypops/vehicle-server": "^0.3.2",
+        "@earendil-works/pi-coding-agent": "^0.82.0",
+        "@earendil-works/pi-tui": "^0.82.0",
         "jiti": "2.6.1",
         "publint": "0.3.22",
         "semver": "^7.8.5",
@@ -37,7 +40,7 @@
     },
     "packages/pi-packed": {
       "name": "@danypops/pi-packed",
-      "version": "0.8.0",
+      "version": "0.10.0",
       "dependencies": {
         "@danypops/packed": "^0.2.0",
         "@danypops/vehicle-client": "^0.1.1",
@@ -107,6 +110,8 @@
     "@danypops/daemon-kit": ["@danypops/daemon-kit@0.4.0", "", { "dependencies": { "pino": "^10.3.1" }, "peerDependencies": { "typescript": "^5" } }, "sha512-oZ1Ryen4r9TpaoRdHPgxqvNo1EKO4erPCRTf4v2qlnF3RUYb6Rz/YHCacZF3WtWi0hr1qL9nmmR5YdT6RI6rgw=="],
 
     "@danypops/packed": ["@danypops/packed@workspace:packages/packed"],
+
+    "@danypops/pi-extension-harness": ["@danypops/pi-extension-harness@0.2.0", "", { "dependencies": { "jiti": "^2.0.0" }, "peerDependencies": { "@earendil-works/pi-coding-agent": "*", "typebox": "*" } }, "sha512-jnyoA6VpQS+OciEPQeRHwvBHKJyaokgA73moSBSvi1DUoCn5sL39P/ooatu8nei/hhJTKkFN2FYlQahvBigznw=="],
 
     "@danypops/pi-packed": ["@danypops/pi-packed@workspace:packages/pi-packed"],
 
@@ -423,6 +428,8 @@
     "@aws-sdk/credential-provider-sso/@aws-sdk/token-providers": ["@aws-sdk/token-providers@3.1088.0", "", { "dependencies": { "@aws-sdk/core": "^3.975.3", "@aws-sdk/nested-clients": "^3.997.33", "@aws-sdk/types": "^3.974.2", "@smithy/core": "^3.29.4", "@smithy/types": "^4.16.1", "tslib": "^2.6.2" } }, "sha512-4ObatWt2qpJg5FBk4LOOKrTQYzaqeewAtdO3r9ZO8lH9YqLtpTzLyIdy0mJ+nVdfYOnqISkKNfmzP22bNDhwyw=="],
 
     "@aws-sdk/nested-clients/@smithy/node-http-handler": ["@smithy/node-http-handler@4.9.7", "", { "dependencies": { "@smithy/core": "^3.29.5", "@smithy/types": "^4.16.1", "tslib": "^2.6.2" } }, "sha512-wCU8HCLjAtAVqxxe0j2xff9LcEPw3yjBbg5IdQDIYFnxnPxbxcSLc7rgex7kqm9L/WYOnJEgaWQlfDkZleozMA=="],
+
+    "@danypops/pi-extension-harness/jiti": ["jiti@2.7.0", "", { "bin": { "jiti": "lib/jiti-cli.mjs" } }, "sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ=="],
 
     "@danypops/vehicle-client/@danypops/vehicle-server": ["@danypops/vehicle-server@0.1.1", "", { "dependencies": { "@danypops/vehicle-core": "^0.1.0", "pino": "^10.3.1" } }, "sha512-7yOxstICfQ9W77CjwvCrDI93lGxFTl1SeAy8SJXM5MfzGXlov2TlpUTRzbb9Sv+t5W+jNVcOs4iZHsaUGRDgrA=="],
 

@@ -11,7 +11,7 @@ The extension connects to Packed's authenticated user daemon and starts the pack
 ## Commands
 
 - `/packed` -- a floating overlay panel: every installed Pi package, with update availability. Mnemonics follow lazy.nvim's own convention (uppercase acts on every row, lowercase on the one under the cursor):
-  - `u` / `U` -- update the selected package / update every outdated package, one combined confirmation and one reload. `U`'s progress bar appears inline next to the package currently updating -- the list stays visible throughout, nothing swaps to a separate screen.
+  - `u` / `U` -- update the selected package / update every outdated package, one combined confirmation and one reload. `U`'s progress bar appears inline next to the package currently updating -- the list stays visible throughout, nothing swaps to a separate screen. A reload is confirmed separately from the update itself -- decline it to defer: the update already happened, only picking it up in this Pi session is deferred until `/reload`.
   - `x` -- remove the selected package.
   - `d` -- disable (or re-enable) the selected package's own extensions.
   - `c` -- jump to resource config for the selected package (skills, prompts, themes).

@@ -14,6 +14,7 @@ import { Container, Input, Spacer, truncateToWidth, visibleWidth } from "@earend
 import type { PackageResources, ResourceField } from "./packed.js";
 import type { Natives } from "./packed.js";
 import { packagePermissionDecision } from "./permission.js";
+import { confirmReload } from "./reload.js";
 
 type Scope = "global" | "project";
 const RESOURCE_FIELDS = ["extensions", "skills", "prompts", "themes"] as const satisfies readonly ResourceField[];
@@ -132,8 +133,7 @@ export async function showResourceConfig(ctx: ExtensionCommandContext, natives: 
 	}
 
 	if (!pendingReload) return;
-	const confirmed = await ctx.ui.confirm("Reload Pi now?", "Extension changes only take effect after a reload.");
-	if (confirmed) await ctx.reload();
+	if (await confirmReload(ctx)) await ctx.reload();
 	else ctx.ui.notify("Extension changes pending -- run /reload when ready.", "warning");
 }
 

@@ -45,6 +45,25 @@ function fakeCtx(confirm: boolean, notices: string[], reloads: { count: number }
 	} as unknown as ExtensionCommandContext;
 }
 
+/** Approves the mutation itself (1st confirm call) but declines the
+ * separate, later confirmReload gate (every call after) -- the shape every
+ * deferral test below needs, distinct from fakeCtx's single fixed answer. */
+function fakeCtxDeferReload(notices: string[], reloads: { count: number }): ExtensionCommandContext {
+	let calls = 0;
+	return {
+		hasUI: true,
+		ui: {
+			async confirm(_title: string, message: string) {
+				calls += 1;
+				notices.push(`confirm:${message}`);
+				return calls === 1;
+			},
+			notify(message: string) { notices.push(message); },
+		},
+		async reload() { reloads.count += 1; },
+	} as unknown as ExtensionCommandContext;
+}
+
 /** Runs a ctx.ui.custom factory the same way the real TUI would -- immediately,
  * with no-op tui/theme/kb stubs -- and resolves once the factory's own async
  * work calls done(). Fits any overlay that resolves itself (a progress bar)
@@ -423,6 +442,38 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		expect(toggled).toEqual(["extension/index.ts"]);
 		expect(customCallCount).toBe(1);
 	});
+
+	it("refreshes rows and stays open (does not close) when a toggle's reload is deferred rather than declined outright", async () => {
+		let customCallCount = 0;
+		let confirmCalls = 0;
+		let installedCalls = 0;
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom() {
+					customCallCount += 1;
+					// 1st open: dispatch disable. 2nd open (after the deferred refresh): close.
+					return customCallCount === 1 ? { type: "disable", row } : undefined;
+				},
+				// 1st call: per-item toggle approval (yes). 2nd call: reload gate (no, defer).
+				async confirm() { confirmCalls += 1; return confirmCalls === 1; },
+				notify() {},
+			},
+			async reload() { throw new Error("must not reload -- this test defers"); },
+		} as unknown as ExtensionCommandContext;
+		const natives = {
+			async installed() { installedCalls += 1; return []; },
+			async updates() { return []; },
+			async security() { return { mutationApproval: "always" as const }; },
+			async listResources() { return { global: [{ source: "npm:pi-lsp", name: "pi-lsp", scope: "global" as const, extensions: [{ path: "extension/index.ts", enabled: true }], skills: [], prompts: [], themes: [] }], project: [] }; },
+			async toggleResource() { return "ok"; },
+		} as unknown as Natives;
+
+		await showPackedPanel(ctx, natives);
+
+		expect(customCallCount).toBe(2); // reopened instead of closing after the deferred toggle
+		expect(installedCalls).toBe(2); // initial load + the deferred-outcome refresh
+	});
 });
 
 describe("applyPackageChoice (/packed panel mutation + reload honesty)", () => {
@@ -484,6 +535,40 @@ describe("applyPackageChoice (/packed panel mutation + reload honesty)", () => {
 		expect(removed).toBe(1);
 		expect(reloads.count).toBe(1);
 		expect(notices.some((n) => n.includes("Removed pi-lsp") && n.includes("reloading"))).toBe(true);
+	});
+
+	it("defers the reload on update when the separate reload prompt is declined, without losing the update itself", async () => {
+		const notices: string[] = [];
+		const reloads = { count: 0 };
+		let updateCalled = false;
+		const natives = {
+			async security() { return { mutationApproval: "always" as const }; },
+			async update() { updateCalled = true; return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false, previousVersion: "1.0.0", currentVersion: "1.1.0" }; },
+		} as unknown as Natives;
+
+		const outcome = await applyPackageChoice("Update to 1.1.0", row, natives, fakeCtxDeferReload(notices, reloads));
+
+		expect(outcome).toBe("deferred");
+		expect(updateCalled).toBe(true); // the update itself still genuinely ran
+		expect(reloads.count).toBe(0); // but reload was declined
+		expect(notices.some((n) => n.includes("Updated pi-lsp") && n.includes("reload pending"))).toBe(true);
+	});
+
+	it("defers the reload on remove when the separate reload prompt is declined, without losing the removal itself", async () => {
+		const notices: string[] = [];
+		const reloads = { count: 0 };
+		let removed = 0;
+		const natives = {
+			async security() { return { mutationApproval: "always" as const }; },
+			async remove() { removed += 1; return ""; },
+		} as unknown as Natives;
+
+		const outcome = await applyPackageChoice("Remove", row, natives, fakeCtxDeferReload(notices, reloads));
+
+		expect(outcome).toBe("deferred");
+		expect(removed).toBe(1); // the removal itself still genuinely ran
+		expect(reloads.count).toBe(0);
+		expect(notices.some((n) => n.includes("Removed pi-lsp") && n.includes("reload pending"))).toBe(true);
 	});
 
 	it("never mutates or reloads when the pre-confirmation is declined", async () => {
@@ -556,12 +641,44 @@ describe("applyUpdateAll (U -- one combined approval and one reload, not N)", ()
 		const outcome = await applyUpdateAll(outdated, natives, ctx);
 
 		expect(outcome).toBe("changed");
-		expect(confirmMessages).toHaveLength(1);
+		// Two distinct confirm dialogs, not one: the batch mutation approval
+		// (still collapsed to a single dialog for the whole batch, not N), then
+		// confirmReload's separate post-mutation reload gate.
+		expect(confirmMessages).toHaveLength(2);
 		expect(confirmMessages[0]).toContain("npm:pi-a");
 		expect(confirmMessages[0]).toContain("npm:pi-b");
 		expect(confirmMessages[0]).not.toContain("npm:pi-c"); // not outdated, never included
+		expect(confirmMessages[1]).toContain("only takes effect after a reload");
 		expect(updated).toEqual(["npm:pi-a", "npm:pi-b"]);
 		expect(reloads.count).toBe(1);
+	});
+
+	it("defers the reload when the user approves the update but declines the separate reload prompt, without losing the update itself", async () => {
+		const notices: string[] = [];
+		const reloads = { count: 0 };
+		const updated: string[] = [];
+		let confirmCalls = 0;
+		const natives = {
+			async security() { return { mutationApproval: "always" as const }; },
+			async update(source: string) { updated.push(source); return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false }; },
+		} as unknown as Natives;
+		const ctx = {
+			hasUI: true,
+			ui: {
+				// 1st call: mutation approval (yes). 2nd call: reload gate (no, defer).
+				async confirm() { confirmCalls += 1; return confirmCalls === 1; },
+				notify(m: string) { notices.push(m); },
+				custom: autoResolvingCustom(),
+			},
+			async reload() { reloads.count += 1; },
+		} as unknown as ExtensionCommandContext;
+
+		const outcome = await applyUpdateAll(outdated, natives, ctx);
+
+		expect(outcome).toBe("deferred");
+		expect(updated).toEqual(["npm:pi-a", "npm:pi-b"]); // the update itself still genuinely ran
+		expect(reloads.count).toBe(0); // but reload was declined
+		expect(notices.some((n) => n.includes("reload pending"))).toBe(true);
 	});
 
 	it("reports partial failure without losing the packages that did succeed", async () => {
@@ -683,6 +800,33 @@ describe("applyDisableExtensions (d -- toggles this package's own extensions on 
 		expect(toggled).toEqual([{ path: "extension/index.ts", enabled: false }]);
 		expect(reloads.count).toBe(1);
 		expect(notices.some((n) => n.includes("Disabled"))).toBe(true);
+	});
+
+	it("defers the reload when the separate reload prompt is declined, without losing the toggle itself", async () => {
+		const toggled: Array<{ path: string; enabled: boolean }> = [];
+		const notices: string[] = [];
+		const reloads = { count: 0 };
+		let confirmCalls = 0;
+		const natives = {
+			async listResources() {
+				return { global: [resourceGroup({ extensions: [{ path: "extension/index.ts", enabled: true }] })], project: [] };
+			},
+			async security() { return { mutationApproval: "always" as const }; },
+			async toggleResource(_source: string, _field: string, path: string, enabled: boolean) { toggled.push({ path, enabled }); return "ok"; },
+		} as unknown as Natives;
+		const ctx = {
+			hasUI: true,
+			// 1st call: per-item toggle approval (yes). 2nd call: reload gate (no, defer).
+			ui: { async confirm() { confirmCalls += 1; return confirmCalls === 1; }, notify(m: string) { notices.push(m); } },
+			async reload() { reloads.count += 1; },
+		} as unknown as ExtensionCommandContext;
+
+		const outcome = await applyDisableExtensions(row, natives, ctx);
+
+		expect(outcome).toBe("deferred");
+		expect(toggled).toEqual([{ path: "extension/index.ts", enabled: false }]); // the toggle itself still genuinely ran
+		expect(reloads.count).toBe(0);
+		expect(notices.some((n) => n.includes("Disabled") && n.includes("reload pending"))).toBe(true);
 	});
 
 	it("re-enables every currently-disabled extension when all are already off", async () => {

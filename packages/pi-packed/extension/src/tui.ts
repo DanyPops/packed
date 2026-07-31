@@ -19,7 +19,11 @@
  * per-row selection styling baked into each cell since Table's own
  * cellStyle is column-wide, not row-wide) inside this panel's own
  * scroll-window slice -- Table deliberately owns no pagination of its
- * own, so the visible-window-around-selectedIndex math stays here. All
+ * own, so the visible-window-around-selectedIndex math stays here. Every
+ * mutation that actually changes something asks confirmReload separately
+ * from the earlier mutation-approval confirm -- declining defers the
+ * reload (the mutation itself already happened) and keeps the panel open
+ * with refreshed rows instead of ending the session. All
  * data flows through the packed CLI (thin seam).
  */
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
@@ -34,6 +38,7 @@ import { showPackedSettings } from "./security-tui.js";
 import { showResourceConfig, applyResourceToggle } from "./resource-config.js";
 import { showDiscoverPanel } from "./discover.js";
 import { menuTheme } from "./menu-theme.js";
+import { confirmReload } from "./reload.js";
 
 interface PanelAction {
 	type: "update" | "remove" | "disable" | "config" | "find" | "refresh" | "settings";
@@ -43,8 +48,11 @@ interface PanelAction {
 /** Outcome of a confirmed row action, resolved after any real mutation and
  * reload decision -- "changed" means the daemon state changed and Pi has
  * already been reloaded (the caller should stop showing the stale panel);
+ * "deferred" means the mutation itself genuinely happened but the user
+ * declined confirmReload's separate reload gate -- Pi's session is still
+ * alive and the panel should refresh its rows and keep running, not close;
  * "unchanged"/"cancelled" mean the panel keeps running as-is. */
-export type PackageChoiceOutcome = "changed" | "unchanged" | "cancelled";
+export type PackageChoiceOutcome = "changed" | "unchanged" | "cancelled" | "deferred";
 
 export async function applyPackageChoice(
 	choice: string | undefined,
@@ -70,6 +78,10 @@ export async function applyPackageChoice(
 				return "unchanged";
 			}
 			const transition = outcome.previousVersion && outcome.currentVersion ? ` (${outcome.previousVersion} → ${outcome.currentVersion})` : "";
+			if (!(await confirmReload(ctx))) {
+				ctx.ui.notify(`Updated ${row.name}${transition}; reload pending -- run /reload when ready.`, "warning");
+				return "deferred";
+			}
 			ctx.ui.notify(`Updated ${row.name}${transition}; reloading Pi resources.`, "info");
 			await ctx.reload();
 			return "changed";
@@ -86,6 +98,10 @@ export async function applyPackageChoice(
 				return "cancelled";
 			}
 			await natives.remove(row.name, approval.approved);
+			if (!(await confirmReload(ctx))) {
+				ctx.ui.notify(`Removed ${row.name}; reload pending -- run /reload when ready.`, "warning");
+				return "deferred";
+			}
 			ctx.ui.notify(`Removed ${row.name}; reloading Pi resources.`, "info");
 			await ctx.reload();
 			return "changed";
@@ -156,7 +172,12 @@ async function approveAndRunUpdateAll(
 		ctx.ui.notify(failedNames.length > 0 ? `No packages updated; ${failedNames.length} failed.` : "All packages already up to date.", failedNames.length > 0 ? "warning" : "info");
 		return failedNames.length > 0 ? "cancelled" : "unchanged";
 	}
-	ctx.ui.notify(`Updated ${changed} package(s)${failedNames.length > 0 ? `, ${failedNames.length} failed` : ""}; reloading Pi resources.`, "info");
+	const failedSuffix = failedNames.length > 0 ? `, ${failedNames.length} failed` : "";
+	if (!(await confirmReload(ctx))) {
+		ctx.ui.notify(`Updated ${changed} package(s)${failedSuffix}; reload pending -- run /reload when ready.`, "warning");
+		return "deferred";
+	}
+	ctx.ui.notify(`Updated ${changed} package(s)${failedSuffix}; reloading Pi resources.`, "info");
 	await ctx.reload();
 	return "changed";
 }
@@ -239,7 +260,12 @@ export async function applyDisableExtensions(row: Row, natives: Natives, ctx: Ex
 		else if (outcome === "cancelled") return toggled > 0 ? "changed" : "cancelled";
 	}
 	if (toggled === 0) return "unchanged";
-	ctx.ui.notify(`${disabling ? "Disabled" : "Enabled"} ${toggled} extension(s) for ${row.name}; reloading Pi resources.`, "info");
+	const verb = disabling ? "Disabled" : "Enabled";
+	if (!(await confirmReload(ctx))) {
+		ctx.ui.notify(`${verb} ${toggled} extension(s) for ${row.name}; reload pending -- run /reload when ready.`, "warning");
+		return "deferred";
+	}
+	ctx.ui.notify(`${verb} ${toggled} extension(s) for ${row.name}; reloading Pi resources.`, "info");
 	await ctx.reload();
 	return "changed";
 }
@@ -287,6 +313,14 @@ export async function showPackedPanel(ctx: ExtensionCommandContext, natives: Nat
 		return;
 	}
 
+	// A deferred reload means the mutation itself genuinely happened but
+	// ctx.reload() was declined -- the session is still alive, so refresh
+	// rows (real on-disk versions) and keep the panel open, same as "refresh".
+	async function refreshRows(): Promise<void> {
+		({ rows, error } = await loadRows(natives));
+		if (error) ctx.ui.notify(`refresh failed: ${error}`, "error");
+	}
+
 	// Panel loop: actions resolve the component, run outside it, then reopen.
 	// U/updateAll is handled entirely inside renderPanel itself (progress
 	// rendered on the same already-open overlay) and never reaches here.
@@ -295,8 +329,7 @@ export async function showPackedPanel(ctx: ExtensionCommandContext, natives: Nat
 		if (!action) return; // closed
 
 		if (action.type === "refresh") {
-			({ rows, error } = await loadRows(natives));
-			if (error) ctx.ui.notify(`refresh failed: ${error}`, "error");
+			await refreshRows();
 			continue;
 		}
 
@@ -321,11 +354,13 @@ export async function showPackedPanel(ctx: ExtensionCommandContext, natives: Nat
 		if (action.type === "disable") {
 			const outcome = await applyDisableExtensions(row, natives, ctx);
 			if (outcome === "changed") return;
+			if (outcome === "deferred") await refreshRows();
 			continue;
 		}
 
 		const outcome = await applyPackageChoice(action.type === "update" ? `Update to ${row.latest}` : "Remove", row, natives, ctx);
 		if (outcome === "changed") return; // ctx.reload() already replaced the session
+		if (outcome === "deferred") await refreshRows();
 	}
 }
 

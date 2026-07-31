@@ -1,6 +1,6 @@
 {
   "name": "@danypops/pi-packed",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Pi package tools, commands, profiles, and TUI for the Packed daemon",
   "type": "module",
   "keywords": ["pi-package"],
@@ -12,7 +12,7 @@
     "typecheck": "bunx tsc --noEmit"
   },
   "dependencies": {
-    "@danypops/packed": "^0.1.0",
+    "@danypops/packed": "^0.2.0",
     "@danypops/vehicle-client": "^0.1.1",
     "@danypops/vehicle-client-pi": "^0.1.5"
   },

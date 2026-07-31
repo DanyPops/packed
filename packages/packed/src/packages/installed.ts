@@ -91,6 +91,21 @@ export function readInstalledPackages(piHome: string): InstalledPkg[] {
 	return out;
 }
 
+/**
+ * Global scope alone is invisible to a project's own .pi/settings.json pin --
+ * confirmed live: a project pinned a stale major version of a since-split
+ * package, and nothing in packed's own drift detection ever saw it. Merges
+ * global and (when given) project-scoped declarations, tagging each so a
+ * name pinned differently in each scope is reported twice, not silently
+ * deduped into one.
+ */
+export function readInstalledPackagesAcrossScopes(piHome: string, projectRoot?: string): InstalledPkg[] {
+	const global = readInstalledPackages(piHome).map((pkg) => ({ ...pkg, scope: "global" as const }));
+	if (!projectRoot) return global;
+	const project = readInstalledPackages(join(projectRoot, ".pi")).map((pkg) => ({ ...pkg, scope: "project" as const }));
+	return [...global, ...project];
+}
+
 export function defaultPiHome(): string {
 	const envHome = process.env[ENV.PI_HOME];
 	if (envHome) return envHome;

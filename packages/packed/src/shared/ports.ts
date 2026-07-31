@@ -106,6 +106,7 @@ export interface InstalledPkg {
 	name: string;
 	pinned?: string;
 	installed?: string;
+	scope?: "global" | "project";
 }
 
 export interface UpdateEntry {
@@ -113,6 +114,7 @@ export interface UpdateEntry {
 	installed: string;
 	latest: string;
 	detectedAt?: string;
+	scope?: "global" | "project";
 }
 
 export interface UpdatesSnapshot {

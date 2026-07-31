@@ -39,7 +39,7 @@ export function checkUpdates(latestOf: (name: string) => string | undefined, ins
 		if (!have) continue;
 		const latest = latestOf(p.name);
 		if (latest && latest !== have) {
-			updates.push({ name: p.name, installed: have, latest, detectedAt: now });
+			updates.push({ name: p.name, installed: have, latest, detectedAt: now, ...(p.scope ? { scope: p.scope } : {}) });
 		}
 	}
 	return updates;

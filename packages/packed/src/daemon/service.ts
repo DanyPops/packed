@@ -9,9 +9,9 @@ import type { InstalledPkg, Installer, Pkg, PkgInfo, Registry, SearchPage, Updat
 import { TTLCache } from "../shared/cache.ts";
 import { syncCatalog } from "../packages/catalog.ts";
 import { buildIndex, indexPath, readIndex, writeIndex, type PackageIndex } from "../index/build-index.ts";
-import { loadUpdates } from "./watcher.ts";
-import { readInstalledPackages, defaultPiHome } from "../packages/installed.ts";
-import { openDb, searchLocal, catalogList, getSyncMeta, dbPath } from "../packages/db.ts";
+import { checkUpdates, loadUpdates } from "./watcher.ts";
+import { readInstalledPackages, readInstalledPackagesAcrossScopes, defaultPiHome } from "../packages/installed.ts";
+import { openDb, searchLocal, catalogList, getSyncMeta, dbPath, latestVersion } from "../packages/db.ts";
 import { SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT } from "../shared/constants.ts";
 import { VERSION } from "../shared/version.ts";
 import { createLogger } from "../shared/log.ts";
@@ -21,6 +21,7 @@ import { scoreTarget, type AdoptionReport } from "../adoption/score.ts";
 import { SetupManager, type SetupApplyResult, type SetupExportReport, type SetupPlan, type SetupUpdateReport } from "../setup/setup.ts";
 import { listPackageResources, resolveToggleSettingsPath, toggleResource, RESOURCE_FIELDS, type PackageResources, type ResourceField } from "../packages/resources.ts";
 import { checkPiVersion, type PiVersionReport } from "../pi/pi-version.ts";
+import { runDoctor, type DoctorReport } from "../adoption/doctor.ts";
 import { formatCleanupSummary, runCleanup } from "./cleanup.ts";
 import { resolveInstalledDir } from "../packages/resources.ts";
 import { scanInstalledPackages, resolveInstalledVersions, type AdvisoryReport } from "../adoption/advisories.ts";
@@ -86,7 +87,9 @@ export type OperationName =
 	| "resources.list"
 	| "resources.toggle"
 	| "pi.status"
-	| "advisories.scan";
+	| "advisories.scan"
+	| "doctor.run"
+	| "package.updates.project";
 
 export interface OperationInputs {
 	"package.search": { query: string; limit: number; offline?: boolean };
@@ -114,6 +117,8 @@ export interface OperationInputs {
 	"resources.toggle": { source: string; field: ResourceField; path: string; enabled: boolean; projectRoot?: string; approved?: boolean };
 	"pi.status": Record<string, never>;
 	"advisories.scan": { name?: string };
+	"doctor.run": { projectRoot?: string };
+	"package.updates.project": { projectRoot: string };
 }
 
 interface MutationResponse { ok: boolean; output: string }
@@ -146,6 +151,8 @@ export interface OperationOutputs {
 	"resources.toggle": MutationResponse;
 	"pi.status": PiVersionReport;
 	"advisories.scan": AdvisoryReport;
+	"doctor.run": DoctorReport;
+	"package.updates.project": UpdatesSnapshot;
 }
 
 export const OPERATION_NAMES: readonly OperationName[] = [
@@ -153,7 +160,7 @@ export const OPERATION_NAMES: readonly OperationName[] = [
 	"setup.export", "setup.update", "setup.plan", "setup.apply",
 	"package.security.get", "package.security.set", "package.install", "package.install_service", "package.remove", "package.update",
 	"resources.list", "resources.toggle",
-	"pi.status", "advisories.scan",
+	"pi.status", "advisories.scan", "doctor.run", "package.updates.project",
 ];
 
 class PackageOperationError extends Error {
@@ -423,6 +430,25 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			const value = input as OperationInputs["resources.list"];
 			if (value.projectRoot !== undefined && (typeof value.projectRoot !== "string" || value.projectRoot.length > 4_096)) throw new PackageOperationError("projectRoot must be a string up to 4096 characters", 400);
 			return listPackageResources(deps.piHome ?? defaultPiHome(), value.projectRoot) as OperationOutputs[Name];
+		}
+		if (op === "doctor.run") {
+			const value = input as OperationInputs["doctor.run"];
+			if (value.projectRoot !== undefined && (typeof value.projectRoot !== "string" || value.projectRoot.length > 4_096)) throw new PackageOperationError("projectRoot must be a string up to 4096 characters", 400);
+			return (await runDoctor(deps.piHome ?? defaultPiHome(), value.projectRoot)) as OperationOutputs[Name];
+		}
+		if (op === "package.updates.project") {
+			const value = input as OperationInputs["package.updates.project"];
+			if (typeof value.projectRoot !== "string" || value.projectRoot.length === 0 || value.projectRoot.length > 4_096) throw new PackageOperationError("projectRoot must be a non-empty string up to 4096 characters", 400);
+			// Live, on-demand, cross-scope -- distinct from package.updates' own persisted,
+			// global-only background snapshot (startWatcher), which has no project context.
+			const db = openDb(dbPath(dataDir));
+			try {
+				const installed = readInstalledPackagesAcrossScopes(deps.piHome ?? defaultPiHome(), value.projectRoot);
+				const updates = checkUpdates((name) => latestVersion(db, name), installed);
+				return { checkedAt: new Date().toISOString(), updates } as OperationOutputs[Name];
+			} finally {
+				db.close();
+			}
 		}
 		if (op === "resources.toggle") {
 			const value = input as OperationInputs["resources.toggle"];

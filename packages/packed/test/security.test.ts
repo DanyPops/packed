@@ -17,7 +17,7 @@ describe("package permission policy", () => {
 		expect(PACKAGE_OPERATIONS).toEqual([
 		"search", "info", "installed", "catalog", "index.status", "index.build", "updates", "check", "setup.plan", "security.read",
 		"mirror", "setup.export", "setup.update", "install", "install_service", "setup.apply", "update", "update.self", "remove",
-		"resources.list", "resources.toggle", "security.write", "pi.status", "advisories.scan",
+		"resources.list", "resources.toggle", "security.write", "pi.status", "advisories.scan", "doctor",
 	]);
 		const decisions = Object.fromEntries(PACKAGE_OPERATIONS.map((operation) => [operation, packagePermissionDecision(settings, operation)]));
 		expect(decisions).toMatchObject({
@@ -45,6 +45,7 @@ describe("package permission policy", () => {
 			"security.write": { classification: "security-mutation", approvalRequired: true },
 			"pi.status": { classification: "read", approvalRequired: false },
 			"advisories.scan": { classification: "read", approvalRequired: false },
+			doctor: { classification: "read", approvalRequired: false },
 		});
 	});
 

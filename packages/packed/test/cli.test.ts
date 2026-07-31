@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { cliRun, type CliDeps } from "../src/cli/cli.ts";
@@ -221,6 +222,27 @@ describe("CLI", () => {
 		const { code, out } = await cliRun(["updates", "--json"], d);
 		expect(code).toBe(0);
 		expect(out).toContain('"latest":"0.9.0"');
+	});
+
+	it("updates --project also checks a project's own .pi/settings.json pins -- global-only misses them entirely", async () => {
+		const d = deps();
+		writeFileSync(join(d.piHome, "settings.json"), JSON.stringify({ packages: ["npm:pi-global@1.0.0"] }));
+		const projectRoot = mkdtempSync(join(tmpdir(), "packed-project-"));
+		const projectHome = join(projectRoot, ".pi");
+		mkdirSync(projectHome, { recursive: true });
+		writeFileSync(join(projectHome, "settings.json"), JSON.stringify({ packages: ["npm:papyrus@0.21.2"] }));
+		const db = openDb(dbPath(d.stateDir));
+		replaceAll(db, [{ name: "pi-global", version: "1.0.0" }, { name: "papyrus", version: "0.38.1" }], "test");
+		db.close();
+
+		const globalOnly = await cliRun(["updates", "--json"], d);
+		expect(JSON.parse(globalOnly.out).updates).toEqual([]);
+
+		const withProject = await cliRun(["updates", "--project", projectRoot, "--json"], d);
+		const updates = JSON.parse(withProject.out).updates;
+		expect(updates).toEqual([{ name: "papyrus", installed: "0.21.2", latest: "0.38.1", detectedAt: updates[0].detectedAt, scope: "project" }]);
+		const human = await cliRun(["updates", "--project", projectRoot], d);
+		expect(human.out).toContain("papyrus [project]");
 	});
 
 	it("catalog reads the SQLite mirror", async () => {
@@ -499,6 +521,8 @@ describe("CLI", () => {
 			async resourcesList(projectRoot) { calls.push(`resourcesList:${projectRoot}`); return { global: [{ source: "npm:pi-daemon", name: "pi-daemon", scope: "global" as const, extensions: [{ path: "extensions/index.ts", enabled: true }], skills: [], prompts: [], themes: [] }], project: [] }; },
 			async resourcesToggle(source, field, path, enabled) { calls.push(`resourcesToggle:${source}:${field}:${path}:${enabled}`); return `${enabled ? "enabled" : "disabled"} ${path}`; },
 			async advisoriesScan(name) { calls.push(`advisoriesScan:${name}`); return { scanned: 1, findings: [], diagnostics: [], truncated: false }; },
+			async doctor(projectRoot) { calls.push(`doctor:${projectRoot}`); return { ok: true, conflicts: [], extensions: [], scanned: 0, truncated: false }; },
+			async updatesForProject(projectRoot) { calls.push(`updatesForProject:${projectRoot}`); return []; },
 		};
 		const d = deps({ daemon });
 		expect(JSON.parse((await cliRun(["search", "daemon", "--offline", "--json"], d)).out).results[0].name).toBe("pi-daemon");
@@ -519,7 +543,9 @@ describe("CLI", () => {
 		expect(JSON.parse((await cliRun(["resources", "list", "--json"], d)).out).global[0].name).toBe("pi-daemon");
 		expect(JSON.parse((await cliRun(["resources", "toggle", "npm:pi-daemon", "extensions", "extensions/index.ts", "off", "--approve", "--json"], d)).out)).toMatchObject({ ok: true, enabled: false });
 		expect(JSON.parse((await cliRun(["advisories", "--json"], d)).out)).toEqual({ scanned: 1, findings: [], diagnostics: [], truncated: false });
-		expect(calls).toEqual(["search:true", "installed", "updates", "catalog", "mirror", "index", "indexBuild", "check:/tmp/package:true", "pack:/tmp/package", "score:pi-daemon", "setupExport:/tmp/project:true", "setupUpdate:/tmp/project/pi-setup.json", "setupPlan:/tmp/project/pi-setup.json", "setupApply:/tmp/project/pi-setup.json:true", "piStatus", "resourcesList:undefined", "resourcesToggle:npm:pi-daemon:extensions:extensions/index.ts:false", "advisoriesScan:undefined"]);
+		expect(JSON.parse((await cliRun(["doctor", "--json"], d)).out)).toEqual({ ok: true, conflicts: [], extensions: [], scanned: 0, truncated: false });
+		expect(JSON.parse((await cliRun(["updates", "--project", "/tmp/project", "--json"], d)).out).updates).toEqual([]);
+		expect(calls).toEqual(["search:true", "installed", "updates", "catalog", "mirror", "index", "indexBuild", "check:/tmp/package:true", "pack:/tmp/package", "score:pi-daemon", "setupExport:/tmp/project:true", "setupUpdate:/tmp/project/pi-setup.json", "setupPlan:/tmp/project/pi-setup.json", "setupApply:/tmp/project/pi-setup.json:true", "piStatus", "resourcesList:undefined", "resourcesToggle:npm:pi-daemon:extensions:extensions/index.ts:false", "advisoriesScan:undefined", "doctor:undefined", "updatesForProject:/tmp/project"]);
 	});
 
 	it("advisories runs standalone without a daemon and degrades to zero findings, never a real network call, when nothing is installed", async () => {
@@ -566,6 +592,41 @@ describe("CLI", () => {
 
 		expect((await cliRun(["resources", "toggle", "npm:pi-demo", "bogus-field", "x", "on"], d)).code).toBe(2);
 		expect((await cliRun(["resources", "bogus"], d)).code).toBe(2);
+	});
+
+	// Same sandbox-availability probe as smoke.test.ts/doctor.test.ts: binary
+	// presence alone doesn't prove bwrap actually works under this host's
+	// user namespaces.
+	const bwrapUsable = existsSync("/usr/bin/bwrap") && spawnSync("/usr/bin/bwrap", ["--ro-bind", "/", "/", "--unshare-all", "--", "/bin/true"], { timeout: 5_000 }).status === 0;
+	(bwrapUsable ? it : it.skip)("doctor runs standalone without a daemon and reproduces the jittor incident through the real CLI (CLI parity for the daemon-only doctor.run operation)", async () => {
+		const piHome = mkdtempSync(join(tmpdir(), "packed-doctor-cli-"));
+		writeFileSync(join(piHome, "settings.json"), JSON.stringify({ packages: ["npm:pi-papyrus"] }));
+		const globalPkg = join(piHome, "npm", "node_modules", "pi-papyrus");
+		mkdirSync(join(globalPkg, "extension"), { recursive: true });
+		writeFileSync(join(globalPkg, "package.json"), JSON.stringify({ name: "pi-papyrus", version: "1.0.0", pi: { extensions: ["extension/index.ts"] } }));
+		writeFileSync(join(globalPkg, "extension", "index.ts"), 'export default function (pi: any) { pi.registerTool({ name: "tasks" }); }');
+		const projectRoot = mkdtempSync(join(tmpdir(), "packed-doctor-cli-project-"));
+		const projectHome = join(projectRoot, ".pi");
+		mkdirSync(projectHome, { recursive: true });
+		writeFileSync(join(projectHome, "settings.json"), JSON.stringify({ packages: ["npm:papyrus"] }));
+		const projectPkg = join(projectHome, "npm", "node_modules", "papyrus");
+		mkdirSync(join(projectPkg, "extension"), { recursive: true });
+		writeFileSync(join(projectPkg, "package.json"), JSON.stringify({ name: "papyrus", version: "1.0.0", pi: { extensions: ["extension/index.ts"] } }));
+		writeFileSync(join(projectPkg, "extension", "index.ts"), 'export default function (pi: any) { pi.registerTool({ name: "tasks" }); }');
+		const d = deps({ piHome });
+
+		const clean = await cliRun(["doctor", "--json"], d);
+		expect(clean.code).toBe(0);
+		expect(JSON.parse(clean.out)).toMatchObject({ ok: true, conflicts: [] });
+
+		const withProject = await cliRun(["doctor", "--project", projectRoot, "--json"], d);
+		expect(withProject.code).toBe(1);
+		const report = JSON.parse(withProject.out);
+		expect(report.ok).toBe(false);
+		expect(report.conflicts).toHaveLength(1);
+		expect(report.conflicts[0]).toMatchObject({ kind: "tool", name: "tasks" });
+		const human = await cliRun(["doctor", "--project", projectRoot], d);
+		expect(human.out).toContain('CONFLICT tool "tasks"');
 	});
 
 	it("unknown command → usage, code 2", async () => {

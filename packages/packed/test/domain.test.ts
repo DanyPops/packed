@@ -2,11 +2,13 @@ import { describe, it, expect } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isPinnedNpmSource, npmPackageName, readInstalledPackages, readResolvedVersion, splitNpmSource } from "../src/packages/installed.ts";
+import { isPinnedNpmSource, npmPackageName, readInstalledPackages, readInstalledPackagesAcrossScopes, readResolvedVersion, splitNpmSource } from "../src/packages/installed.ts";
 import { checkUpdates, saveUpdates, loadUpdates, startWatcher } from "../src/daemon/watcher.ts";
 import { catalogStatus } from "../src/packages/catalog.ts";
-import { openDb, replaceAll } from "../src/packages/db.ts";
-import type { PkgInfo, Registry, SearchPage } from "../src/shared/ports.ts";
+import { openDb, replaceAll, dbPath } from "../src/packages/db.ts";
+import { AuthenticatedRpcClient } from "@danypops/vehicle-client/rpc-client";
+import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/daemon/service.ts";
+import type { Installer, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/shared/ports.ts";
 
 class FakeRegistry implements Registry {
 	infoCalls = 0;
@@ -124,6 +126,34 @@ describe("readInstalledPackages", () => {
 	});
 });
 
+describe("readInstalledPackagesAcrossScopes", () => {
+	it("tags every entry with its scope and is global-only without a projectRoot", () => {
+		const home = writePiHome({ packages: ["npm:pi-global@1.0.0"] });
+		expect(readInstalledPackagesAcrossScopes(home)).toEqual([{ name: "pi-global", pinned: "1.0.0", installed: undefined, scope: "global" }]);
+	});
+
+	it("reproduces the real jittor gap: a stale project-scoped pin is invisible to a global-only read, visible once project scope is included", () => {
+		const home = writePiHome({ packages: ["npm:pi-global@1.0.0"] });
+		const projectRoot = mkdtempSync(join(tmpdir(), "packed-project-"));
+		const projectHome = join(projectRoot, ".pi");
+		mkdirSync(projectHome, { recursive: true });
+		writeFileSync(join(projectHome, "settings.json"), JSON.stringify({ packages: ["npm:papyrus@0.21.2"] }));
+
+		expect(readInstalledPackages(home).map((pkg) => pkg.name)).not.toContain("papyrus");
+		const merged = readInstalledPackagesAcrossScopes(home, projectRoot);
+		expect(merged).toEqual([
+			{ name: "pi-global", pinned: "1.0.0", installed: undefined, scope: "global" },
+			{ name: "papyrus", pinned: "0.21.2", installed: undefined, scope: "project" },
+		]);
+	});
+
+	it("is unaffected by a missing project settings file", () => {
+		const home = writePiHome({ packages: ["npm:pi-global@1.0.0"] });
+		const projectRoot = mkdtempSync(join(tmpdir(), "packed-project-"));
+		expect(readInstalledPackagesAcrossScopes(home, projectRoot)).toEqual([{ name: "pi-global", pinned: "1.0.0", installed: undefined, scope: "global" }]);
+	});
+});
+
 describe("checkUpdates (mirror-based)", () => {
 	it("flags drift only", () => {
 		const latest = (name: string) => ({ "pi-extension-manager": "0.9.0", "pi-lsp": "1.0.0" })[name];
@@ -138,6 +168,48 @@ describe("checkUpdates (mirror-based)", () => {
 	it("packages missing from the mirror are skipped", () => {
 		const updates = checkUpdates(() => undefined, [{ name: "gone", pinned: "1.0.0" }]);
 		expect(updates).toEqual([]);
+	});
+
+	it("carries scope through so a project-scoped drift entry is distinguishable from a global one", () => {
+		const latest = (name: string) => ({ papyrus: "0.38.1" })[name];
+		const updates = checkUpdates(latest, [{ name: "papyrus", pinned: "0.21.2", scope: "project" }]);
+		expect(updates).toEqual([{ name: "papyrus", installed: "0.21.2", latest: "0.38.1", detectedAt: updates[0]!.detectedAt, scope: "project" }]);
+	});
+});
+
+class NoopRegistry implements Registry {
+	async search(): Promise<SearchPage> { return { results: [], total: 0 }; }
+	async searchPage(): Promise<SearchPage> { return { results: [], total: 0 }; }
+	async searchAll() { return []; }
+	async info(name: string): Promise<PkgInfo> { return { name, version: "1.0.0" }; }
+}
+
+class NoopInstaller implements Installer {
+	async install() { return "ok"; }
+	async remove() { return "ok"; }
+	async update(): Promise<UpdateOutcome> { return { output: "ok", reloadRequired: false, alreadyUpToDate: true, pinned: false }; }
+}
+
+describe("package.updates.project (daemon RPC wiring)", () => {
+	it("computes a live, cross-scope drift check on demand, distinct from package.updates' own persisted global-only snapshot", async () => {
+		const home = mkdtempSync(join(tmpdir(), "packed-updates-project-"));
+		writeFileSync(join(home, "settings.json"), JSON.stringify({ packages: ["npm:pi-global@1.0.0"] }));
+		const projectRoot = mkdtempSync(join(tmpdir(), "packed-updates-project-root-"));
+		const projectHome = join(projectRoot, ".pi");
+		mkdirSync(projectHome, { recursive: true });
+		writeFileSync(join(projectHome, "settings.json"), JSON.stringify({ packages: ["npm:papyrus@0.21.2"] }));
+		const stateDir = mkdtempSync(join(tmpdir(), "packed-updates-project-state-"));
+		const db = openDb(dbPath(stateDir));
+		replaceAll(db, [{ name: "pi-global", version: "1.0.0" }, { name: "papyrus", version: "0.38.1" }], "test");
+		db.close();
+		const app = createApp({ reg: new NoopRegistry(), inst: new NoopInstaller(), token: "test-token", stateDir, piHome: home });
+		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", { label: "Packed", transport: (request) => app.fetch(request) });
+
+		const globalSnapshot = await client.call("package.updates", {});
+		expect(globalSnapshot.updates).toEqual([]);
+
+		const result = await client.call("package.updates.project", { projectRoot });
+		expect(result.updates).toEqual([{ name: "papyrus", installed: "0.21.2", latest: "0.38.1", detectedAt: result.updates[0]!.detectedAt, scope: "project" }]);
 	});
 });
 

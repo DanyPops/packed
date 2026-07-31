@@ -15,6 +15,7 @@ import type { SetupApplyResult, SetupExportReport, SetupPlan, SetupUpdateReport 
 import type { PiVersionReport } from "../pi/pi-version.ts";
 import type { PackageResources, ResourceField } from "../packages/resources.ts";
 import type { AdvisoryReport } from "../adoption/advisories.ts";
+import type { DoctorReport } from "../adoption/doctor.ts";
 import type { PackageIndex } from "../index/build-index.ts";
 
 export type FetchTransport = (request: Request) => Promise<Response>;
@@ -29,6 +30,7 @@ export interface PackageDaemonPort {
 	index(): Promise<PackageIndex | undefined>;
 	indexBuild(): Promise<PackageIndex>;
 	updates(): Promise<UpdateEntry[]>;
+	updatesForProject(projectRoot: string): Promise<UpdateEntry[]>;
 	check(path: string, smoke?: boolean): Promise<CheckReport>;
 	pack(path: string): Promise<PackReport>;
 	score(target: string): Promise<AdoptionReport>;
@@ -46,6 +48,7 @@ export interface PackageDaemonPort {
 	resourcesList(projectRoot?: string): Promise<{ global: PackageResources[]; project: PackageResources[] }>;
 	resourcesToggle(source: string, field: ResourceField, path: string, enabled: boolean, projectRoot?: string, approved?: boolean): Promise<string>;
 	advisoriesScan(name?: string): Promise<AdvisoryReport>;
+	doctor(projectRoot?: string): Promise<DoctorReport>;
 }
 
 export class PackageDaemonError extends Error {
@@ -121,6 +124,10 @@ export class PackageDaemonClient implements PackageDaemonPort {
 		return (await this.call("package.updates", {})).updates;
 	}
 
+	async updatesForProject(projectRoot: string): Promise<UpdateEntry[]> {
+		return (await this.call("package.updates.project", { projectRoot })).updates;
+	}
+
 	piStatus(): Promise<PiVersionReport> {
 		return this.call("pi.status", {});
 	}
@@ -135,6 +142,10 @@ export class PackageDaemonClient implements PackageDaemonPort {
 
 	advisoriesScan(name?: string): Promise<AdvisoryReport> {
 		return this.call("advisories.scan", { name });
+	}
+
+	doctor(projectRoot?: string): Promise<DoctorReport> {
+		return this.call("doctor.run", { projectRoot });
 	}
 
 	check(path: string, smoke = false): Promise<CheckReport> {

@@ -9,12 +9,13 @@ import { buildSearchQuery, clampLimit } from "../shared/ports.ts";
 import type { Installer, Pkg, Registry } from "../shared/ports.ts";
 import type { PackageDaemonPort } from "../daemon/client.ts";
 import { checkPackage, formatCheckReport } from "../adoption/check.ts";
+import { runDoctor, formatDoctorReport } from "../adoption/doctor.ts";
 import { NpmPackVerifier, formatPackReport, type PackReport } from "../adoption/pack.ts";
 import { formatAdoptionReport, scoreTarget, type AdoptionReport } from "../adoption/score.ts";
 import { formatPublishReport, npmWebUrl, openBrowser, PublishManager, runInherited, runNpmLoginWeb, type PublishSetupReport, type PublishStatusReport } from "../publish/publish.ts";
 import { bundledEcosystemManifestPath, formatSetupReport, SetupManager, type SetupApplyResult, type SetupExportReport, type SetupPlan, type SetupUpdateReport } from "../setup/setup.ts";
 import { resolve } from "node:path";
-import { npmPackageName, readInstalledPackages } from "../packages/installed.ts";
+import { npmPackageName, readInstalledPackages, readInstalledPackagesAcrossScopes } from "../packages/installed.ts";
 import { checkUpdates } from "../daemon/watcher.ts";
 import { checkPiVersion, runPiStatusInteractive, runPiUpdateSelf, type PiVersionReport } from "../pi/pi-version.ts";
 import { listPackageResources, resolveToggleSettingsPath, toggleResource, RESOURCE_FIELDS, type PackageResources, type ResourceField } from "../packages/resources.ts";
@@ -56,7 +57,7 @@ const USAGE = `packed — package service for the Pi agent
 usage:
   packed search <query> [--offline] [--json]   search npm (or the local mirror with --offline)
   packed info <name> [--json]                  package details
-  packed updates [--json]                      updates per the local mirror
+  packed updates [--project <path>] [--json]   updates per the local mirror; --project also checks that project's own .pi/settings.json pins
   packed update <source> [--approve] [--json]  update one configured package through Pi
   packed update --self [--approve] [--json]    update Packed itself (npm-global installs only) and restart its supervised service
   packed mirror [--json]                       sync upstream into the local SQLite index
@@ -65,6 +66,7 @@ usage:
   packed index build [--json]                  regenerate the local static adoption-scoring snapshot (npm-only, no GitHub)
   packed index status [--json]                 report the local static index's generatedAt and package count
   packed check [path] [--smoke] [--json]       diagnose a Pi package; smoke is isolated and opt-in
+  packed doctor [--project <path>] [--json]    smoke-test every enabled extension (global + project scope) and report tool/command/shortcut/flag name collisions before pi has to
   packed pack [path] [--json]                  verify exact npm tarball contents without lifecycle scripts
   packed score [path|name] [--json]            report adoption-readiness evidence by dimension
   packed publish setup [path] [--force] [--json] generate an OIDC staged-publish workflow
@@ -184,6 +186,7 @@ const PACKAGE_COMMAND_OPERATIONS: Record<string, PackageOperation | undefined> =
 	remove: "remove",
 	pi: "pi.status",
 	advisories: "advisories.scan",
+	doctor: "doctor",
 };
 
 function formatResourcesList(result: { global: PackageResources[]; project: PackageResources[] }): string {
@@ -287,6 +290,15 @@ const commands: Record<string, { usage: string; run: Command }> = {
 		},
 	},
 
+	doctor: {
+		usage: "packed doctor [--project <path>] [--json]",
+		async run(_rest, d, flags) {
+			const report = d.daemon ? await d.daemon.doctor(flags.project) : await runDoctor(d.piHome, flags.project);
+			const output = formatDoctorReport(report, flags.json);
+			return report.ok ? ok(output) : fail(output);
+		},
+	},
+
 	search: {
 		usage: "packed search <query> [--offline] [--limit N] [--json]",
 		async run(_rest, d, flags, pos) {
@@ -361,10 +373,17 @@ const commands: Record<string, { usage: string; run: Command }> = {
 	},
 
 	updates: {
-		usage: "packed updates [--json]  (from the local mirror — run `packed mirror` first)",
+		usage: "packed updates [--project <path>] [--json]  (from the local mirror — run `packed mirror` first)",
 		async run(_rest, d, flags) {
 			let updates;
-			if (d.daemon) {
+			if (flags.project) {
+				updates = d.daemon
+					? await d.daemon.updatesForProject(flags.project)
+					: await (async () => {
+						const db = openDb(dbPath(dataDirectory(d)));
+						try { return checkUpdates((name) => latestVersion(db, name), readInstalledPackagesAcrossScopes(d.piHome, flags.project)); } finally { db.close(); }
+					})();
+			} else if (d.daemon) {
 				updates = await d.daemon.updates();
 			} else {
 				const db = openDb(dbPath(dataDirectory(d)));
@@ -375,7 +394,7 @@ const commands: Record<string, { usage: string; run: Command }> = {
 			}
 			if (updates.length === 0) return ok("all pi packages up to date (per the local mirror)\n");
 			let out = `${updates.length} update(s) available:\n\n`;
-			for (const u of updates) out += `  ${u.name}  ${u.installed} → ${u.latest}\n`;
+			for (const u of updates) out += `  ${u.name}${u.scope ? ` [${u.scope}]` : ""}  ${u.installed} → ${u.latest}\n`;
 			return ok(out + "\nrun: pi update --extensions\n");
 		},
 	},

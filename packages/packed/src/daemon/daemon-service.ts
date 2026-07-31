@@ -25,11 +25,10 @@
  * step isn't a real convention, so detection reads what's already true
  * on disk instead of asking for one more declaration.
  */
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveDaemonPaths } from "@danypops/vehicle-server/paths";
-import { installUserService, type ServiceInstallDeps, type ServiceInstallResult, type ServiceSpec } from "@danypops/vehicle-server/service";
+import { createNodeServiceInstallDeps, installUserService, type ServiceInstallResult, type ServiceSpec } from "@danypops/vehicle-server/service";
 import { npmPackageName } from "../packages/installed.ts";
 
 export interface DaemonServiceManifest {
@@ -176,49 +175,6 @@ export function resolveDaemonServiceSpec(piHome: string, source: string): Resolv
 	return { ok: false, notADaemon: true, reason: `${packageName} does not declare a packed.daemonService manifest and no Vehicle-shaped daemon dependency was detected` };
 }
 
-/** Real (non-test) ServiceInstallDeps -- node:fs/node:child_process, mirroring the same shape vehicle-server's own service.test.ts fakes for tests. */
-export function realServiceInstallDeps(): ServiceInstallDeps {
-	return {
-		writeFile: (path, content) => writeFileSync(path, content, "utf8"),
-		readFile: (path) => {
-			try {
-				return readFileSync(path, "utf8");
-			} catch {
-				return null;
-			}
-		},
-		removeFile: (path) => {
-			try {
-				rmSync(path, { force: true });
-			} catch {
-				/* already gone */
-			}
-		},
-		fileExists: (path) => existsSync(path),
-		mkdirp: (path) => mkdirSync(path, { recursive: true }),
-		runCommand: (command, args) => {
-			try {
-				const output = execFileSync(command, args, { encoding: "utf8" });
-				return { ok: true, output };
-			} catch (error) {
-				const stdout = typeof (error as { stdout?: unknown })?.stdout === "string" ? (error as { stdout: string }).stdout : "";
-				const stderr = typeof (error as { stderr?: unknown })?.stderr === "string" ? (error as { stderr: string }).stderr : "";
-				const message = error instanceof Error ? error.message : String(error);
-				return { ok: false, output: [stdout, stderr].filter(Boolean).join("\n") || message };
-			}
-		},
-		which: (binary) => {
-			try {
-				execFileSync(process.platform === "win32" ? "where" : "which", [binary], { stdio: "ignore" });
-				return true;
-			} catch {
-				return false;
-			}
-		},
-		uid: process.getuid?.(),
-	};
-}
-
 export interface DaemonServiceInstaller {
 	install(piHome: string, source: string): { ok: true; result: ServiceInstallResult; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean };
 }
@@ -227,7 +183,7 @@ export class RealDaemonServiceInstaller implements DaemonServiceInstaller {
 	install(piHome: string, source: string): { ok: true; result: ServiceInstallResult; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean } {
 		const resolved = resolveDaemonServiceSpec(piHome, source);
 		if (!resolved.ok) return resolved;
-		const result = installUserService(resolved.spec, realServiceInstallDeps());
+		const result = installUserService(resolved.spec, createNodeServiceInstallDeps());
 		return { ok: true, result, spec: resolved.spec };
 	}
 }

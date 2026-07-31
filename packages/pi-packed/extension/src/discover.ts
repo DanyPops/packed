@@ -149,15 +149,16 @@ function renderDiscoverPanel(ctx: ExtensionCommandContext, natives: Natives): Pr
 			},
 		};
 
+		const border = () => new DynamicBorder((s) => theme.fg("border", s));
 		const container = new Container();
 		container.addChild(new Spacer(1));
-		container.addChild(new DynamicBorder());
+		container.addChild(border());
 		container.addChild(new Spacer(1));
 		container.addChild(header);
 		container.addChild(new Spacer(1));
 		container.addChild(list);
 		container.addChild(new Spacer(1));
-		container.addChild(new DynamicBorder());
+		container.addChild(border());
 
 		return {
 			render: (width: number) => container.render(width),

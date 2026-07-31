@@ -14,7 +14,7 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder, rawKeyHint } from "@earendil-works/pi-coding-agent";
 import { Container, Input, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { Menu, type MenuItem } from "malevich-tui-components";
+import { Menu, ProgressBar, type MenuItem } from "malevich-tui-components";
 import { filterRows, mergeRows, nextMode, visibleRows } from "./model.js";
 import type { Row, ViewMode } from "./model.js";
 import type { Natives, PackageResources } from "./packed.js";
@@ -86,6 +86,57 @@ export async function applyPackageChoice(
 	return "cancelled";
 }
 
+interface UpdateAllResult { changed: number; failedNames: string[]; }
+
+/** Floats a live progress bar over the still-open panel while the batch
+ * runs sequentially -- the lazy.nvim-style "Updating N package(s)" window,
+ * instead of one static toast with no visible progress until it's all
+ * done. Resolves on its own once the last package finishes; nothing the
+ * user presses closes it early. */
+async function runUpdatesWithProgress(
+	outdated: Row[],
+	natives: Natives,
+	approved: boolean | undefined,
+	ctx: ExtensionCommandContext,
+): Promise<UpdateAllResult> {
+	return ctx.ui.custom<UpdateAllResult>(
+		(tui, theme, _kb, done) => {
+			const bar = new ProgressBar({ value: 0, max: outdated.length, label: `${outdated[0]?.name ?? ""} (1/${outdated.length})`, style: (s) => theme.fg("accent", s) });
+			const border = () => new DynamicBorder((s) => theme.fg("border", s));
+			const container = new Container();
+			container.addChild(new Spacer(1));
+			container.addChild(border());
+			container.addChild({ invalidate() {}, render: (_width: number) => [theme.bold("Updating packages")] });
+			container.addChild(new Spacer(1));
+			container.addChild(bar);
+			container.addChild(new Spacer(1));
+			container.addChild(border());
+
+			void (async () => {
+				let changed = 0;
+				const failedNames: string[] = [];
+				for (let i = 0; i < outdated.length; i++) {
+					const row = outdated[i]!;
+					bar.setLabel(`${row.name} (${i + 1}/${outdated.length})`);
+					tui.requestRender();
+					try {
+						const outcome = await natives.update(`npm:${row.name}`, approved);
+						if (outcome.reloadRequired) changed += 1;
+					} catch (e) {
+						failedNames.push(`${row.name}: ${e instanceof Error ? e.message : e}`);
+					}
+					bar.setValue(i + 1);
+					tui.requestRender();
+				}
+				done({ changed, failedNames });
+			})();
+
+			return { render: (width: number) => container.render(width), invalidate: () => container.invalidate(), handleInput() {} };
+		},
+		{ overlay: true, overlayOptions: { width: 50, anchor: "center" } },
+	);
+}
+
 /** U -- update every outdated row with one combined approval and one
  * reload, instead of applyPackageChoice's own per-call reload (which
  * would end the session after the first successful update). */
@@ -105,23 +156,13 @@ export async function applyUpdateAll(rows: Row[], natives: Natives, ctx: Extensi
 		ctx.ui.notify(approval.message ?? "update denied", "warning");
 		return "cancelled";
 	}
-	ctx.ui.notify(`Updating ${outdated.length} package(s)…`, "info");
-	let changed = 0;
-	let failed = 0;
-	for (const row of outdated) {
-		try {
-			const outcome = await natives.update(`npm:${row.name}`, approval.approved);
-			if (outcome.reloadRequired) changed += 1;
-		} catch (e) {
-			failed += 1;
-			ctx.ui.notify(`${row.name} update failed: ${e instanceof Error ? e.message : e}`, "error");
-		}
-	}
+	const { changed, failedNames } = await runUpdatesWithProgress(outdated, natives, approval.approved, ctx);
+	for (const failure of failedNames) ctx.ui.notify(`update failed: ${failure}`, "error");
 	if (changed === 0) {
-		ctx.ui.notify(failed > 0 ? `No packages updated; ${failed} failed.` : "All packages already up to date.", failed > 0 ? "warning" : "info");
-		return failed > 0 ? "cancelled" : "unchanged";
+		ctx.ui.notify(failedNames.length > 0 ? `No packages updated; ${failedNames.length} failed.` : "All packages already up to date.", failedNames.length > 0 ? "warning" : "info");
+		return failedNames.length > 0 ? "cancelled" : "unchanged";
 	}
-	ctx.ui.notify(`Updated ${changed} package(s)${failed > 0 ? `, ${failed} failed` : ""}; reloading Pi resources.`, "info");
+	ctx.ui.notify(`Updated ${changed} package(s)${failedNames.length > 0 ? `, ${failedNames.length} failed` : ""}; reloading Pi resources.`, "info");
 	await ctx.reload();
 	return "changed";
 }
@@ -329,15 +370,16 @@ function renderPanel(ctx: ExtensionCommandContext, rows: Row[]): Promise<PanelAc
 			},
 		};
 
+		const border = () => new DynamicBorder((s) => theme.fg("border", s));
 		const container = new Container();
 		container.addChild(new Spacer(1));
-		container.addChild(new DynamicBorder());
+		container.addChild(border());
 		container.addChild(new Spacer(1));
 		container.addChild(header);
 		container.addChild(new Spacer(1));
 		container.addChild(list);
 		container.addChild(new Spacer(1));
-		container.addChild(new DynamicBorder());
+		container.addChild(border());
 
 		return {
 			render: (width: number) => container.render(width),

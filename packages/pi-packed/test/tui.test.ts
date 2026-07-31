@@ -20,6 +20,17 @@ function fakeCtx(confirm: boolean, notices: string[], reloads: { count: number }
 	} as unknown as ExtensionCommandContext;
 }
 
+/** Runs a ctx.ui.custom factory the same way the real TUI would -- immediately,
+ * with no-op tui/theme/kb stubs -- and resolves once the factory's own async
+ * work calls done(). Fits any overlay that resolves itself (a progress bar)
+ * rather than waiting on simulated keypresses. */
+function autoResolvingCustom() {
+	return <T>(factory: (tui: unknown, theme: unknown, kb: unknown, done: (result: T) => void) => unknown): Promise<T> =>
+		new Promise<T>((resolve) => {
+			factory({ requestRender() {} }, { fg: (_c: string, s: string) => s, bold: (s: string) => s }, {}, resolve);
+		});
+}
+
 describe("showPackedPanel (/packed folds packages + settings into one panel)", () => {
 	it("opens on the packages panel, and pressing s returns to it afterward instead of exiting", async () => {
 		// ctx.ui.custom is faked directly rather than simulating keypresses --
@@ -77,7 +88,12 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom() { customCallCount += 1; return { type: "updateAll" }; },
+				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => unknown) {
+					customCallCount += 1;
+					// 1st: packages panel dispatch. 2nd: applyUpdateAll's own progress overlay -- run for real.
+					if (customCallCount === 1) return { type: "updateAll" };
+					return new Promise((resolve) => factory({ requestRender() {} }, { fg: (_c: string, s: string) => s, bold: (s: string) => s }, {}, resolve));
+				},
 				async confirm() { return true; },
 				notify() {},
 			},
@@ -94,7 +110,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		await showPackedPanel(ctx, natives);
 
 		expect(updated).toEqual(["npm:pi-a"]);
-		expect(customCallCount).toBe(1); // returned instead of reopening -- reload already ended the session
+		expect(customCallCount).toBe(2); // 1: panel dispatch, 2: the progress overlay -- returned instead of reopening since reload already ended the session
 	});
 
 	it("dispatches config to showResourceConfig, scoped to the selected row, then returns to the same panel", async () => {
@@ -301,7 +317,7 @@ describe("applyUpdateAll (U -- one combined approval and one reload, not N)", ()
 		} as unknown as Natives;
 		const ctx = {
 			hasUI: true,
-			ui: { async confirm(_t: string, message: string) { confirmMessages.push(message); return true; }, notify(m: string) { notices.push(m); } },
+			ui: { async confirm(_t: string, message: string) { confirmMessages.push(message); return true; }, notify(m: string) { notices.push(m); }, custom: autoResolvingCustom() },
 			async reload() { reloads.count += 1; },
 		} as unknown as ExtensionCommandContext;
 
@@ -326,7 +342,7 @@ describe("applyUpdateAll (U -- one combined approval and one reload, not N)", ()
 				return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false };
 			},
 		} as unknown as Natives;
-		const ctx = { hasUI: true, ui: { async confirm() { return true; }, notify(m: string) { notices.push(m); } }, async reload() { reloads.count += 1; } } as unknown as ExtensionCommandContext;
+		const ctx = { hasUI: true, ui: { async confirm() { return true; }, notify(m: string) { notices.push(m); }, custom: autoResolvingCustom() }, async reload() { reloads.count += 1; } } as unknown as ExtensionCommandContext;
 
 		const outcome = await applyUpdateAll(outdated, natives, ctx);
 
@@ -343,7 +359,7 @@ describe("applyUpdateAll (U -- one combined approval and one reload, not N)", ()
 			async security() { return { mutationApproval: "always" as const }; },
 			async update() { throw new Error("boom"); },
 		} as unknown as Natives;
-		const ctx = { hasUI: true, ui: { async confirm() { return true; }, notify(m: string) { notices.push(m); } }, async reload() { reloads.count += 1; } } as unknown as ExtensionCommandContext;
+		const ctx = { hasUI: true, ui: { async confirm() { return true; }, notify(m: string) { notices.push(m); }, custom: autoResolvingCustom() }, async reload() { reloads.count += 1; } } as unknown as ExtensionCommandContext;
 
 		const outcome = await applyUpdateAll(outdated, natives, ctx);
 
@@ -365,6 +381,38 @@ describe("applyUpdateAll (U -- one combined approval and one reload, not N)", ()
 		expect(outcome).toBe("cancelled");
 		expect(updateCalled).toBe(false);
 		expect(reloads.count).toBe(0);
+	});
+
+	it("renders a real progress bar that advances label and value across the batch, not one static line", async () => {
+		let renderCount = 0;
+		let component: { render(width: number): string[] } | undefined;
+		const renders: string[][] = [];
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async confirm() { return true; },
+				notify() {},
+				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[] }) {
+					return new Promise((resolve) => {
+						const tui = { requestRender() { renderCount += 1; if (component) renders.push(component.render(60)); } };
+						component = factory(tui, { fg: (_c: string, s: string) => s, bold: (s: string) => s }, {}, resolve);
+					});
+				},
+			},
+			async reload() {},
+		} as unknown as ExtensionCommandContext;
+		const natives = {
+			async security() { return { mutationApproval: "always" as const }; },
+			async update() { return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false }; },
+		} as unknown as Natives;
+
+		await applyUpdateAll(outdated, natives, ctx);
+
+		expect(renderCount).toBeGreaterThanOrEqual(4); // 2 outdated rows, at least a before/after render each -- a real animation, not one frame
+		const rendered = renders.map((lines) => lines.join("\n"));
+		expect(rendered.some((text) => text.includes("pi-a"))).toBe(true);
+		expect(rendered.some((text) => text.includes("pi-b"))).toBe(true);
+		expect(renders.at(-1)?.some((line) => line.includes("100%"))).toBe(true); // finishes at the bar's max
 	});
 });
 

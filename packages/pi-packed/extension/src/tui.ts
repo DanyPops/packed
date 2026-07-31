@@ -12,9 +12,13 @@
  * own row percentage, not a fixed row count -- scales with the real
  * terminal, unlike the anchor:"top-center"+offsetY this replaced, which
  * was pinned 1 row below the absolute top on any terminal size). Enter
- * opens a second, smaller overlay action menu on top of it. U's batch update stays on
- * this same package list -- progress renders inline next to the row
- * currently being updated, not as a separate screen. Rows render through
+ * opens a second, smaller overlay action menu on top of it. U's batch
+ * update stays on this same package list -- an indeterminate spinner
+ * (Spinner, this package's own -- neither Malevich nor pi-tui exposes an
+ * embeddable one) renders inline next to the row currently updating,
+ * settling into a real ✓/✗ plus a bounded tail of that row's own actual
+ * captured stdout/stderr once it finishes, never a determinate bar (a
+ * single subprocess call has no knowable percentage). Rows render through
  * Malevich's Table (real column-aligned Package/Version/status cells,
  * per-row selection styling baked into each cell since Table's own
  * cellStyle is column-wide, not row-wide) inside this panel's own
@@ -29,7 +33,7 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder, rawKeyHint } from "@earendil-works/pi-coding-agent";
 import { Container, Input, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { Envelope, Menu, ProgressBar, Table, type MenuItem, type TableColumn, type TextMeasure } from "malevich-tui-components";
+import { Envelope, Menu, Table, type MenuItem, type TableColumn, type TextMeasure } from "malevich-tui-components";
 import { filterRows, mergeRows, nextMode, visibleRows } from "./model.js";
 import type { Row, ViewMode } from "./model.js";
 import type { Natives, PackageResources } from "./packed.js";
@@ -39,6 +43,7 @@ import { showResourceConfig, applyResourceToggle } from "./resource-config.js";
 import { showDiscoverPanel } from "./discover.js";
 import { menuTheme } from "./menu-theme.js";
 import { confirmReload } from "./reload.js";
+import { Spinner } from "./spinner.js";
 
 interface PanelAction {
 	type: "update" | "remove" | "disable" | "config" | "find" | "refresh" | "settings";
@@ -115,7 +120,13 @@ export async function applyPackageChoice(
 
 interface UpdateAllResult { changed: number; failedNames: string[]; }
 
-interface UpdateProgressEvent { row: Row; index: number; total: number; phase: "start" | "done"; }
+/** Present only on phase "done" -- the real captured stdout+stderr from
+ * ExecInstaller (ok: true) or the thrown error's message (ok: false). This
+ * is the actual execution output, not a synthetic status string, so a host
+ * can show a genuine success/failure sign instead of guessing from
+ * reloadRequired alone. */
+interface UpdateProgressResult { ok: boolean; output: string; }
+interface UpdateProgressEvent { row: Row; index: number; total: number; phase: "start" | "done"; result?: UpdateProgressResult; }
 
 /** The core sequential-update loop, with no UI of its own -- reports each
  * step via onProgress so any host surface (a floating overlay, or the
@@ -134,12 +145,26 @@ async function performUpdateAll(
 		try {
 			const outcome = await natives.update(`npm:${row.name}`, approved);
 			if (outcome.reloadRequired) changed += 1;
+			onProgress?.({ row, index: i, total: outdated.length, phase: "done", result: { ok: true, output: outcome.output } });
 		} catch (e) {
-			failedNames.push(`${row.name}: ${e instanceof Error ? e.message : e}`);
+			const message = e instanceof Error ? e.message : String(e);
+			failedNames.push(`${row.name}: ${message}`);
+			onProgress?.({ row, index: i, total: outdated.length, phase: "done", result: { ok: false, output: message } });
 		}
-		onProgress?.({ row, index: i, total: outdated.length, phase: "done" });
 	}
 	return { changed, failedNames };
+}
+
+const MAX_LOG_TAIL_CHARS = 60;
+
+/** The last non-empty line of real captured output, bounded -- never the
+ * full stdout/stderr dump inline (a noisy npm install can produce hundreds
+ * of lines). undefined when there's nothing worth showing (the common
+ * case: `pi update` often produces no output on success at all). */
+function logTail(output: string): string | undefined {
+	const line = output.trim().split("\n").filter(Boolean).at(-1);
+	if (!line) return undefined;
+	return line.length > MAX_LOG_TAIL_CHARS ? `${line.slice(0, MAX_LOG_TAIL_CHARS - 1)}…` : line;
 }
 
 /** Approves once for the whole batch, runs it via whatever runBatch does
@@ -182,11 +207,17 @@ async function approveAndRunUpdateAll(
 	return "changed";
 }
 
-/** Floats its own progress-bar overlay over the still-open panel -- kept
+const MAX_SETTLED_LOG_LINES = 5;
+
+/** Floats its own spinner+log overlay over the still-open panel -- kept
  * for applyUpdateAll's own public API (and anything calling it directly,
  * outside the packages panel). renderPanel's own U key does not use this;
- * it renders the same progress bar inline on its own already-open overlay
- * instead of stacking a second one. */
+ * it renders the same spinner+log inline on its own already-open overlay
+ * instead of stacking a second one. An indeterminate spinner (not a
+ * determinate bar) because a single subprocess call has no knowable
+ * percentage -- only "still running" or "settled". Each settled row
+ * appends one bounded log line (real captured output, not a synthetic
+ * status) with a genuine success/failure glyph, up to a small scrollback. */
 async function runUpdatesWithProgress(
 	outdated: Row[],
 	natives: Natives,
@@ -195,22 +226,35 @@ async function runUpdatesWithProgress(
 ): Promise<UpdateAllResult> {
 	return ctx.ui.custom<UpdateAllResult>(
 		(tui, theme, _kb, done) => {
-			const bar = new ProgressBar({ value: 0, max: outdated.length, label: `${outdated[0]?.name ?? ""} (1/${outdated.length})`, style: (s) => theme.fg("accent", s) });
+			const spinner = new Spinner();
+			const settledLines: string[] = [];
+			let currentLabel = `${outdated[0]?.name ?? ""} (1/${outdated.length})`;
 			const border = () => new DynamicBorder((s) => theme.fg("border", s));
 			const container = new Container();
 			container.addChild(new Spacer(1));
 			container.addChild(border());
 			container.addChild({ invalidate() {}, render: (_width: number) => [theme.bold("Updating packages")] });
 			container.addChild(new Spacer(1));
-			container.addChild(bar);
+			container.addChild({ invalidate() {}, render: (width: number) => [truncateToWidth(`${theme.fg("accent", spinner.glyph())} ${currentLabel}`, width, "")] });
+			container.addChild(new Spacer(1));
+			container.addChild({
+				invalidate() {},
+				render: (width: number) => settledLines.slice(-MAX_SETTLED_LOG_LINES).map((line) => truncateToWidth(line, width, "")),
+			});
 			container.addChild(new Spacer(1));
 			container.addChild(border());
 
+			spinner.start(() => tui.requestRender());
 			performUpdateAll(outdated, natives, approved, (event) => {
-				bar.setLabel(`${event.row.name} (${event.index + 1}/${event.total})`);
-				if (event.phase === "done") bar.setValue(event.index + 1);
+				if (event.phase === "start") {
+					currentLabel = `${event.row.name} (${event.index + 1}/${event.total})`;
+				} else {
+					const glyph = event.result?.ok ? theme.fg("success", "✓") : theme.fg("error", "✗");
+					const tail = event.result ? logTail(event.result.output) : undefined;
+					settledLines.push(`${glyph} ${event.row.name}${tail ? theme.fg("dim", ` -- ${tail}`) : ""}`);
+				}
 				tui.requestRender();
-			}).then(done);
+			}).finally(() => spinner.stop()).then(done);
 
 			return { render: (width: number) => container.render(width), invalidate: () => container.invalidate(), handleInput() {} };
 		},
@@ -372,11 +416,16 @@ function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows
 		let searchActive = false;
 		let filtered = visibleRows(rows, mode);
 		let selectedIndex = 0;
-		// Set only while U's batch update is running. The list stays fully
-		// visible throughout -- this just names which row the shared bar
-		// (below) is currently sitting next to.
+		// Set only while U's batch update is running -- blocks input for the
+		// whole batch (the installer owns input until it finishes), same as
+		// before. The list stays fully visible throughout. Which specific row
+		// currently shows a spinner vs. a settled ✓/✗ is settled's own job
+		// (below), not this -- a just-finished row must show its glyph
+		// immediately, even for the instant before the next row's "start"
+		// event reassigns this to the next name.
 		let updatingRowName: string | undefined;
-		const updatingBar = new ProgressBar({ value: 0, max: 1, width: 10, style: (s) => theme.fg("accent", s) });
+		const spinner = new Spinner();
+		const settled = new Map<string, { ok: boolean; tail: string | undefined }>();
 
 		const maxVisible = 20;
 
@@ -386,21 +435,23 @@ function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows
 		}
 
 		/** U -- runs the whole approve+update+notify+reload flow without ever
-		 * closing this panel or replacing the list: each step's progress
-		 * appears inline next to the row currently being updated, via
-		 * updatingRowName/updatingBar, which list's own render checks. Rows
-		 * refresh in place afterward unless a reload already ended the
-		 * session. */
+		 * closing this panel or replacing the list: each row's own settled
+		 * outcome (spinner while in flight, then a real ✓/✗ plus a bounded tail
+		 * of its actual captured output) appears inline next to that row, via
+		 * updatingRowName/spinner/settled, which list's own render checks. Rows
+		 * refresh in place afterward unless a reload already ended the session. */
 		async function runUpdateAllInline(): Promise<void> {
 			const outdated = rows.filter((row) => row.hasUpdate);
+			settled.clear();
 			const outcome = await approveAndRunUpdateAll(outdated, natives, ctx, (batch, approved) => {
-				updatingBar.setValue(0);
-				updatingBar.setMax(batch.length);
+				spinner.start(() => tui.requestRender());
 				return performUpdateAll(batch, natives, approved, (event) => {
 					updatingRowName = event.row.name;
-					if (event.phase === "done") updatingBar.setValue(event.index + 1);
+					if (event.phase === "done" && event.result) {
+						settled.set(event.row.name, { ok: event.result.ok, tail: logTail(event.result.output) });
+					}
 					tui.requestRender();
-				});
+				}).finally(() => spinner.stop());
 			});
 			updatingRowName = undefined;
 			if (outcome === "changed") {
@@ -410,6 +461,7 @@ function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows
 			const reloaded = await loadRows(natives);
 			if (reloaded.error) ctx.ui.notify(`refresh failed: ${reloaded.error}`, "error");
 			else rows = reloaded.rows;
+			settled.clear(); // fresh state for a subsequent batch
 			applyFilter();
 			tui.requestRender();
 		}
@@ -485,10 +537,16 @@ function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows
 						const selected = i === selectedIndex;
 						const cursor = selected ? theme.fg("accent", "❯ ") : "  ";
 						const name = selected ? theme.bold(row.name) : row.name;
-						const isUpdating = updatingRowName === row.name;
+						// A settled row shows its real outcome even for the instant
+						// before the next row's "start" event moves updatingRowName
+						// off it -- settled always wins over "still spinning".
+						const rowSettled = settled.get(row.name);
+						const isUpdating = !rowSettled && updatingRowName === row.name;
 						const status = isUpdating
-							? theme.fg("accent", `${updatingBar.format(10)} updating…`)
-							: row.hasUpdate ? theme.fg("warning", `↑${row.latest}`) : "";
+							? theme.fg("accent", `${spinner.glyph()} updating…`)
+							: rowSettled
+								? theme.fg(rowSettled.ok ? "success" : "error", `${rowSettled.ok ? "✓" : "✗"}${rowSettled.tail ? ` ${rowSettled.tail}` : ""}`)
+								: row.hasUpdate ? theme.fg("warning", `↑${row.latest}`) : "";
 						return { name: `${cursor}${name}`, version: theme.fg("dim", row.version), status };
 					}),
 				);

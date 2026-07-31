@@ -284,15 +284,56 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 
 		await showPackedPanel(ctx, natives);
 
-		// A frame captured mid-update: the updating row carries an inline bar
-		// (progress glyphs + "updating…"), and the OTHER, non-updating row is
-		// still rendered in the same frame -- the list was never replaced.
+		// A frame captured mid-update: the updating row carries an inline
+		// spinner (a real braille frame glyph + "updating…"), and the OTHER,
+		// non-updating row is still rendered in the same frame -- the list was
+		// never replaced.
 		const midUpdate = renderedFrames.find((frame) => frame.includes("updating…"));
 		expect(midUpdate).toBeDefined();
 		expect(midUpdate).toContain("pi-a");
 		expect(midUpdate).toContain("pi-b");
-		expect(midUpdate).toMatch(/[\u2588\u2591]/); // the bar's own filled/empty glyphs
+		expect(midUpdate).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/); // a real spinner frame, not a determinate bar
+		// A later frame, once pi-a has settled: a genuine success glyph replaces the spinner.
+		const settled = renderedFrames.find((frame) => frame.includes("✓"));
+		expect(settled).toBeDefined();
+		expect(settled).toContain("pi-a");
 		expect(renderedFrames.every((frame) => !frame.includes("Updating packages"))).toBe(true); // no separate full-screen swap
+	});
+
+	it("settles a failed row with a real failure glyph and the actual captured error output, not just a toast", async () => {
+		const renderedFrames: string[] = [];
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
+					return new Promise((resolve) => {
+						const theme = { fg: (_c: string, s: string) => s, bold: (s: string) => s };
+						const tui = { requestRender() { renderedFrames.push(component.render(60).join("\n")); } };
+						const component = factory(tui, theme, {}, resolve);
+						component.handleInput("U");
+						// the failed batch stays open in list mode (never "changed") -- close it once settled.
+						setTimeout(() => component.handleInput("\x1b"), 0);
+					});
+				},
+				async confirm() { return true; },
+				notify() {},
+			},
+			async reload() {},
+		} as unknown as ExtensionCommandContext;
+		const natives = {
+			async installed() { return [{ name: "pi-a", installed: "1.0.0" }]; },
+			async updates() { return [{ name: "pi-a", installed: "1.0.0", latest: "1.1.0" }]; },
+			async security() { return { mutationApproval: "always" as const }; },
+			async update() { throw new Error("npm error 404 Not Found"); },
+		} as unknown as Natives;
+
+		await showPackedPanel(ctx, natives);
+
+		const settled = renderedFrames.find((frame) => frame.includes("✗"));
+		expect(settled).toBeDefined();
+		expect(settled).toContain("pi-a");
+		expect(settled).toContain("npm error 404 Not Found"); // the real captured error, not a generic "failed" label
+		expect(renderedFrames.some((frame) => frame.includes("✓"))).toBe(false); // never a false success glyph
 	});
 
 	it("U runs the installer inline on the same overlay and closes once the batch actually changed something", async () => {
@@ -732,7 +773,7 @@ describe("applyUpdateAll (U -- one combined approval and one reload, not N)", ()
 		expect(reloads.count).toBe(0);
 	});
 
-	it("renders a real progress bar that advances label and value across the batch, not one static line", async () => {
+	it("renders a real spinner across the batch and settles both rows with genuine success glyphs, not one static line", async () => {
 		let renderCount = 0;
 		let component: { render(width: number): string[] } | undefined;
 		const renders: string[][] = [];
@@ -761,7 +802,10 @@ describe("applyUpdateAll (U -- one combined approval and one reload, not N)", ()
 		const rendered = renders.map((lines) => lines.join("\n"));
 		expect(rendered.some((text) => text.includes("pi-a"))).toBe(true);
 		expect(rendered.some((text) => text.includes("pi-b"))).toBe(true);
-		expect(renders.at(-1)?.some((line) => line.includes("100%"))).toBe(true); // finishes at the bar's max
+		// Finishes with both rows settled (real success glyphs), not a bar at 100%.
+		const last = renders.at(-1)?.join("\n") ?? "";
+		expect(last).toContain("✓ pi-a");
+		expect(last).toContain("✓ pi-b");
 	});
 });
 

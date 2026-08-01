@@ -17,12 +17,12 @@
  */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { Registry } from "../shared/ports.ts";
-import { assessRegistryAdoption, PI_COMMAND_NAME, type AdoptionReport } from "../adoption/score.ts";
+import { type AdoptionReport, assessRegistryAdoption, PI_COMMAND_NAME } from "../adoption/score.ts";
+import { catalogList, dbPath, openDb } from "../packages/db.ts";
 import { resolveCurrentPiVersion } from "../pi/pi-version.ts";
-import { openDb, catalogList, dbPath } from "../packages/db.ts";
 import { INDEX_FILE, PAGE_DELAY_MS } from "../shared/constants.ts";
 import { createLogger } from "../shared/log.ts";
+import type { Registry } from "../shared/ports.ts";
 
 const log = createLogger("index");
 
@@ -86,8 +86,6 @@ export interface BuildIndexOptions {
 	maxPackages?: number;
 }
 
-
-
 /** Same per-directory-filename convention as db.ts's dbPath(). */
 export function indexPath(dir: string): string {
 	return join(dir, INDEX_FILE);
@@ -110,7 +108,9 @@ export function indexPath(dir: string): string {
  */
 export function buildIndex(reg: Registry, catalogDir: string, options: BuildIndexOptions = {}): Promise<PackageIndex> {
 	if (inFlight) return inFlight;
-	const run = buildIndexNow(reg, catalogDir, options).finally(() => { inFlight = undefined; });
+	const run = buildIndexNow(reg, catalogDir, options).finally(() => {
+		inFlight = undefined;
+	});
 	inFlight = run;
 	return run;
 }
@@ -133,11 +133,20 @@ function partitionAgainstPriorIndex(
 	const unchanged: PackageIndexEntry[] = [];
 	for (const pkg of catalogPkgs) {
 		const prior = priorByName.get(pkg.name);
-		if (!prior) { toScore.push(pkg.name); continue; } // New
+		if (!prior) {
+			toScore.push(pkg.name);
+			continue;
+		} // New
 		// Can't prove nothing changed without both dates -- rescore rather
 		// than assume, matching this codebase's "never guess" convention.
-		if (pkg.date === undefined || prior.date === undefined) { toScore.push(pkg.name); continue; }
-		if (Date.parse(pkg.date) > Date.parse(prior.date)) { toScore.push(pkg.name); continue; } // Changed
+		if (pkg.date === undefined || prior.date === undefined) {
+			toScore.push(pkg.name);
+			continue;
+		}
+		if (Date.parse(pkg.date) > Date.parse(prior.date)) {
+			toScore.push(pkg.name);
+			continue;
+		} // Changed
 		unchanged.push(prior); // Unchanged -- carried forward verbatim, zero live calls
 	}
 	return { toScore, unchanged };
@@ -175,7 +184,11 @@ async function buildIndexNow(reg: Registry, catalogDir: string, options: BuildIn
 	if (names.length > 0) {
 		piVersion = await currentPiVersion();
 		if (reg.modifiedAt) {
-			try { piModified = await reg.modifiedAt(PI_COMMAND_NAME); } catch { /* freshness stays explicitly unknown for every entry */ }
+			try {
+				piModified = await reg.modifiedAt(PI_COMMAND_NAME);
+			} catch {
+				/* freshness stays explicitly unknown for every entry */
+			}
 		}
 	}
 
@@ -184,7 +197,11 @@ async function buildIndexNow(reg: Registry, catalogDir: string, options: BuildIn
 		try {
 			const info = await reg.info(name);
 			if (reg.modifiedAt) {
-				try { info.modified = await reg.modifiedAt(name); } catch { /* freshness proxy stays explicitly unknown */ }
+				try {
+					info.modified = await reg.modifiedAt(name);
+				} catch {
+					/* freshness proxy stays explicitly unknown */
+				}
 			}
 			// No candidateCommitAt argument here -- GitHub is never touched
 			// during bulk generation, by construction, not by omission.
@@ -229,7 +246,12 @@ export function indexStatus(path: string, ttlMs: number): IndexStatus {
 }
 
 /** Build + write in one call -- the maintenance-task/CLI entry point. */
-export async function generateIndex(reg: Registry, catalogDir: string, path: string, options: BuildIndexOptions = {}): Promise<PackageIndex> {
+export async function generateIndex(
+	reg: Registry,
+	catalogDir: string,
+	path: string,
+	options: BuildIndexOptions = {},
+): Promise<PackageIndex> {
 	const index = await buildIndex(reg, catalogDir, options);
 	writeIndex(path, index);
 	return index;

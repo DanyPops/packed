@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { confirmReload, reloadWarning, type ReloadConfirmContext } from "../extension/src/reload.ts";
+import { confirmReload, type ReloadConfirmContext, reloadWarning } from "../extension/src/reload.ts";
 
 describe("reloadWarning (shared pre-confirmation wording)", () => {
 	it("warns remove as a definite reload, install/update as a likely one", () => {
@@ -12,7 +12,15 @@ describe("reloadWarning (shared pre-confirmation wording)", () => {
 describe("confirmReload (the second, post-mutation reload gate -- separate from reloadWarning's pre-hoc wording)", () => {
 	it("asks the user once reload is actually known to be needed, not just predicted", async () => {
 		const messages: string[] = [];
-		const ctx: ReloadConfirmContext = { hasUI: true, ui: { async confirm(title, message) { messages.push(`${title}: ${message}`); return true; } } };
+		const ctx: ReloadConfirmContext = {
+			hasUI: true,
+			ui: {
+				async confirm(title, message) {
+					messages.push(`${title}: ${message}`);
+					return true;
+				},
+			},
+		};
 
 		const result = await confirmReload(ctx);
 
@@ -22,14 +30,29 @@ describe("confirmReload (the second, post-mutation reload gate -- separate from 
 	});
 
 	it("returns false, deferring, when the user declines", async () => {
-		const ctx: ReloadConfirmContext = { hasUI: true, ui: { async confirm() { return false; } } };
+		const ctx: ReloadConfirmContext = {
+			hasUI: true,
+			ui: {
+				async confirm() {
+					return false;
+				},
+			},
+		};
 
 		expect(await confirmReload(ctx)).toBe(false);
 	});
 
 	it("reloads immediately without asking in a non-interactive context -- there is no one to ask", async () => {
 		let confirmCalled = false;
-		const ctx: ReloadConfirmContext = { hasUI: false, ui: { async confirm() { confirmCalled = true; return false; } } };
+		const ctx: ReloadConfirmContext = {
+			hasUI: false,
+			ui: {
+				async confirm() {
+					confirmCalled = true;
+					return false;
+				},
+			},
+		};
 
 		expect(await confirmReload(ctx)).toBe(true);
 		expect(confirmCalled).toBe(false);

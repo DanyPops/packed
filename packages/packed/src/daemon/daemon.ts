@@ -1,21 +1,32 @@
-import { startDaemon, runDaemonProcess, type MaintenanceTask, type RunningDaemon, type StartDaemonOptions } from "@danypops/vehicle-server/daemon";
-import { ensureAuthToken } from "@danypops/vehicle-server/paths";
-import { createApp } from "./service.ts";
-import { HttpRegistry } from "../registry/registry.ts";
-import { ExecInstaller } from "../packages/install.ts";
-import { envMs } from "../shared/state.ts";
-import { catalogStatus, syncCatalog } from "../packages/catalog.ts";
-import { openDb, latestVersion } from "../packages/db.ts";
-import { generateIndex, indexPath, indexStatus } from "../index/build-index.ts";
-import {
-	ENV, WATCH_INTERVAL_DEFAULT_MS, CATALOG_INTERVAL_DEFAULT_MS, INDEX_INTERVAL_DEFAULT_MS, IDLE_BUDGET_DEFAULT_MS, WATCHDOG_TICK_MS,
-} from "../shared/constants.ts";
-import { readInstalledPackages, defaultPiHome } from "../packages/installed.ts";
-import { checkUpdates, saveUpdates } from "./watcher.ts";
-import { createLogger } from "../shared/log.ts";
 import { dirname } from "node:path";
-import { legacyPackedStateDirectory, migrateLegacyPackedState, resolvePackedPaths, type PackedPaths } from "../shared/paths.ts";
+import {
+	type MaintenanceTask,
+	type RunningDaemon,
+	runDaemonProcess,
+	type StartDaemonOptions,
+	startDaemon,
+} from "@danypops/vehicle-server/daemon";
+import { ensureAuthToken } from "@danypops/vehicle-server/paths";
+import { generateIndex, indexPath, indexStatus } from "../index/build-index.ts";
+import { catalogStatus, syncCatalog } from "../packages/catalog.ts";
+import { latestVersion, openDb } from "../packages/db.ts";
+import { ExecInstaller } from "../packages/install.ts";
+import { defaultPiHome, readInstalledPackages } from "../packages/installed.ts";
+import { HttpRegistry } from "../registry/registry.ts";
+import {
+	CATALOG_INTERVAL_DEFAULT_MS,
+	ENV,
+	IDLE_BUDGET_DEFAULT_MS,
+	INDEX_INTERVAL_DEFAULT_MS,
+	WATCH_INTERVAL_DEFAULT_MS,
+	WATCHDOG_TICK_MS,
+} from "../shared/constants.ts";
+import { createLogger } from "../shared/log.ts";
+import { legacyPackedStateDirectory, migrateLegacyPackedState, type PackedPaths, resolvePackedPaths } from "../shared/paths.ts";
 import type { Installer, Registry } from "../shared/ports.ts";
+import { envMs } from "../shared/state.ts";
+import { createApp } from "./service.ts";
+import { checkUpdates, saveUpdates } from "./watcher.ts";
 
 const logger = createLogger("daemon");
 
@@ -69,7 +80,9 @@ function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOptions {
 
 	if (options.maintenanceTasks === undefined) {
 		for (const task of maintenanceTasks) {
-			void Promise.resolve(task.run()).catch((error) => logger.error(`maintenance task failed: ${task.name}`, { error: error instanceof Error ? error.message : String(error) }));
+			void Promise.resolve(task.run()).catch((error) =>
+				logger.error(`maintenance task failed: ${task.name}`, { error: error instanceof Error ? error.message : String(error) }),
+			);
 		}
 	}
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { applyResourceToggle, filterItems, flatten, handleResourceConfigCommand, type FlatItem } from "../extension/src/resource-config.ts";
 import type { Natives, PackageResources } from "../extension/src/packed.ts";
+import { applyResourceToggle, type FlatItem, filterItems, flatten, handleResourceConfigCommand } from "../extension/src/resource-config.ts";
 
 function group(overrides: Partial<PackageResources> = {}): PackageResources {
 	return { source: "npm:pi-demo", name: "pi-demo", scope: "global", extensions: [], skills: [], prompts: [], themes: [], ...overrides };
@@ -9,9 +9,21 @@ function group(overrides: Partial<PackageResources> = {}): PackageResources {
 
 describe("flatten (grouping installed packages into one sorted picker list)", () => {
 	it("flattens every resource field, sorted by package, then field, then path", () => {
-		const groups = [group({ extensions: [{ path: "extensions/b.ts", enabled: true }, { path: "extensions/a.ts", enabled: false }], skills: [{ path: "skills/x/SKILL.md", enabled: true }] })];
+		const groups = [
+			group({
+				extensions: [
+					{ path: "extensions/b.ts", enabled: true },
+					{ path: "extensions/a.ts", enabled: false },
+				],
+				skills: [{ path: "skills/x/SKILL.md", enabled: true }],
+			}),
+		];
 		const items = flatten(groups, "global");
-		expect(items.map((item) => `${item.field}:${item.path}`)).toEqual(["extensions:extensions/a.ts", "extensions:extensions/b.ts", "skills:skills/x/SKILL.md"]);
+		expect(items.map((item) => `${item.field}:${item.path}`)).toEqual([
+			"extensions:extensions/a.ts",
+			"extensions:extensions/b.ts",
+			"skills:skills/x/SKILL.md",
+		]);
 		expect(items[0]?.scope).toBe("global");
 		expect(items[0]?.packageName).toBe("pi-demo");
 	});
@@ -37,37 +49,72 @@ function fakeCtx(confirm: boolean, notices: string[]): ExtensionCommandContext {
 		hasUI: true,
 		cwd: "/project",
 		ui: {
-			async confirm(_title: string, message: string) { notices.push(`confirm:${message}`); return confirm; },
-			notify(message: string) { notices.push(message); },
+			async confirm(_title: string, message: string) {
+				notices.push(`confirm:${message}`);
+				return confirm;
+			},
+			notify(message: string) {
+				notices.push(message);
+			},
 		},
 	} as unknown as ExtensionCommandContext;
 }
 
-const extensionItem: FlatItem = { scope: "global", source: "npm:pi-demo", packageName: "pi-demo", field: "extensions", path: "extensions/a.ts", enabled: true };
-const skillItem: FlatItem = { scope: "project", source: "npm:pi-demo", packageName: "pi-demo", field: "skills", path: "skills/x/SKILL.md", enabled: false };
+const extensionItem: FlatItem = {
+	scope: "global",
+	source: "npm:pi-demo",
+	packageName: "pi-demo",
+	field: "extensions",
+	path: "extensions/a.ts",
+	enabled: true,
+};
+const skillItem: FlatItem = {
+	scope: "project",
+	source: "npm:pi-demo",
+	packageName: "pi-demo",
+	field: "skills",
+	path: "skills/x/SKILL.md",
+	enabled: false,
+};
 
 describe("applyResourceToggle (warn inline, approve, then mutate -- never silently)", () => {
 	it("warns inline in the pre-toggle confirm specifically for extensions, mentioning the reload requirement", async () => {
 		const notices: string[] = [];
 		let toggled: unknown;
 		const natives = {
-			async security() { return { mutationApproval: "always" as const }; },
-			async toggleResource(source: string, field: string, path: string, enabled: boolean, projectRoot?: string) { toggled = { source, field, path, enabled, projectRoot }; return "ok"; },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async toggleResource(source: string, field: string, path: string, enabled: boolean, projectRoot?: string) {
+				toggled = { source, field, path, enabled, projectRoot };
+				return "ok";
+			},
 		} as unknown as Natives;
 
 		const outcome = await applyResourceToggle(extensionItem, natives, fakeCtx(true, notices));
 
 		expect(outcome).toBe("toggled");
 		expect(notices.some((n) => n.startsWith("confirm:") && n.includes("will require a Pi reload"))).toBe(true);
-		expect(toggled).toEqual({ source: "npm:pi-demo", field: "extensions", path: "extensions/a.ts", enabled: false, projectRoot: undefined });
+		expect(toggled).toEqual({
+			source: "npm:pi-demo",
+			field: "extensions",
+			path: "extensions/a.ts",
+			enabled: false,
+			projectRoot: undefined,
+		});
 	});
 
 	it("does not mention reload for a non-extension resource, and passes the project root only for project-scoped items", async () => {
 		const notices: string[] = [];
 		let toggled: unknown;
 		const natives = {
-			async security() { return { mutationApproval: "always" as const }; },
-			async toggleResource(source: string, field: string, path: string, enabled: boolean, projectRoot?: string) { toggled = { source, field, path, enabled, projectRoot }; return "ok"; },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async toggleResource(source: string, field: string, path: string, enabled: boolean, projectRoot?: string) {
+				toggled = { source, field, path, enabled, projectRoot };
+				return "ok";
+			},
 		} as unknown as Natives;
 
 		await applyResourceToggle(skillItem, natives, fakeCtx(true, notices));
@@ -80,8 +127,13 @@ describe("applyResourceToggle (warn inline, approve, then mutate -- never silent
 		const notices: string[] = [];
 		let called = 0;
 		const natives = {
-			async security() { return { mutationApproval: "always" as const }; },
-			async toggleResource() { called += 1; return "ok"; },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async toggleResource() {
+				called += 1;
+				return "ok";
+			},
 		} as unknown as Natives;
 
 		const outcome = await applyResourceToggle(extensionItem, natives, fakeCtx(false, notices));
@@ -94,8 +146,13 @@ describe("applyResourceToggle (warn inline, approve, then mutate -- never silent
 		const notices: string[] = [];
 		let called = 0;
 		const natives = {
-			async security() { return { mutationApproval: "never" as const }; },
-			async toggleResource() { called += 1; return "ok"; },
+			async security() {
+				return { mutationApproval: "never" as const };
+			},
+			async toggleResource() {
+				called += 1;
+				return "ok";
+			},
 		} as unknown as Natives;
 
 		const outcome = await applyResourceToggle(extensionItem, natives, fakeCtx(false, notices));
@@ -108,8 +165,12 @@ describe("applyResourceToggle (warn inline, approve, then mutate -- never silent
 	it("reports failure, not a throw, when the daemon rejects the toggle", async () => {
 		const notices: string[] = [];
 		const natives = {
-			async security() { return { mutationApproval: "always" as const }; },
-			async toggleResource() { throw new Error("package not found in settings"); },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async toggleResource() {
+				throw new Error("package not found in settings");
+			},
 		} as unknown as Natives;
 
 		const outcome = await applyResourceToggle(extensionItem, natives, fakeCtx(true, notices));
@@ -123,7 +184,9 @@ describe("handleResourceConfigCommand (/packed config dispatch)", () => {
 	it("only claims the exact 'config' subcommand, leaving other /packed args to the caller", async () => {
 		const natives = {} as Natives;
 		const ctx = { hasUI: false, ui: { notify() {} } } as unknown as ExtensionCommandContext;
-		const openPanel = async () => { throw new Error("must not be called for a non-config subcommand"); };
+		const openPanel = async () => {
+			throw new Error("must not be called for a non-config subcommand");
+		};
 		expect(await handleResourceConfigCommand("setup plan", ctx, natives, openPanel)).toBe(false);
 		expect(await handleResourceConfigCommand("", ctx, natives, openPanel)).toBe(false);
 	});
@@ -132,7 +195,9 @@ describe("handleResourceConfigCommand (/packed config dispatch)", () => {
 		const natives = {} as Natives;
 		const ctx = { hasUI: false, ui: { notify() {} } } as unknown as ExtensionCommandContext;
 		const calls: unknown[] = [];
-		const openPanel = async (openedCtx: ExtensionCommandContext, openedNatives: Natives, opts?: { initialTab?: "config" }) => { calls.push([openedCtx, openedNatives, opts]); };
+		const openPanel = async (openedCtx: ExtensionCommandContext, openedNatives: Natives, opts?: { initialTab?: "config" }) => {
+			calls.push([openedCtx, openedNatives, opts]);
+		};
 		expect(await handleResourceConfigCommand("config", ctx, natives, openPanel)).toBe(true);
 		expect(calls).toEqual([[ctx, natives, { initialTab: "config" }]]);
 	});

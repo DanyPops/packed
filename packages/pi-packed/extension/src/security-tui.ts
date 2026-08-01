@@ -7,11 +7,14 @@
  * dialog from any custom overlay, confirmed live as the same "opens a
  * different TUI" complaint the other three tabs had.
  */
+
+import type { SecuritySettings } from "@danypops/packed/protocol";
 import { rawKeyHint } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { Component } from "malevich-tui-components";
-import type { SecuritySettings } from "@danypops/packed/protocol";
+
 type MutationApproval = SecuritySettings["mutationApproval"];
+
 import type { Natives } from "./packed.ts";
 import type { TabHost } from "./tab-host.ts";
 
@@ -20,7 +23,10 @@ const OPTIONS: Array<{ value: MutationApproval; label: string }> = [
 	{ value: "never", label: "Never require mutation approval (unsafe opt-out)" },
 ];
 
-interface Theme { fg(color: string, s: string): string; bold(s: string): string; }
+interface Theme {
+	fg(color: string, s: string): string;
+	bold(s: string): string;
+}
 
 export class SettingsTab implements Component {
 	private current: MutationApproval = "always";
@@ -30,6 +36,7 @@ export class SettingsTab implements Component {
 	constructor(
 		private readonly natives: Pick<Natives, "security" | "setMutationApproval">,
 		private readonly host: TabHost,
+		// biome-ignore lint/correctness/noUnusedPrivateClassMembers: read via `const { theme } = this` in render(), which Biome's usage check doesn't trace
 		private readonly theme: Theme,
 	) {}
 

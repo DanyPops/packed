@@ -2,7 +2,7 @@ import { existsSync, lstatSync, opendirSync, readFileSync, realpathSync } from "
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { publint } from "publint";
 import { formatMessage } from "publint/utils";
-import { runExtensionSmoke, type ExtensionSmokeResult } from "./smoke.ts";
+import { type ExtensionSmokeResult, runExtensionSmoke } from "./smoke.ts";
 
 export type DiagnosticSeverity = "error" | "warning" | "info";
 
@@ -99,8 +99,9 @@ export function walk(root: string, maxFiles: number, bundledRoots: string[]): { 
 		const directory = queue.shift()!;
 		const handle = opendirSync(directory);
 		try {
-			let entry;
-			while ((entry = handle.readSync()) !== null) {
+			for (;;) {
+				const entry = handle.readSync();
+				if (entry === null) break;
 				visitedEntries++;
 				if (visitedEntries > maxEntries) return { files, truncated: true };
 				if (entry.name === ".git") continue;
@@ -140,16 +141,27 @@ function hasMagic(pattern: string): boolean {
 }
 
 function isValidGlob(pattern: string): boolean {
-	for (const [open, close] of [["[", "]"], ["{", "}"]] as const) {
+	for (const [open, close] of [
+		["[", "]"],
+		["{", "}"],
+	] as const) {
 		let depth = 0;
 		for (let index = 0; index < pattern.length; index++) {
-			if (pattern[index] === "\\") { index++; continue; }
+			if (pattern[index] === "\\") {
+				index++;
+				continue;
+			}
 			if (pattern[index] === open) depth++;
 			if (pattern[index] === close && --depth < 0) return false;
 		}
 		if (depth !== 0) return false;
 	}
-	try { new Bun.Glob(pattern); return true; } catch { return false; }
+	try {
+		new Bun.Glob(pattern);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 export function matchesPattern(file: string, pattern: string): boolean {
@@ -186,7 +198,8 @@ function shippedFiles(context: Context): string[] {
 	if (!configured) return context.files;
 	const selected = new Set(resolvePatterns(context.files, configured));
 	for (const file of context.files) {
-		if (file === "package.json" || /^readme(?:\.|$)/i.test(basename(file)) || /^(?:licen[cs]e|copying)(?:\.|$)/i.test(basename(file))) selected.add(file);
+		if (file === "package.json" || /^readme(?:\.|$)/i.test(basename(file)) || /^(?:licen[cs]e|copying)(?:\.|$)/i.test(basename(file)))
+			selected.add(file);
 	}
 	return [...selected];
 }
@@ -194,18 +207,38 @@ function shippedFiles(context: Context): string[] {
 function manifestCheck(context: Context): void {
 	const { pkg, add } = context;
 	if (typeof pkg.name !== "string" || !/^(@[a-z0-9._-]+\/)?[a-z0-9._-]+$/.test(pkg.name)) {
-		add({ code: "PKG_NAME_INVALID", severity: "error", path: "package.json#name", message: "name must be a valid lowercase npm package name" });
+		add({
+			code: "PKG_NAME_INVALID",
+			severity: "error",
+			path: "package.json#name",
+			message: "name must be a valid lowercase npm package name",
+		});
 	}
 	if (typeof pkg.version !== "string" || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(pkg.version)) {
 		add({ code: "PKG_VERSION_INVALID", severity: "error", path: "package.json#version", message: "version must be valid SemVer" });
 	}
-	for (const [field, code] of [["license", "PKG_LICENSE_MISSING"], ["repository", "PKG_REPOSITORY_MISSING"], ["homepage", "PKG_HOMEPAGE_MISSING"], ["bugs", "PKG_BUGS_MISSING"]] as const) {
-		if (pkg[field] === undefined) add({ code, severity: "warning", path: `package.json#${field}`, message: `${field} metadata is missing` });
+	for (const [field, code] of [
+		["license", "PKG_LICENSE_MISSING"],
+		["repository", "PKG_REPOSITORY_MISSING"],
+		["homepage", "PKG_HOMEPAGE_MISSING"],
+		["bugs", "PKG_BUGS_MISSING"],
+	] as const) {
+		if (pkg[field] === undefined)
+			add({ code, severity: "warning", path: `package.json#${field}`, message: `${field} metadata is missing` });
 	}
 	const keywords = Array.isArray(pkg.keywords) ? pkg.keywords : [];
-	if (!keywords.includes("pi-package")) add({ code: "PI_KEYWORD_MISSING", severity: "warning", path: "package.json#keywords", message: "add pi-package for Pi gallery discovery", fix: "Add pi-package to keywords." });
-	if (!context.files.some((file) => /^readme(?:\.|$)/i.test(basename(file)))) add({ code: "PACKAGE_README_MISSING", severity: "warning", path: "README.md", message: "the package has no README" });
-	if (!context.files.some((file) => /^(?:licen[cs]e|copying)(?:\.|$)/i.test(basename(file)))) add({ code: "PACKAGE_LICENSE_FILE_MISSING", severity: "warning", path: "LICENSE", message: "the package has no license file" });
+	if (!keywords.includes("pi-package"))
+		add({
+			code: "PI_KEYWORD_MISSING",
+			severity: "warning",
+			path: "package.json#keywords",
+			message: "add pi-package for Pi gallery discovery",
+			fix: "Add pi-package to keywords.",
+		});
+	if (!context.files.some((file) => /^readme(?:\.|$)/i.test(basename(file))))
+		add({ code: "PACKAGE_README_MISSING", severity: "warning", path: "README.md", message: "the package has no README" });
+	if (!context.files.some((file) => /^(?:licen[cs]e|copying)(?:\.|$)/i.test(basename(file))))
+		add({ code: "PACKAGE_LICENSE_FILE_MISSING", severity: "warning", path: "LICENSE", message: "the package has no license file" });
 }
 
 /** Resolves a resource field's configured or default patterns without
@@ -223,7 +256,16 @@ function resourceFieldPatterns(pi: unknown, field: (typeof RESOURCE_FIELDS)[numb
  * an error in resourcesCheck, silently dropped in discoverPackageResources). */
 function matchResourceFiles(files: string[], field: (typeof RESOURCE_FIELDS)[number], patterns: string[]): string[] {
 	let matched: string[] = [];
-	try { matched = resolvePatterns(files, patterns.filter((pattern) => !pattern.includes("..") && !isAbsolute(pattern) && isValidGlob(normalizePattern(pattern.replace(/^!/, ""))))); } catch { /* invalid glob already reported */ }
+	try {
+		matched = resolvePatterns(
+			files,
+			patterns.filter(
+				(pattern) => !pattern.includes("..") && !isAbsolute(pattern) && isValidGlob(normalizePattern(pattern.replace(/^!/, ""))),
+			),
+		);
+	} catch {
+		/* invalid glob already reported */
+	}
 	return matched.filter((file) => RESOURCE_EXTENSIONS[field].test(file));
 }
 
@@ -261,7 +303,12 @@ function resourcesCheck(context: Context): void {
 		if (configured !== undefined) {
 			const parsed = patternsFor(configured);
 			if (!parsed) {
-				context.add({ code: "PI_MANIFEST_FIELD_INVALID", severity: "error", path: `package.json#pi.${field}`, message: `${field} must be an array of glob strings` });
+				context.add({
+					code: "PI_MANIFEST_FIELD_INVALID",
+					severity: "error",
+					path: `package.json#pi.${field}`,
+					message: `${field} must be an array of glob strings`,
+				});
 				continue;
 			}
 			patterns = parsed;
@@ -274,42 +321,109 @@ function resourcesCheck(context: Context): void {
 			const pattern = raw.startsWith("!") ? raw.slice(1) : raw;
 			const normalized = normalizePattern(pattern);
 			if (isAbsolute(normalized) || normalized.split("/").includes("..")) {
-				context.add({ code: "PI_RESOURCE_OUTSIDE_PACKAGE", severity: "error", path: `package.json#pi.${field}`, message: `resource pattern escapes the package: ${raw}` });
+				context.add({
+					code: "PI_RESOURCE_OUTSIDE_PACKAGE",
+					severity: "error",
+					path: `package.json#pi.${field}`,
+					message: `resource pattern escapes the package: ${raw}`,
+				});
 				continue;
 			}
-			if (!isValidGlob(normalized)) context.add({ code: "PI_RESOURCE_GLOB_INVALID", severity: "error", path: `package.json#pi.${field}`, message: `invalid resource glob: ${raw}` });
+			if (!isValidGlob(normalized))
+				context.add({
+					code: "PI_RESOURCE_GLOB_INVALID",
+					severity: "error",
+					path: `package.json#pi.${field}`,
+					message: `invalid resource glob: ${raw}`,
+				});
 		}
 		const matched = matchResourceFiles(context.files, field, patterns).filter((file) => {
 			if (isContainedFile(context.root, file)) return true;
-			context.add({ code: "PI_RESOURCE_OUTSIDE_PACKAGE", severity: "error", path: file, message: `resource resolves outside the package: ${file}` });
+			context.add({
+				code: "PI_RESOURCE_OUTSIDE_PACKAGE",
+				severity: "error",
+				path: file,
+				message: `resource resolves outside the package: ${file}`,
+			});
 			return false;
 		});
 		resourceCount += matched.length;
 		const packageFiles = patternsFor(context.pkg.files);
 		if (packageFiles) {
 			for (const file of matched) {
-				if (!resolvePatterns([file], packageFiles).includes(file)) context.add({ code: "PI_RESOURCE_NOT_PUBLISHED", severity: "error", path: file, message: "declared Pi resource is excluded by package.json files" });
+				if (!resolvePatterns([file], packageFiles).includes(file))
+					context.add({
+						code: "PI_RESOURCE_NOT_PUBLISHED",
+						severity: "error",
+						path: file,
+						message: "declared Pi resource is excluded by package.json files",
+					});
 			}
 		}
 		const dependencies = isRecord(context.pkg.dependencies) ? context.pkg.dependencies : {};
-		const bundled = Array.isArray(context.pkg.bundledDependencies) ? context.pkg.bundledDependencies : Array.isArray(context.pkg.bundleDependencies) ? context.pkg.bundleDependencies : [];
+		const bundled = Array.isArray(context.pkg.bundledDependencies)
+			? context.pkg.bundledDependencies
+			: Array.isArray(context.pkg.bundleDependencies)
+				? context.pkg.bundleDependencies
+				: [];
 		for (const raw of patterns) {
 			const normalized = normalizePattern(raw.replace(/^!/, ""));
 			if (!normalized.startsWith("node_modules/")) continue;
 			const parts = normalized.slice("node_modules/".length).split("/");
 			const dependency = parts[0]!.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0]!;
-			if (dependencies[dependency] === undefined || !bundled.includes(dependency)) context.add({ code: "PI_PACKAGE_NOT_BUNDLED", severity: "error", path: `package.json#pi.${field}`, message: `${dependency} resources require dependencies plus bundledDependencies` });
+			if (dependencies[dependency] === undefined || !bundled.includes(dependency))
+				context.add({
+					code: "PI_PACKAGE_NOT_BUNDLED",
+					severity: "error",
+					path: `package.json#pi.${field}`,
+					message: `${dependency} resources require dependencies plus bundledDependencies`,
+				});
 		}
 		if (patterns.some((pattern) => !pattern.startsWith("!")) && matched.length === 0) {
-			context.add({ code: "PI_RESOURCE_NO_MATCH", severity: "error", path: `package.json#pi.${field}`, message: `${field} patterns match no supported resources` });
+			context.add({
+				code: "PI_RESOURCE_NO_MATCH",
+				severity: "error",
+				path: `package.json#pi.${field}`,
+				message: `${field} patterns match no supported resources`,
+			});
 		}
 	}
-	if (resourceCount === 0) context.add({ code: "PI_NO_RESOURCES", severity: "error", path: "package.json#pi", message: "package declares or contains no Pi resources" });
+	if (resourceCount === 0)
+		context.add({
+			code: "PI_NO_RESOURCES",
+			severity: "error",
+			path: "package.json#pi",
+			message: "package declares or contains no Pi resources",
+		});
 	if (isRecord(pi)) {
-		if (pi.image !== undefined && typeof pi.image !== "string") context.add({ code: "PI_IMAGE_INVALID", severity: "error", path: "package.json#pi.image", message: "gallery image must be a URL string" });
-		else if (typeof pi.image === "string" && !/\.(?:png|jpe?g|gif|webp)(?:[?#].*)?$/i.test(pi.image)) context.add({ code: "PI_IMAGE_FORMAT_INVALID", severity: "error", path: "package.json#pi.image", message: "gallery image must be PNG, JPEG, GIF, or WebP" });
-		if (pi.video !== undefined && typeof pi.video !== "string") context.add({ code: "PI_VIDEO_INVALID", severity: "error", path: "package.json#pi.video", message: "gallery video must be a URL string" });
-		else if (typeof pi.video === "string" && !/\.mp4(?:[?#].*)?$/i.test(pi.video)) context.add({ code: "PI_VIDEO_FORMAT_INVALID", severity: "error", path: "package.json#pi.video", message: "gallery video must be MP4" });
+		if (pi.image !== undefined && typeof pi.image !== "string")
+			context.add({
+				code: "PI_IMAGE_INVALID",
+				severity: "error",
+				path: "package.json#pi.image",
+				message: "gallery image must be a URL string",
+			});
+		else if (typeof pi.image === "string" && !/\.(?:png|jpe?g|gif|webp)(?:[?#].*)?$/i.test(pi.image))
+			context.add({
+				code: "PI_IMAGE_FORMAT_INVALID",
+				severity: "error",
+				path: "package.json#pi.image",
+				message: "gallery image must be PNG, JPEG, GIF, or WebP",
+			});
+		if (pi.video !== undefined && typeof pi.video !== "string")
+			context.add({
+				code: "PI_VIDEO_INVALID",
+				severity: "error",
+				path: "package.json#pi.video",
+				message: "gallery video must be a URL string",
+			});
+		else if (typeof pi.video === "string" && !/\.mp4(?:[?#].*)?$/i.test(pi.video))
+			context.add({
+				code: "PI_VIDEO_FORMAT_INVALID",
+				severity: "error",
+				path: "package.json#pi.video",
+				message: "gallery video must be MP4",
+			});
 	}
 }
 
@@ -328,22 +442,47 @@ function cleanupManifestCheck(context: Context): void {
 	if (!isRecord(pi) || pi.cleanup === undefined) return;
 	const declared = pi.cleanup;
 	if (!Array.isArray(declared) || !declared.every((item) => typeof item === "string")) {
-		context.add({ code: "PI_CLEANUP_INVALID", severity: "error", path: "package.json#pi.cleanup", message: "pi.cleanup must be an array of relative path strings" });
+		context.add({
+			code: "PI_CLEANUP_INVALID",
+			severity: "error",
+			path: "package.json#pi.cleanup",
+			message: "pi.cleanup must be an array of relative path strings",
+		});
 		return;
 	}
 	if (declared.length > MAX_CLEANUP_ENTRIES) {
-		context.add({ code: "PI_CLEANUP_TOO_LARGE", severity: "warning", path: "package.json#pi.cleanup", message: `pi.cleanup declares ${declared.length} entries; only the first ${MAX_CLEANUP_ENTRIES} are honored at removal time` });
+		context.add({
+			code: "PI_CLEANUP_TOO_LARGE",
+			severity: "warning",
+			path: "package.json#pi.cleanup",
+			message: `pi.cleanup declares ${declared.length} entries; only the first ${MAX_CLEANUP_ENTRIES} are honored at removal time`,
+		});
 	}
 	for (const raw of declared) {
 		if (raw.length > MAX_CLEANUP_PATH_BYTES) {
-			context.add({ code: "PI_CLEANUP_TOO_LARGE", severity: "warning", path: "package.json#pi.cleanup", message: `pi.cleanup entry exceeds ${MAX_CLEANUP_PATH_BYTES} characters and will be ignored at removal time: ${raw.slice(0, 80)}...` });
+			context.add({
+				code: "PI_CLEANUP_TOO_LARGE",
+				severity: "warning",
+				path: "package.json#pi.cleanup",
+				message: `pi.cleanup entry exceeds ${MAX_CLEANUP_PATH_BYTES} characters and will be ignored at removal time: ${raw.slice(0, 80)}...`,
+			});
 			continue;
 		}
 		const trimmed = raw.trim();
 		if (trimmed.length === 0) {
-			context.add({ code: "PI_CLEANUP_ESCAPES_PACKAGE", severity: "error", path: "package.json#pi.cleanup", message: "pi.cleanup entries must not be empty" });
+			context.add({
+				code: "PI_CLEANUP_ESCAPES_PACKAGE",
+				severity: "error",
+				path: "package.json#pi.cleanup",
+				message: "pi.cleanup entries must not be empty",
+			});
 		} else if (isAbsolute(trimmed) || trimmed.split("/").includes("..")) {
-			context.add({ code: "PI_CLEANUP_ESCAPES_PACKAGE", severity: "error", path: "package.json#pi.cleanup", message: `pi.cleanup entry escapes the package and will never be removed: ${raw}` });
+			context.add({
+				code: "PI_CLEANUP_ESCAPES_PACKAGE",
+				severity: "error",
+				path: "package.json#pi.cleanup",
+				message: `pi.cleanup entry escapes the package and will never be removed: ${raw}`,
+			});
 		}
 	}
 }
@@ -372,7 +511,12 @@ function dependencyCheck(context: Context): void {
 	const dev = isRecord(context.pkg.devDependencies) ? context.pkg.devDependencies : {};
 	for (const core of CORE_PACKAGES) {
 		if (dependencies[core] !== undefined || optional[core] !== undefined || (peers[core] !== undefined && peers[core] !== "*")) {
-			context.add({ code: "PI_CORE_DEPENDENCY_PLACEMENT", severity: "error", path: `package.json#peerDependencies.${core}`, message: `${core} must be a peerDependency with range *` });
+			context.add({
+				code: "PI_CORE_DEPENDENCY_PLACEMENT",
+				severity: "error",
+				path: `package.json#peerDependencies.${core}`,
+				message: `${core} must be a peerDependency with range *`,
+			});
 		}
 	}
 	for (const file of shippedSourceFiles(context)) {
@@ -380,10 +524,21 @@ function dependencyCheck(context: Context): void {
 			if (specifier.startsWith(".") || specifier.startsWith("/") || specifier.startsWith("node:") || specifier.startsWith("bun:")) continue;
 			const name = specifier.startsWith("@") ? specifier.split("/").slice(0, 2).join("/") : specifier.split("/")[0]!;
 			if (CORE_PACKAGES.has(name)) {
-				if (peers[name] !== "*") context.add({ code: "PI_CORE_DEPENDENCY_PLACEMENT", severity: "error", path: file, message: `${name} must be declared as peerDependencies[${name}] = *` });
+				if (peers[name] !== "*")
+					context.add({
+						code: "PI_CORE_DEPENDENCY_PLACEMENT",
+						severity: "error",
+						path: file,
+						message: `${name} must be declared as peerDependencies[${name}] = *`,
+					});
 			} else if (dependencies[name] === undefined && optional[name] === undefined) {
 				const misplaced = dev[name] !== undefined ? "devDependency" : peers[name] !== undefined ? "peerDependency" : undefined;
-				context.add({ code: "RUNTIME_DEPENDENCY_MISSING", severity: "error", path: file, message: `${name} is imported by shipped code but is not in dependencies${misplaced ? `; it is only a ${misplaced}` : ""}` });
+				context.add({
+					code: "RUNTIME_DEPENDENCY_MISSING",
+					severity: "error",
+					path: file,
+					message: `${name} is imported by shipped code but is not in dependencies${misplaced ? `; it is only a ${misplaced}` : ""}`,
+				});
 			}
 		}
 	}
@@ -395,7 +550,9 @@ const MAX_SCRIPT_TEXT = 500;
 /** Bare module name a capability-suggestive specifier is checked against,
  * after stripping an optional node:/bun: prefix and any subpath
  * ("node:fs/promises" and "fs/promises" both normalize to "fs"). */
-const CAPABILITY_MODULES = new Set((["child_process", "net", "fs", "dgram", "worker_threads"] as const).flatMap((name) => [name, `node:${name}`]).concat("bun:sqlite"));
+const CAPABILITY_MODULES = new Set(
+	(["child_process", "net", "fs", "dgram", "worker_threads"] as const).flatMap((name) => [name, `node:${name}`]).concat("bun:sqlite"),
+);
 
 function capabilitySpecifier(specifier: string): string | undefined {
 	const bare = specifier.split("/")[0]!;
@@ -413,7 +570,12 @@ function capabilityCheck(context: Context): void {
 	for (const name of LIFECYCLE_SCRIPT_NAMES) {
 		const command = scripts[name];
 		if (typeof command === "string" && command.trim().length > 0) {
-			context.add({ code: "PI_LIFECYCLE_SCRIPT_DECLARED", severity: "warning", path: `package.json#scripts.${name}`, message: `declares a ${name} lifecycle script that runs automatically on install: ${command.slice(0, MAX_SCRIPT_TEXT)}` });
+			context.add({
+				code: "PI_LIFECYCLE_SCRIPT_DECLARED",
+				severity: "warning",
+				path: `package.json#scripts.${name}`,
+				message: `declares a ${name} lifecycle script that runs automatically on install: ${command.slice(0, MAX_SCRIPT_TEXT)}`,
+			});
 		}
 	}
 	for (const file of shippedSourceFiles(context)) {
@@ -422,7 +584,12 @@ function capabilityCheck(context: Context): void {
 			const capability = capabilitySpecifier(specifier);
 			if (capability && !seen.has(capability)) {
 				seen.add(capability);
-				context.add({ code: "PI_CAPABILITY_IMPORT", severity: "info", path: file, message: `imports ${capability}, a capability-suggestive module` });
+				context.add({
+					code: "PI_CAPABILITY_IMPORT",
+					severity: "info",
+					path: file,
+					message: `imports ${capability}, a capability-suggestive module`,
+				});
 			}
 		}
 	}
@@ -441,24 +608,57 @@ function parseFrontmatter(source: string): Record<string, string> {
 }
 
 function skillsCheck(context: Context): void {
-	for (const file of context.files.filter((path) => (basename(path) === "SKILL.md" || /^skills\/[^/]+\.md$/.test(path)) && isContainedFile(context.root, path))) {
+	for (const file of context.files.filter(
+		(path) => (basename(path) === "SKILL.md" || /^skills\/[^/]+\.md$/.test(path)) && isContainedFile(context.root, path),
+	)) {
 		const source = readFileSync(join(context.root, file), "utf8");
 		const fields = parseFrontmatter(source);
-		if (typeof fields.name !== "string" || !/^(?!-)(?!.*--)[a-z0-9-]{1,64}(?<!-)$/.test(fields.name)) context.add({ code: "SKILL_NAME_INVALID", severity: "error", path: file, message: "skill name must use 1-64 lowercase letters, numbers, and single hyphens" });
-		if (!fields.description) context.add({ code: "SKILL_DESCRIPTION_MISSING", severity: "error", path: file, message: "skill frontmatter requires a description" });
-		else if (fields.description.length > 1024) context.add({ code: "SKILL_DESCRIPTION_TOO_LONG", severity: "warning", path: file, message: "skill description exceeds 1024 characters" });
+		if (typeof fields.name !== "string" || !/^(?!-)(?!.*--)[a-z0-9-]{1,64}(?<!-)$/.test(fields.name))
+			context.add({
+				code: "SKILL_NAME_INVALID",
+				severity: "error",
+				path: file,
+				message: "skill name must use 1-64 lowercase letters, numbers, and single hyphens",
+			});
+		if (!fields.description)
+			context.add({
+				code: "SKILL_DESCRIPTION_MISSING",
+				severity: "error",
+				path: file,
+				message: "skill frontmatter requires a description",
+			});
+		else if (fields.description.length > 1024)
+			context.add({
+				code: "SKILL_DESCRIPTION_TOO_LONG",
+				severity: "warning",
+				path: file,
+				message: "skill description exceeds 1024 characters",
+			});
 		const references = new Set<string>();
 		for (const match of source.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) references.add(match[1]!.split("#")[0]!);
 		for (const match of source.matchAll(/`((?:scripts|references?|assets)\/[^`\s]+)`/g)) references.add(match[1]!);
 		for (const target of references) {
 			if (!target || /^(?:[a-z]+:|#|\/)/i.test(target)) continue;
 			let decoded: string;
-			try { decoded = decodeURIComponent(target); } catch {
-				context.add({ code: "SKILL_REFERENCE_INVALID", severity: "error", path: file, message: `skill reference is not a valid path: ${target}` });
+			try {
+				decoded = decodeURIComponent(target);
+			} catch {
+				context.add({
+					code: "SKILL_REFERENCE_INVALID",
+					severity: "error",
+					path: file,
+					message: `skill reference is not a valid path: ${target}`,
+				});
 				continue;
 			}
 			const absolute = resolve(context.root, dirname(file), decoded);
-			if (!absolute.startsWith(`${context.root}${sep}`) || !existsSync(absolute)) context.add({ code: "SKILL_REFERENCE_MISSING", severity: "error", path: file, message: `skill reference does not exist: ${target}` });
+			if (!absolute.startsWith(`${context.root}${sep}`) || !existsSync(absolute))
+				context.add({
+					code: "SKILL_REFERENCE_MISSING",
+					severity: "error",
+					path: file,
+					message: `skill reference does not exist: ${target}`,
+				});
 		}
 	}
 }
@@ -466,8 +666,9 @@ function skillsCheck(context: Context): void {
 function extensionFiles(context: Context): string[] {
 	const pi = isRecord(context.pkg.pi) ? context.pkg.pi : undefined;
 	const configured = patternsFor(pi?.extensions);
-	return (configured ? resolvePatterns(context.files, configured) : context.files.filter((path) => /^extensions\/.*\.[cm]?[jt]s$/.test(path)))
-		.filter((path) => /\.[cm]?[jt]s$/.test(path) && isContainedFile(context.root, path));
+	return (
+		configured ? resolvePatterns(context.files, configured) : context.files.filter((path) => /^extensions\/.*\.[cm]?[jt]s$/.test(path))
+	).filter((path) => /\.[cm]?[jt]s$/.test(path) && isContainedFile(context.root, path));
 }
 
 function extensionsCheck(context: Context): void {
@@ -476,8 +677,20 @@ function extensionsCheck(context: Context): void {
 		const absolute = join(context.root, file);
 		if (lstatSync(absolute).size > MAX_SOURCE_BYTES) continue;
 		const source = readFileSync(absolute, "utf8");
-		if (!/export\s+default\s+(?:async\s+)?(?:function|\(?[A-Za-z_$][\w$]*\)?\s*=>)/.test(source)) context.add({ code: "PI_EXTENSION_DEFAULT_EXPORT_MISSING", severity: "error", path: file, message: "extension must statically expose a default factory export" });
-		if (!/\.register(?:Tool|Command|Shortcut|Flag|MessageRenderer|Provider)\s*\(|\.on\s*\(/.test(source)) context.add({ code: "PI_EXTENSION_REGISTRATION_NOT_DETECTED", severity: "info", path: file, message: "no statically recognizable Pi registration was found" });
+		if (!/export\s+default\s+(?:async\s+)?(?:function|\(?[A-Za-z_$][\w$]*\)?\s*=>)/.test(source))
+			context.add({
+				code: "PI_EXTENSION_DEFAULT_EXPORT_MISSING",
+				severity: "error",
+				path: file,
+				message: "extension must statically expose a default factory export",
+			});
+		if (!/\.register(?:Tool|Command|Shortcut|Flag|MessageRenderer|Provider)\s*\(|\.on\s*\(/.test(source))
+			context.add({
+				code: "PI_EXTENSION_REGISTRATION_NOT_DETECTED",
+				severity: "info",
+				path: file,
+				message: "no statically recognizable Pi registration was found",
+			});
 	}
 }
 
@@ -490,7 +703,12 @@ async function genericCheck(context: Context): Promise<void> {
 			const size = lstatSync(join(context.root, name)).size;
 			if (size > MAX_SOURCE_BYTES || totalBytes + size > MAX_GENERIC_BYTES) {
 				context.markTruncated();
-				context.add({ code: "NPM_INPUT_TRUNCATED", severity: "warning", path: name, message: "file was omitted from generic npm checks by the static input bound" });
+				context.add({
+					code: "NPM_INPUT_TRUNCATED",
+					severity: "warning",
+					path: name,
+					message: "file was omitted from generic npm checks by the static input bound",
+				});
 				continue;
 			}
 			const data = readFileSync(join(context.root, name));
@@ -507,7 +725,12 @@ async function genericCheck(context: Context): Promise<void> {
 			});
 		}
 	} catch (error) {
-		context.add({ code: "NPM_PUBLINT_FAILED", severity: "warning", path: "package.json", message: `publint failed: ${error instanceof Error ? error.message : String(error)}` });
+		context.add({
+			code: "NPM_PUBLINT_FAILED",
+			severity: "warning",
+			path: "package.json",
+			message: `publint failed: ${error instanceof Error ? error.message : String(error)}`,
+		});
 	}
 }
 
@@ -518,8 +741,20 @@ export async function checkPackage(packagePath: string, options: CheckOptions = 
 		root = realpathSync(requestedRoot);
 		if (!lstatSync(root).isDirectory()) throw new Error("path is not a directory");
 	} catch (error) {
-		const diagnostic: Diagnostic = { code: "PKG_PATH_INVALID", severity: "error", path: requestedRoot, message: `cannot inspect package path: ${error instanceof Error ? error.message : String(error)}` };
-		return { root: requestedRoot, ok: false, diagnostics: [diagnostic], summary: { errors: 1, warnings: 0, info: 0 }, checkedFiles: 0, truncated: false };
+		const diagnostic: Diagnostic = {
+			code: "PKG_PATH_INVALID",
+			severity: "error",
+			path: requestedRoot,
+			message: `cannot inspect package path: ${error instanceof Error ? error.message : String(error)}`,
+		};
+		return {
+			root: requestedRoot,
+			ok: false,
+			diagnostics: [diagnostic],
+			summary: { errors: 1, warnings: 0, info: 0 },
+			checkedFiles: 0,
+			truncated: false,
+		};
 	}
 	const maxDiagnostics = Math.max(1, Math.min(options.maxDiagnostics ?? DEFAULT_MAX_DIAGNOSTICS, 1_000));
 	const maxFiles = Math.max(1, Math.min(options.maxFiles ?? DEFAULT_MAX_FILES, 10_000));
@@ -530,7 +765,12 @@ export async function checkPackage(packagePath: string, options: CheckOptions = 
 		if (!isRecord(parsed)) throw new Error("root must be an object");
 		pkg = parsed;
 	} catch (error) {
-		const diagnostic: Diagnostic = { code: "PKG_JSON_INVALID", severity: "error", path: "package.json", message: `cannot parse package.json: ${error instanceof Error ? error.message : String(error)}` };
+		const diagnostic: Diagnostic = {
+			code: "PKG_JSON_INVALID",
+			severity: "error",
+			path: "package.json",
+			message: `cannot parse package.json: ${error instanceof Error ? error.message : String(error)}`,
+		};
 		return { root, ok: false, diagnostics: [diagnostic], summary: { errors: 1, warnings: 0, info: 0 }, checkedFiles: 0, truncated: false };
 	}
 	const walked = walk(root, maxFiles, declaredBundledRoots(pkg));
@@ -541,17 +781,32 @@ export async function checkPackage(packagePath: string, options: CheckOptions = 
 		root,
 		pkg,
 		files: walked.files,
-		markTruncated() { diagnosticOverflow = true; },
+		markTruncated() {
+			diagnosticOverflow = true;
+		},
 		add(diagnostic) {
 			if (diagnostic.severity === "error") totals.errors++;
 			else if (diagnostic.severity === "warning") totals.warnings++;
 			else totals.info++;
-			const bounded = { ...diagnostic, path: diagnostic.path.slice(0, 512), message: diagnostic.message.slice(0, 1_000), fix: diagnostic.fix?.slice(0, 1_000) };
+			const bounded = {
+				...diagnostic,
+				path: diagnostic.path.slice(0, 512),
+				message: diagnostic.message.slice(0, 1_000),
+				fix: diagnostic.fix?.slice(0, 1_000),
+			};
 			if (diagnostics.length < maxDiagnostics) diagnostics.push(bounded);
 			else diagnosticOverflow = true;
 		},
 	};
-	const checks: Check[] = [manifestCheck, resourcesCheck, cleanupManifestCheck, dependencyCheck, capabilityCheck, skillsCheck, extensionsCheck];
+	const checks: Check[] = [
+		manifestCheck,
+		resourcesCheck,
+		cleanupManifestCheck,
+		dependencyCheck,
+		capabilityCheck,
+		skillsCheck,
+		extensionsCheck,
+	];
 	if (options.generic !== false) checks.push(genericCheck);
 	for (const check of checks) await check(context);
 	let smoke: CheckReport["smoke"];
@@ -567,14 +822,27 @@ export async function checkPackage(packagePath: string, options: CheckOptions = 
 				code: `PI_EXTENSION_SMOKE_${suffix}`,
 				severity: result.status === "ok" ? "info" : "error",
 				path: file,
-				message: result.status === "ok" ? `extension loaded; registrations: ${JSON.stringify(result.registrations)}` : result.message ?? `extension smoke failed: ${result.status}`,
+				message:
+					result.status === "ok"
+						? `extension loaded; registrations: ${JSON.stringify(result.registrations)}`
+						: (result.message ?? `extension smoke failed: ${result.status}`),
 			});
 		}
 		smoke = { extensions: results };
 	}
 	const severityRank: Record<DiagnosticSeverity, number> = { error: 0, warning: 1, info: 2 };
-	diagnostics.sort((a, b) => severityRank[a.severity] - severityRank[b.severity] || a.code.localeCompare(b.code) || a.path.localeCompare(b.path));
-	return { root, ok: totals.errors === 0, diagnostics, summary: totals, checkedFiles: walked.files.length, truncated: walked.truncated || diagnosticOverflow, ...(smoke ? { smoke } : {}) };
+	diagnostics.sort(
+		(a, b) => severityRank[a.severity] - severityRank[b.severity] || a.code.localeCompare(b.code) || a.path.localeCompare(b.path),
+	);
+	return {
+		root,
+		ok: totals.errors === 0,
+		diagnostics,
+		summary: totals,
+		checkedFiles: walked.files.length,
+		truncated: walked.truncated || diagnosticOverflow,
+		...(smoke ? { smoke } : {}),
+	};
 }
 
 export function formatCheckReport(report: CheckReport, json: boolean): string {
@@ -585,11 +853,20 @@ export function formatCheckReport(report: CheckReport, json: boolean): string {
 			diagnostics = diagnostics.slice(0, Math.floor(diagnostics.length / 2));
 			output = JSON.stringify({ ...report, diagnostics, truncated: true });
 		}
-		if (output.length + 1 > MAX_JSON_OUTPUT) output = JSON.stringify({ root: report.root.slice(0, 4_096), ok: report.ok, diagnostics: [], summary: report.summary, checkedFiles: report.checkedFiles, truncated: true });
+		if (output.length + 1 > MAX_JSON_OUTPUT)
+			output = JSON.stringify({
+				root: report.root.slice(0, 4_096),
+				ok: report.ok,
+				diagnostics: [],
+				summary: report.summary,
+				checkedFiles: report.checkedFiles,
+				truncated: true,
+			});
 		return `${output}\n`;
 	}
 	let output = `${report.ok ? "PASS" : "FAIL"} ${report.root} — ${report.summary.errors} error(s), ${report.summary.warnings} warning(s), ${report.summary.info} info\n`;
-	for (const diagnostic of report.diagnostics) output += `${diagnostic.severity.toUpperCase()} ${diagnostic.code} ${diagnostic.path}: ${diagnostic.message}${diagnostic.fix ? ` Fix: ${diagnostic.fix}` : ""}\n`;
+	for (const diagnostic of report.diagnostics)
+		output += `${diagnostic.severity.toUpperCase()} ${diagnostic.code} ${diagnostic.path}: ${diagnostic.message}${diagnostic.fix ? ` Fix: ${diagnostic.fix}` : ""}\n`;
 	if (report.truncated) output += "Output truncated by configured bounds.\n";
 	return output.slice(0, MAX_HUMAN_OUTPUT);
 }

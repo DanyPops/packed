@@ -1,4 +1,57 @@
 #!/usr/bin/env bun
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import { generateSystemdUnit } from "@danypops/vehicle-server/service";
+import { formatAdvisoryReport, resolveInstalledVersions, scanInstalledPackages } from "../adoption/advisories.ts";
+import { checkPackage, formatCheckReport } from "../adoption/check.ts";
+import { formatDoctorReport, runDoctor } from "../adoption/doctor.ts";
+import { formatPackReport, NpmPackVerifier, type PackReport } from "../adoption/pack.ts";
+import { type AdoptionReport, formatAdoptionReport, scoreTarget } from "../adoption/score.ts";
+import type { PackageDaemonPort } from "../daemon/client.ts";
+import { checkUpdates } from "../daemon/watcher.ts";
+import { generateIndex, indexPath, readIndex } from "../index/build-index.ts";
+import { syncCatalog } from "../packages/catalog.ts";
+import { catalogList, dbPath, getSyncMeta, latestVersion, openDb, searchLocal } from "../packages/db.ts";
+import { defaultPiBin, NAME_RE } from "../packages/install.ts";
+import { npmPackageName, readInstalledPackages, readInstalledPackagesAcrossScopes } from "../packages/installed.ts";
+import {
+	listPackageResources,
+	type PackageResources,
+	RESOURCE_FIELDS,
+	type ResourceField,
+	resolveToggleSettingsPath,
+	toggleResource,
+} from "../packages/resources.ts";
+import { checkPiVersion, type PiVersionReport, runPiStatusInteractive, runPiUpdateSelf } from "../pi/pi-version.ts";
+import {
+	formatPublishReport,
+	npmWebUrl,
+	openBrowser,
+	PublishManager,
+	type PublishSetupReport,
+	type PublishStatusReport,
+	runInherited,
+	runNpmLoginWeb,
+} from "../publish/publish.ts";
+import {
+	assertPackagePermission,
+	type MutationApproval,
+	type PackageOperation,
+	packageOperationClassification,
+	type SecuritySettingsPort,
+} from "../security/security.ts";
+import { runSelfUpdate, type SelfUpdateReport } from "../self-update/self-update.ts";
+import {
+	bundledEcosystemManifestPath,
+	formatSetupReport,
+	type SetupApplyResult,
+	type SetupExportReport,
+	SetupManager,
+	type SetupPlan,
+	type SetupUpdateReport,
+} from "../setup/setup.ts";
+import { resolvePackedPaths } from "../shared/paths.ts";
+import type { Installer, Pkg, Registry, UpdateEntry } from "../shared/ports.ts";
 /**
  * cli.ts — the CLI entry point; drives the same shared ports (registry, installer, security) the HTTP service also drives.
  * cliRun is pure: ({code, out}) in, no I/O — the entry point prints.
@@ -6,35 +59,6 @@
  * anywhere (agents put them anywhere).
  */
 import { buildSearchQuery, clampLimit } from "../shared/ports.ts";
-import type { Installer, Pkg, Registry } from "../shared/ports.ts";
-import type { PackageDaemonPort } from "../daemon/client.ts";
-import { checkPackage, formatCheckReport } from "../adoption/check.ts";
-import { runDoctor, formatDoctorReport } from "../adoption/doctor.ts";
-import { NpmPackVerifier, formatPackReport, type PackReport } from "../adoption/pack.ts";
-import { formatAdoptionReport, scoreTarget, type AdoptionReport } from "../adoption/score.ts";
-import { formatPublishReport, npmWebUrl, openBrowser, PublishManager, runInherited, runNpmLoginWeb, type PublishSetupReport, type PublishStatusReport } from "../publish/publish.ts";
-import { bundledEcosystemManifestPath, formatSetupReport, SetupManager, type SetupApplyResult, type SetupExportReport, type SetupPlan, type SetupUpdateReport } from "../setup/setup.ts";
-import { resolve } from "node:path";
-import { npmPackageName, readInstalledPackages, readInstalledPackagesAcrossScopes } from "../packages/installed.ts";
-import { checkUpdates } from "../daemon/watcher.ts";
-import { checkPiVersion, runPiStatusInteractive, runPiUpdateSelf, type PiVersionReport } from "../pi/pi-version.ts";
-import { listPackageResources, resolveToggleSettingsPath, toggleResource, RESOURCE_FIELDS, type PackageResources, type ResourceField } from "../packages/resources.ts";
-import { scanInstalledPackages, resolveInstalledVersions, formatAdvisoryReport } from "../adoption/advisories.ts";
-import { existsSync } from "node:fs";
-import { syncCatalog } from "../packages/catalog.ts";
-import { openDb, searchLocal, catalogList, getSyncMeta, latestVersion, dbPath } from "../packages/db.ts";
-import { generateIndex, indexPath, readIndex } from "../index/build-index.ts";
-import { NAME_RE, defaultPiBin } from "../packages/install.ts";
-import {
-	assertPackagePermission,
-	packageOperationClassification,
-	type MutationApproval,
-	type PackageOperation,
-	type SecuritySettingsPort,
-} from "../security/security.ts";
-import { runSelfUpdate, type SelfUpdateReport } from "../self-update/self-update.ts";
-import { generateSystemdUnit } from "@danypops/vehicle-server/service";
-import { resolvePackedPaths } from "../shared/paths.ts";
 
 /** A generated unit must never trust a bare "pi" resolving under systemd's
  * own restricted PATH just because it resolves in the shell that generated
@@ -47,10 +71,9 @@ function defaultPiBinForUnit(): string | undefined {
 	if (b !== "pi") return b; // explicit override already given
 	return Bun.which("pi") ?? undefined;
 }
-import {
-	SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT, NPM_REGISTRY_BASE, SEARCH_PAGE_SIZE, MIRROR_PAGE_DELAY_MS,
-} from "../shared/constants.ts";
-import { VERSION, buildVersionReport, formatVersionReport } from "../shared/version.ts";
+
+import { MIRROR_PAGE_DELAY_MS, NPM_REGISTRY_BASE, SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT, SEARCH_PAGE_SIZE } from "../shared/constants.ts";
+import { buildVersionReport, formatVersionReport, VERSION } from "../shared/version.ts";
 
 const SOURCE_RE = /^(npm:[A-Za-z0-9@._/-]+|git:[A-Za-z0-9@:._/-]+|https:\/\/[A-Za-z0-9@:._/?=&%~-]+)$/;
 
@@ -113,7 +136,12 @@ export interface CliDeps {
 		plan(manifestPath: string, options?: { prune?: boolean }): Promise<SetupPlan>;
 		apply(manifestPath: string, options?: { prune?: boolean }): Promise<SetupApplyResult>;
 	};
-	daemonService?: { install(source: string, approved?: boolean): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }> };
+	daemonService?: {
+		install(
+			source: string,
+			approved?: boolean,
+		): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }>;
+	};
 	piVersion?: { check(): Promise<PiVersionReport> };
 	selfUpdater?: { run(): Promise<SelfUpdateReport> };
 }
@@ -140,7 +168,20 @@ interface Flags {
 }
 
 function parseFlags(rest: string[]): { flags: Flags; pos: string[] } {
-	const flags: Flags = { json: false, limit: SEARCH_DEFAULT_LIMIT, cached: false, offline: false, approved: false, smoke: false, force: false, prune: false, machineLocal: false, noService: false, ecosystem: false, self: false };
+	const flags: Flags = {
+		json: false,
+		limit: SEARCH_DEFAULT_LIMIT,
+		cached: false,
+		offline: false,
+		approved: false,
+		smoke: false,
+		force: false,
+		prune: false,
+		machineLocal: false,
+		noService: false,
+		ecosystem: false,
+		self: false,
+	};
 	const pos: string[] = [];
 	for (let i = 0; i < rest.length; i++) {
 		const a = rest[i]!;
@@ -172,7 +213,7 @@ const fail = (out: string, code = 1): CliResult => ({ code, out });
 const usageErr = (out: string): CliResult => ({ code: 2, out });
 const evidenceLabel = (pkg: Pick<Pkg, "packageEvidence">): string => {
 	const evidence = pkg.packageEvidence;
-	if (!evidence || !evidence.verified) return "[keyword candidate]";
+	if (!evidence?.verified) return "[keyword candidate]";
 	return `[verified ${evidence.shape}]`;
 };
 
@@ -197,7 +238,10 @@ const PACKAGE_COMMAND_OPERATIONS: Record<string, PackageOperation | undefined> =
 
 function formatResourcesList(result: { global: PackageResources[]; project: PackageResources[] }): string {
 	let out = "";
-	for (const [scope, groups] of [["global", result.global], ["project", result.project]] as const) {
+	for (const [scope, groups] of [
+		["global", result.global],
+		["project", result.project],
+	] as const) {
 		if (groups.length === 0) continue;
 		out += `${scope}:\n`;
 		for (const group of groups) {
@@ -211,7 +255,8 @@ function formatResourcesList(result: { global: PackageResources[]; project: Pack
 }
 
 function formatPiVersionReport(report: PiVersionReport): string {
-	if (!report.current && !report.latest) return "pi version unknown (pi not found on PATH, and the latest-version check failed or was skipped)\n";
+	if (!report.current && !report.latest)
+		return "pi version unknown (pi not found on PATH, and the latest-version check failed or was skipped)\n";
 	let out = `pi ${report.current ?? "unknown"}`;
 	if (report.latest) out += ` (latest ${report.latest})`;
 	out += "\n";
@@ -224,10 +269,12 @@ function formatPiVersionReport(report: PiVersionReport): string {
 
 const commands: Record<string, { usage: string; run: Command }> = {
 	setup: {
-		usage: "packed setup export [path] [--force] [--machine-local] [--json] | packed setup update [manifest] [--json] | packed setup plan [manifest|--ecosystem] [--prune] [--json] | packed setup apply [manifest|--ecosystem] [--prune] [--approve] [--json]",
+		usage:
+			"packed setup export [path] [--force] [--machine-local] [--json] | packed setup update [manifest] [--json] | packed setup plan [manifest|--ecosystem] [--prune] [--json] | packed setup apply [manifest|--ecosystem] [--prune] [--approve] [--json]",
 		async run(_rest, d, flags, pos) {
 			const action = pos[0];
-			if (action !== "export" && action !== "update" && action !== "plan" && action !== "apply") return usageErr(`usage: ${commands["setup"]!.usage}\n`);
+			if (action !== "export" && action !== "update" && action !== "plan" && action !== "apply")
+				return usageErr(`usage: ${commands.setup!.usage}\n`);
 			// --ecosystem resolves to the curated @danypops starter manifest bundled
 			// in this same package -- no separate download, review, or trust surface
 			// beyond the npm package itself. Only meaningful for plan/apply.
@@ -257,7 +304,7 @@ const commands: Record<string, { usage: string; run: Command }> = {
 		usage: "packed publish setup [path] [--force] [--json] | packed publish status [path] [--json] [--open-browser]",
 		async run(_rest, d, flags, pos) {
 			const action = pos[0];
-			if (action !== "setup" && action !== "status") return usageErr(`usage: ${commands["publish"]!.usage}\n`);
+			if (action !== "setup" && action !== "status") return usageErr(`usage: ${commands.publish!.usage}\n`);
 			const path = resolve(pos[1] ?? ".");
 			const manager = d.publisher ?? new PublishManager(d.reg);
 			const report = action === "setup" ? await manager.setup(path, { force: flags.force }) : await manager.status(path);
@@ -281,7 +328,9 @@ const commands: Record<string, { usage: string; run: Command }> = {
 			const target = pos[0] ?? ".";
 			const report = d.daemon
 				? await d.daemon.score(target)
-				: d.scorer ? await d.scorer.score(target) : await scoreTarget(target, d.reg, d.packer);
+				: d.scorer
+					? await d.scorer.score(target)
+					: await scoreTarget(target, d.reg, d.packer);
 			return ok(formatAdoptionReport(report, flags.json));
 		},
 	},
@@ -309,25 +358,29 @@ const commands: Record<string, { usage: string; run: Command }> = {
 		usage: "packed search <query> [--offline] [--limit N] [--json]",
 		async run(_rest, d, flags, pos) {
 			const q = pos[0];
-			if (!q) return usageErr(`usage: ${commands["search"]!.usage}\n`);
+			if (!q) return usageErr(`usage: ${commands.search!.usage}\n`);
 			const limit = clampLimit(flags.limit, SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT);
 			// --offline: query the SQLite mirror only (apt-cache search analog)
 			if (flags.offline) {
-				let results;
+				let results: Pkg[];
 				if (d.daemon) {
 					results = (await d.daemon.search(q, limit, true)).results;
 				} else {
 					const db = openDb(dbPath(dataDirectory(d)));
-					try { results = searchLocal(db, q, limit); } finally { db.close(); }
+					try {
+						results = searchLocal(db, q, limit);
+					} finally {
+						db.close();
+					}
 				}
-				if (flags.json) return ok(JSON.stringify({ query: q, total: results.length, results, offline: true }) + "\n");
+				if (flags.json) return ok(`${JSON.stringify({ query: q, total: results.length, results, offline: true })}\n`);
 				if (results.length === 0) return ok(`no mirrored packages match "${q}" (run: packed mirror)\n`);
 				let out = `${results.length} mirrored package(s):\n\n`;
 				for (const p of results) out += `  ${p.name}@${p.version}  ${evidenceLabel(p)}\n    ${p.description ?? ""}\n`;
 				return ok(out);
 			}
 			const { results, total } = await d.reg.search(buildSearchQuery(q), limit);
-			if (flags.json) return ok(JSON.stringify({ query: q, total, results }) + "\n");
+			if (flags.json) return ok(`${JSON.stringify({ query: q, total, results })}\n`);
 			if (results.length === 0) return ok(`no pi packages found for "${q}"\n`);
 			let out = `${total} package(s) (showing ${results.length}):\n\n`;
 			for (const p of results) out += `  ${p.name}@${p.version}  ${evidenceLabel(p)}\n    ${p.description ?? ""}\n`;
@@ -339,25 +392,30 @@ const commands: Record<string, { usage: string; run: Command }> = {
 		usage: "packed mirror [--json]  (sync the upstream registry into the local SQLite index — the apt update analog)",
 		async run(_rest, d, flags) {
 			const n = d.daemon ? await d.daemon.mirror() : await syncCatalog(d.reg, dataDirectory(d));
-			if (flags.json) return ok(JSON.stringify({ synced: n }) + "\n");
+			if (flags.json) return ok(`${JSON.stringify({ synced: n })}\n`);
 			return ok(`mirrored ${n} packages into the local index\n`);
 		},
 	},
 
 	index: {
-		usage: "packed index build [--json] | packed index status [--json]  (local static adoption-scoring snapshot, npm-only -- createrepo/dpkg-scanpackages analog)",
+		usage:
+			"packed index build [--json] | packed index status [--json]  (local static adoption-scoring snapshot, npm-only -- createrepo/dpkg-scanpackages analog)",
 		async run(_rest, d, flags, pos) {
 			const action = pos[0];
-			if (action !== "build" && action !== "status") return usageErr(`usage: ${commands["index"]!.usage}\n`);
+			if (action !== "build" && action !== "status") return usageErr(`usage: ${commands.index!.usage}\n`);
 			if (action === "build") {
 				const index = d.daemon ? await d.daemon.indexBuild() : await generateIndex(d.reg, dataDirectory(d), indexPath(dataDirectory(d)));
-				if (flags.json) return ok(JSON.stringify(index) + "\n");
-				return ok(`generated a static index of ${index.packages.length} packages (generatedAt ${index.generatedAt})${index.truncated ? " -- truncated, the local catalog holds more entries than this run's bound" : ""}\n`);
+				if (flags.json) return ok(`${JSON.stringify(index)}\n`);
+				return ok(
+					`generated a static index of ${index.packages.length} packages (generatedAt ${index.generatedAt})${index.truncated ? " -- truncated, the local catalog holds more entries than this run's bound" : ""}\n`,
+				);
 			}
 			const status = d.daemon ? await d.daemon.index() : readIndex(indexPath(dataDirectory(d)));
-			if (flags.json) return ok(JSON.stringify(status ?? null) + "\n");
+			if (flags.json) return ok(`${JSON.stringify(status ?? null)}\n`);
 			if (!status) return ok("no local index generated yet -- run packed index build\n");
-			return ok(`local index: ${status.packages.length} packages, generated ${status.generatedAt}${status.truncated ? " (truncated)" : ""}\n`);
+			return ok(
+				`local index: ${status.packages.length} packages, generated ${status.generatedAt}${status.truncated ? " (truncated)" : ""}\n`,
+			);
 		},
 	},
 
@@ -365,13 +423,14 @@ const commands: Record<string, { usage: string; run: Command }> = {
 		usage: "packed info <name> [--json]",
 		async run(_rest, d, flags, pos) {
 			const name = pos[0];
-			if (!name) return usageErr(`usage: ${commands["info"]!.usage}\n`);
+			if (!name) return usageErr(`usage: ${commands.info!.usage}\n`);
 			const info = await d.reg.info(name);
-			if (flags.json) return ok(JSON.stringify(info) + "\n");
+			if (flags.json) return ok(`${JSON.stringify(info)}\n`);
 			let out = `${info.name}@${info.version}\n${info.description ?? ""}\n`;
 			if (info.repository) out += `repo: ${info.repository}\n`;
 			if (info.pi) out += `provides: ${Object.keys(info.pi).join(", ")}\n`;
-			if (info.packageEvidence) out += `shape: ${info.packageEvidence.shape}${info.packageEvidence.verified ? " (tarball verified)" : " (metadata only)"}\n`;
+			if (info.packageEvidence)
+				out += `shape: ${info.packageEvidence.shape}${info.packageEvidence.verified ? " (tarball verified)" : " (metadata only)"}\n`;
 			if (info.publication?.provenanceUrl) out += `provenance: ${info.publication.provenanceUrl}\n`;
 			out += `trusted publisher: ${info.publication?.trustedPublisher ?? "unknown"}\n`;
 			return ok(out);
@@ -381,42 +440,51 @@ const commands: Record<string, { usage: string; run: Command }> = {
 	updates: {
 		usage: "packed updates [--project <path>] [--json]  (from the local mirror — run `packed mirror` first)",
 		async run(_rest, d, flags) {
-			let updates;
+			let updates: UpdateEntry[];
 			if (flags.project) {
 				updates = d.daemon
 					? await d.daemon.updatesForProject(flags.project)
 					: await (async () => {
-						const db = openDb(dbPath(dataDirectory(d)));
-						try { return checkUpdates((name) => latestVersion(db, name), readInstalledPackagesAcrossScopes(d.piHome, flags.project)); } finally { db.close(); }
-					})();
+							const db = openDb(dbPath(dataDirectory(d)));
+							try {
+								return checkUpdates((name) => latestVersion(db, name), readInstalledPackagesAcrossScopes(d.piHome, flags.project));
+							} finally {
+								db.close();
+							}
+						})();
 			} else if (d.daemon) {
 				updates = await d.daemon.updates();
 			} else {
 				const db = openDb(dbPath(dataDirectory(d)));
-				try { updates = checkUpdates((name) => latestVersion(db, name), readInstalledPackages(d.piHome)); } finally { db.close(); }
+				try {
+					updates = checkUpdates((name) => latestVersion(db, name), readInstalledPackages(d.piHome));
+				} finally {
+					db.close();
+				}
 			}
 			if (flags.json) {
-				return ok(JSON.stringify({ checkedAt: new Date().toISOString(), updates }) + "\n");
+				return ok(`${JSON.stringify({ checkedAt: new Date().toISOString(), updates })}\n`);
 			}
 			if (updates.length === 0) return ok("all pi packages up to date (per the local mirror)\n");
 			let out = `${updates.length} update(s) available:\n\n`;
 			for (const u of updates) out += `  ${u.name}${u.scope ? ` [${u.scope}]` : ""}  ${u.installed} → ${u.latest}\n`;
-			return ok(out + "\nrun: pi update --extensions\n");
+			return ok(`${out}\nrun: pi update --extensions\n`);
 		},
 	},
 
 	pi: {
 		usage: "packed pi status [--json]",
 		async run(_rest, d, flags, pos) {
-			if (pos[0] !== "status") return usageErr(`usage: ${commands["pi"]!.usage}\n`);
+			if (pos[0] !== "status") return usageErr(`usage: ${commands.pi!.usage}\n`);
 			const report = d.daemon ? await d.daemon.piStatus() : await (d.piVersion ?? { check: checkPiVersion }).check();
-			if (flags.json) return ok(JSON.stringify(report) + "\n");
+			if (flags.json) return ok(`${JSON.stringify(report)}\n`);
 			return ok(formatPiVersionReport(report));
 		},
 	},
 
 	advisories: {
-		usage: "packed advisories [name] [--json]  (no lockfile required; scans installed npm-sourced Pi packages against npm's bulk advisory endpoint)",
+		usage:
+			"packed advisories [name] [--json]  (no lockfile required; scans installed npm-sourced Pi packages against npm's bulk advisory endpoint)",
 		async run(_rest, d, flags, pos) {
 			const name = pos[0];
 			const report = d.daemon ? await d.daemon.advisoriesScan(name) : await scanInstalledPackages(resolveInstalledVersions(d.piHome, name));
@@ -425,18 +493,19 @@ const commands: Record<string, { usage: string; run: Command }> = {
 	},
 
 	resources: {
-		usage: "packed resources list [--project <path>] [--json] | packed resources toggle <source> <field> <path> <on|off> [--project <path>] [--approve] [--json]",
+		usage:
+			"packed resources list [--project <path>] [--json] | packed resources toggle <source> <field> <path> <on|off> [--project <path>] [--approve] [--json]",
 		async run(_rest, d, flags, pos) {
 			const action = pos[0];
 			if (action === "list") {
 				const result = d.daemon ? await d.daemon.resourcesList(flags.project) : listPackageResources(d.piHome, flags.project);
-				if (flags.json) return ok(JSON.stringify(result) + "\n");
+				if (flags.json) return ok(`${JSON.stringify(result)}\n`);
 				return ok(formatResourcesList(result));
 			}
 			if (action === "toggle") {
 				const [source, field, path, state] = [pos[1] ?? "", pos[2] ?? "", pos[3] ?? "", pos[4] ?? ""];
 				if (!source || !RESOURCE_FIELDS.includes(field as ResourceField) || !path || (state !== "on" && state !== "off")) {
-					return usageErr(`usage: ${commands["resources"]!.usage}\n`);
+					return usageErr(`usage: ${commands.resources!.usage}\n`);
 				}
 				const enabled = state === "on";
 				try {
@@ -457,7 +526,7 @@ const commands: Record<string, { usage: string; run: Command }> = {
 					return flags.json ? fail(`${JSON.stringify({ ok: false, source, field, path, enabled, error })}\n`) : fail(`${error}\n`);
 				}
 			}
-			return usageErr(`usage: ${commands["resources"]!.usage}\n`);
+			return usageErr(`usage: ${commands.resources!.usage}\n`);
 		},
 	},
 
@@ -465,7 +534,7 @@ const commands: Record<string, { usage: string; run: Command }> = {
 		usage: "packed installed [--json]",
 		async run(_rest, d, flags) {
 			const installed = d.daemon ? await d.daemon.installed() : readInstalledPackages(d.piHome);
-			if (flags.json) return ok(JSON.stringify(installed) + "\n");
+			if (flags.json) return ok(`${JSON.stringify(installed)}\n`);
 			return ok(installed.map((p) => `  ${p.name}@${p.pinned ?? p.installed ?? "?"}\n`).join(""));
 		},
 	},
@@ -473,7 +542,7 @@ const commands: Record<string, { usage: string; run: Command }> = {
 	catalog: {
 		usage: "packed catalog [--json]",
 		async run(_rest, d, flags) {
-			let snapshot;
+			let snapshot: { fetchedAt?: string; sha256?: string; packages: Pkg[] };
 			if (d.daemon) {
 				snapshot = await d.daemon.catalog();
 			} else {
@@ -481,9 +550,11 @@ const commands: Record<string, { usage: string; run: Command }> = {
 				try {
 					const meta = getSyncMeta(db);
 					snapshot = { fetchedAt: meta?.fetchedAt, sha256: meta?.sha256, packages: catalogList(db) };
-				} finally { db.close(); }
+				} finally {
+					db.close();
+				}
 			}
-			if (flags.json) return ok(JSON.stringify(snapshot) + "\n");
+			if (flags.json) return ok(`${JSON.stringify(snapshot)}\n`);
 			let out = `${snapshot.packages.length} packages in the local index`;
 			if (snapshot.fetchedAt && snapshot.sha256) out += ` (synced ${snapshot.fetchedAt}, sha256:${snapshot.sha256.slice(0, 12)}…)`;
 			out += "\n\n";
@@ -496,7 +567,7 @@ const commands: Record<string, { usage: string; run: Command }> = {
 		usage: "packed install npm:<pkg>[@ver] | git:<host>/<owner>/<repo>[@ref] | https://… [--no-service] [--json]",
 		async run(_rest, d, flags, pos) {
 			const source = pos[0] ?? "";
-			if (!SOURCE_RE.test(source)) return usageErr(`usage: ${commands["install"]!.usage}\n`);
+			if (!SOURCE_RE.test(source)) return usageErr(`usage: ${commands.install!.usage}\n`);
 			try {
 				const output = await d.inst.install(source, { approved: flags.approved });
 				// A package's own persistent-service registration piggybacks on the same
@@ -520,7 +591,8 @@ const commands: Record<string, { usage: string; run: Command }> = {
 				if (flags.json) return ok(`${JSON.stringify({ ok: true, source, output, ...(serviceInstall ? { serviceInstall } : {}) })}\n`);
 				let human = `${output}\n`;
 				if (serviceInstall?.ok) human += `${serviceInstall.output}\n`;
-				else if (serviceInstall && !serviceInstall.ok) human += `note: detected a persistent-service daemon but could not register it: ${serviceInstall.output}\n`;
+				else if (serviceInstall && !serviceInstall.ok)
+					human += `note: detected a persistent-service daemon but could not register it: ${serviceInstall.output}\n`;
 				return ok(human);
 			} catch (e) {
 				const error = e instanceof Error ? e.message : String(e);
@@ -530,7 +602,8 @@ const commands: Record<string, { usage: string; run: Command }> = {
 	},
 
 	"install-service": {
-		usage: "packed install-service npm:<pkg>[@ver] --approve [--json]  (registers the package's own daemon as a persistent login/boot service; see its packed.daemonService manifest)",
+		usage:
+			"packed install-service npm:<pkg>[@ver] --approve [--json]  (registers the package's own daemon as a persistent login/boot service; see its packed.daemonService manifest)",
 		async run(_rest, d, flags, pos) {
 			const source = pos[0] ?? "";
 			if (!SOURCE_RE.test(source)) return usageErr(`usage: ${commands["install-service"]!.usage}\n`);
@@ -550,14 +623,12 @@ const commands: Record<string, { usage: string; run: Command }> = {
 		async run(_rest, d, flags, pos) {
 			const requested = pos[0];
 			if (requested !== undefined && requested !== "always" && requested !== "never") {
-				return usageErr(`usage: ${commands["security"]!.usage}\n`);
+				return usageErr(`usage: ${commands.security!.usage}\n`);
 			}
 			const settings = requested
 				? await d.security.setMutationApproval(requested as MutationApproval, { approved: flags.approved })
 				: await d.security.security();
-			return flags.json
-				? ok(`${JSON.stringify(settings)}\n`)
-				: ok(`package mutation approval: ${settings.mutationApproval}\n`);
+			return flags.json ? ok(`${JSON.stringify(settings)}\n`) : ok(`package mutation approval: ${settings.mutationApproval}\n`);
 		},
 	},
 
@@ -574,11 +645,14 @@ const commands: Record<string, { usage: string; run: Command }> = {
 				if (!d.selfUpdater) return fail("update --self requires a running packed daemon\n");
 				const report = await d.selfUpdater.run();
 				if (flags.json) return report.ok ? ok(`${JSON.stringify(report)}\n`) : fail(`${JSON.stringify(report)}\n`);
-				const transition = report.latestVersion && report.previousVersion !== report.latestVersion ? ` (${report.previousVersion} → ${report.latestVersion})` : "";
+				const transition =
+					report.latestVersion && report.previousVersion !== report.latestVersion
+						? ` (${report.previousVersion} → ${report.latestVersion})`
+						: "";
 				return report.ok ? ok(`${report.message}${transition}\n`) : fail(`${report.message}\n`);
 			}
 			const source = pos[0] ?? "";
-			if (!SOURCE_RE.test(source)) return usageErr(`usage: ${commands["update"]!.usage}\n`);
+			if (!SOURCE_RE.test(source)) return usageErr(`usage: ${commands.update!.usage}\n`);
 			try {
 				const outcome = await d.inst.update(source, { approved: flags.approved });
 				if (flags.json) return ok(`${JSON.stringify({ ok: true, source, ...outcome })}\n`);
@@ -605,7 +679,7 @@ const commands: Record<string, { usage: string; run: Command }> = {
 		usage: "packed remove <name> [--approve] [--json]  (bare npm name, e.g. pi-lsp or @scope/pkg)",
 		async run(_rest, d, flags, pos) {
 			const name = pos[0] ?? "";
-			if (!NAME_RE.test(name)) return usageErr(`usage: ${commands["remove"]!.usage}\n`);
+			if (!NAME_RE.test(name)) return usageErr(`usage: ${commands.remove!.usage}\n`);
 			try {
 				const output = await d.inst.remove(`npm:${name}`, { approved: flags.approved });
 				return flags.json ? ok(`${JSON.stringify({ ok: true, name, output })}\n`) : ok(`${output}\n`);
@@ -632,9 +706,9 @@ const commands: Record<string, { usage: string; run: Command }> = {
 			const daemonVersion = d.daemonVersionCheck
 				? await d.daemonVersionCheck()
 				: await (async () => {
-					const { probe } = await import("../daemon/client.ts");
-					return (await probe())?.version;
-				})();
+						const { probe } = await import("../daemon/client.ts");
+						return (await probe())?.version;
+					})();
 			const report = buildVersionReport(VERSION, daemonVersion);
 			return ok(json ? `${JSON.stringify(report)}\n` : formatVersionReport(report));
 		},
@@ -649,7 +723,7 @@ export function renderUnit(execPath: string, cliPath: string, piBin?: string): s
 	// systemd does not read shell rc files: PI_BIN must be explicit so the
 	// daemon's install/remove execs can find the pi binary.
 	const env: Record<string, string> = { PI_PACKED_IDLE_SECS: "0" };
-	if (piBin) env["PI_BIN"] = piBin;
+	if (piBin) env.PI_BIN = piBin;
 	return generateSystemdUnit({
 		name: "pi-packed",
 		displayName: "pi-packed package service (Pi agent)",
@@ -673,14 +747,15 @@ export async function cliRun(args: string[], d: CliDeps): Promise<CliResult> {
 	if (!cmd) return usageErr(`unknown command "${name}"\n${USAGE}`);
 	const { flags, pos } = parseFlags(rest);
 	try {
-		const validMutationInput = name === "install" || name === "update" || name === "install-service"
-			? SOURCE_RE.test(pos[0] ?? "")
-			: name === "remove" ? NAME_RE.test(pos[0] ?? "")
-				: name === "security" ? (pos[0] === undefined || pos[0] === "always" || pos[0] === "never")
-					: true;
-		const operation = name === "security"
-			? (pos[0] === undefined ? "security.read" : "security.write")
-			: PACKAGE_COMMAND_OPERATIONS[name];
+		const validMutationInput =
+			name === "install" || name === "update" || name === "install-service"
+				? SOURCE_RE.test(pos[0] ?? "")
+				: name === "remove"
+					? NAME_RE.test(pos[0] ?? "")
+					: name === "security"
+						? pos[0] === undefined || pos[0] === "always" || pos[0] === "never"
+						: true;
+		const operation = name === "security" ? (pos[0] === undefined ? "security.read" : "security.write") : PACKAGE_COMMAND_OPERATIONS[name];
 		if (operation && validMutationInput) {
 			const classification = packageOperationClassification(operation);
 			if (classification === "code-execution" || classification === "settings-mutation" || classification === "security-mutation") {
@@ -742,7 +817,9 @@ async function runPublishInteractive(path: string, reg: Registry, openBrowserAut
 		const accessUrl = npmWebUrl(report.packageName);
 		if (await confirmInteractive(`Configure npm Trusted Publisher for ${report.packageName} now?`)) {
 			if (openBrowserAuto) await openBrowser(accessUrl);
-			await waitForEnter(`${openBrowserAuto ? "Opened (or open manually)" : "Open this URL"}: ${accessUrl}\nConfigure "Trusted publisher" for the GitHub Actions workflow there, then press Enter to continue... `);
+			await waitForEnter(
+				`${openBrowserAuto ? "Opened (or open manually)" : "Open this URL"}: ${accessUrl}\nConfigure "Trusted publisher" for the GitHub Actions workflow there, then press Enter to continue... `,
+			);
 			report = await manager.status(path);
 		}
 	}
@@ -759,7 +836,8 @@ if (import.meta.main) {
 		const { migrateLegacyPackedState, resolvePackedPaths } = await import("../shared/paths.ts");
 		const { dirname } = await import("node:path");
 		const { defaultPiHome } = await import("../packages/installed.ts");
-		const { connectPackageDaemon, DaemonBackedSecurity, DaemonBackedInstaller, DaemonBackedDaemonServiceInstaller, resolveRegistry } = await import("../daemon/client.ts");
+		const { connectPackageDaemon, DaemonBackedSecurity, DaemonBackedInstaller, DaemonBackedDaemonServiceInstaller, resolveRegistry } =
+			await import("../daemon/client.ts");
 		const paths = resolvePackedPaths();
 		migrateLegacyPackedState(paths);
 		const dir = paths.stateDirectory;
@@ -779,13 +857,13 @@ if (import.meta.main) {
 			dataDir: dirname(paths.database),
 			piHome: defaultPiHome(),
 			selfUpdater: {
-				run: () => runSelfUpdate({
-					registry: reg,
-					isServiceInstalled: () => existsSync(paths.serviceDescriptor),
-					restartService: process.platform === "linux"
-						? () => runInherited(["systemctl", "--user", "restart", "pi-packed.service"])
-						: undefined,
-				}),
+				run: () =>
+					runSelfUpdate({
+						registry: reg,
+						isServiceInstalled: () => existsSync(paths.serviceDescriptor),
+						restartService:
+							process.platform === "linux" ? () => runInherited(["systemctl", "--user", "restart", "pi-packed.service"]) : undefined,
+					}),
 			},
 		});
 		const interactive = process.stdin.isTTY && process.stdout.isTTY && !args.includes("--json");

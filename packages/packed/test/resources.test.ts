@@ -3,12 +3,14 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthenticatedRpcClient } from "@danypops/vehicle-client/rpc-client";
-import { listPackageResources, toggleResource } from "../src/packages/resources.ts";
 import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/daemon/service.ts";
-import type { Installer, Registry, SearchPage, PkgInfo } from "../src/shared/ports.ts";
+import { listPackageResources, toggleResource } from "../src/packages/resources.ts";
+import type { Installer, PkgInfo, Registry, SearchPage } from "../src/shared/ports.ts";
 
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(() => {
+	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 
 function piHome(settingsPackages: unknown[]): string {
 	const root = mkdtempSync(join(tmpdir(), "packed-resources-"));
@@ -30,9 +32,16 @@ function installNpmPackage(home: string, name: string, pi: Record<string, unknow
 describe("listPackageResources", () => {
 	it("lists an npm package's discovered resources with the default all-enabled state", () => {
 		const home = piHome(["npm:pi-demo"]);
-		installNpmPackage(home, "pi-demo", { extensions: ["extensions/*.ts"], skills: ["skills/*/SKILL.md"] }, {
-			"extensions/one.ts": "", "extensions/two.ts": "", "skills/review/SKILL.md": "",
-		});
+		installNpmPackage(
+			home,
+			"pi-demo",
+			{ extensions: ["extensions/*.ts"], skills: ["skills/*/SKILL.md"] },
+			{
+				"extensions/one.ts": "",
+				"extensions/two.ts": "",
+				"skills/review/SKILL.md": "",
+			},
+		);
 
 		const { global, project } = listPackageResources(home);
 
@@ -109,21 +118,45 @@ describe("listPackageResources", () => {
 });
 
 class NoopRegistry implements Registry {
-	async search(): Promise<SearchPage> { return { results: [], total: 0 }; }
-	async searchPage(): Promise<SearchPage> { return { results: [], total: 0 }; }
-	async searchAll() { return []; }
-	async info(name: string): Promise<PkgInfo> { return { name, version: "1.0.0" }; }
+	async search(): Promise<SearchPage> {
+		return { results: [], total: 0 };
+	}
+	async searchPage(): Promise<SearchPage> {
+		return { results: [], total: 0 };
+	}
+	async searchAll() {
+		return [];
+	}
+	async info(name: string): Promise<PkgInfo> {
+		return { name, version: "1.0.0" };
+	}
 }
 
 class NoopInstaller implements Installer {
-	async install() { return "ok"; }
-	async remove() { return "ok"; }
-	async update() { return { output: "ok", reloadRequired: false, alreadyUpToDate: true, pinned: false }; }
+	async install() {
+		return "ok";
+	}
+	async remove() {
+		return "ok";
+	}
+	async update() {
+		return { output: "ok", reloadRequired: false, alreadyUpToDate: true, pinned: false };
+	}
 }
 
 function rpcClient(piHome: string) {
-	const app = createApp({ reg: new NoopRegistry(), inst: new NoopInstaller(), token: "test-token", stateDir: mkdtempSync(join(tmpdir(), "packed-resources-state-")), dataDir: mkdtempSync(join(tmpdir(), "packed-resources-data-")), piHome });
-	return new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", { label: "Packed", transport: (request) => app.fetch(request) });
+	const app = createApp({
+		reg: new NoopRegistry(),
+		inst: new NoopInstaller(),
+		token: "test-token",
+		stateDir: mkdtempSync(join(tmpdir(), "packed-resources-state-")),
+		dataDir: mkdtempSync(join(tmpdir(), "packed-resources-data-")),
+		piHome,
+	});
+	return new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", {
+		label: "Packed",
+		transport: (request) => app.fetch(request),
+	});
 }
 
 describe("resources.list / resources.toggle (daemon RPC wiring)", () => {
@@ -142,9 +175,17 @@ describe("resources.list / resources.toggle (daemon RPC wiring)", () => {
 		installNpmPackage(home, "pi-demo", { extensions: ["extensions/*.ts"] }, { "extensions/one.ts": "" });
 		const client = rpcClient(home);
 
-		await expect(client.call("resources.toggle", { source: "npm:pi-demo", field: "extensions", path: "extensions/one.ts", enabled: false })).rejects.toThrow();
+		await expect(
+			client.call("resources.toggle", { source: "npm:pi-demo", field: "extensions", path: "extensions/one.ts", enabled: false }),
+		).rejects.toThrow();
 
-		const approved = await client.call("resources.toggle", { source: "npm:pi-demo", field: "extensions", path: "extensions/one.ts", enabled: false, approved: true });
+		const approved = await client.call("resources.toggle", {
+			source: "npm:pi-demo",
+			field: "extensions",
+			path: "extensions/one.ts",
+			enabled: false,
+			approved: true,
+		});
 		expect(approved.ok).toBe(true);
 		const { global } = await client.call("resources.list", {});
 		expect(global[0]?.extensions).toEqual([{ path: "extensions/one.ts", enabled: false }]);
@@ -155,7 +196,15 @@ describe("resources.list / resources.toggle (daemon RPC wiring)", () => {
 		installNpmPackage(home, "pi-demo", { extensions: ["extensions/*.ts"] }, { "extensions/one.ts": "" });
 		const client = rpcClient(home);
 
-		await expect(client.call("resources.toggle", { source: "npm:pi-demo", field: "extensions", path: "../../etc/passwd", enabled: false, approved: true })).rejects.toThrow();
+		await expect(
+			client.call("resources.toggle", {
+				source: "npm:pi-demo",
+				field: "extensions",
+				path: "../../etc/passwd",
+				enabled: false,
+				approved: true,
+			}),
+		).rejects.toThrow();
 	});
 });
 
@@ -187,7 +236,13 @@ describe("toggleResource", () => {
 
 	it("fails closed with an error, not a throw, when the package is not in settings", () => {
 		const home = piHome(["npm:other"]);
-		const result = toggleResource({ settingsPath: join(home, "settings.json"), source: "npm:pi-demo", field: "extensions", path: "extensions/one.ts", enabled: false });
+		const result = toggleResource({
+			settingsPath: join(home, "settings.json"),
+			source: "npm:pi-demo",
+			field: "extensions",
+			path: "extensions/one.ts",
+			enabled: false,
+		});
 		expect(result.ok).toBe(false);
 		expect(result.error).toContain("not found");
 	});

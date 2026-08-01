@@ -1,3 +1,4 @@
+import type { PackageSummary as Pkg, PackageInfo as PkgInfo } from "@danypops/packed/protocol";
 import type { AgentToolResult, Theme } from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth } from "@earendil-works/pi-tui";
 import {
@@ -10,7 +11,6 @@ import {
 	TOOL_DETAILS_MAX_SERIALIZED_CHARACTERS,
 	TOOL_MODEL_CONTENT_MAX_CHARACTERS,
 } from "./constants.js";
-import type { PackageInfo as PkgInfo, PackageSummary as Pkg } from "@danypops/packed/protocol";
 
 const DETAILS_VERSION = 2 as const;
 const MUTATION_OPERATIONS = new Set(["install", "update", "remove"]);
@@ -149,8 +149,12 @@ export function createInfoDetails(info: PkgInfo): InfoToolDetails {
 			...(info.homepage ? { homepage: safePackageTarget(info.homepage) } : {}),
 			...(info.repository ? { repository: safePackageTarget(info.repository) } : {}),
 			...(info.license ? { license: bounded(info.license, TOOL_DETAILS_MAX_DESCRIPTION_CHARACTERS) } : {}),
-			keywords: (info.keywords ?? []).slice(0, TOOL_DETAILS_MAX_KEYWORDS).map((keyword) => bounded(keyword, TOOL_DETAILS_MAX_DESCRIPTION_CHARACTERS)),
-			capabilities: Object.keys(info.pi ?? {}).slice(0, TOOL_DETAILS_MAX_CAPABILITIES).map((name) => bounded(name, TOOL_DETAILS_MAX_DESCRIPTION_CHARACTERS)),
+			keywords: (info.keywords ?? [])
+				.slice(0, TOOL_DETAILS_MAX_KEYWORDS)
+				.map((keyword) => bounded(keyword, TOOL_DETAILS_MAX_DESCRIPTION_CHARACTERS)),
+			capabilities: Object.keys(info.pi ?? {})
+				.slice(0, TOOL_DETAILS_MAX_CAPABILITIES)
+				.map((name) => bounded(name, TOOL_DETAILS_MAX_DESCRIPTION_CHARACTERS)),
 			...(info.publication?.provenanceUrl ? { provenance: safePackageTarget(info.publication.provenanceUrl) } : {}),
 			trustedPublisher: info.publication?.trustedPublisher ?? "unknown",
 		},
@@ -191,7 +195,15 @@ export function parsePackageToolDetails(value: unknown): PackageToolDetails | un
 		const candidate = value as Record<string, unknown>;
 		if (candidate.version !== DETAILS_VERSION || typeof candidate.kind !== "string") return undefined;
 		if (candidate.kind === "search") {
-			if (candidate.operation !== "search" || !isShortString(candidate.query, TOOL_DETAILS_MAX_DESCRIPTION_CHARACTERS) || typeof candidate.total !== "number" || !Number.isSafeInteger(candidate.total) || candidate.total < 0 || typeof candidate.truncated !== "boolean") return undefined;
+			if (
+				candidate.operation !== "search" ||
+				!isShortString(candidate.query, TOOL_DETAILS_MAX_DESCRIPTION_CHARACTERS) ||
+				typeof candidate.total !== "number" ||
+				!Number.isSafeInteger(candidate.total) ||
+				candidate.total < 0 ||
+				typeof candidate.truncated !== "boolean"
+			)
+				return undefined;
 			if (!Array.isArray(candidate.items) || candidate.items.length > TOOL_DETAILS_MAX_PACKAGES) return undefined;
 			if (!candidate.items.every((item) => isPackageSummary(item))) return undefined;
 			return value as SearchToolDetails;
@@ -199,8 +211,19 @@ export function parsePackageToolDetails(value: unknown): PackageToolDetails | un
 		if (candidate.kind === "info") {
 			if (candidate.operation !== "info" || !candidate.package || typeof candidate.package !== "object") return undefined;
 			const pkg = candidate.package as Record<string, unknown>;
-			if (!isPackageSummary(pkg) || !Array.isArray(pkg.keywords) || pkg.keywords.length > TOOL_DETAILS_MAX_KEYWORDS || !pkg.keywords.every((item) => isShortString(item, TOOL_DETAILS_MAX_DESCRIPTION_CHARACTERS))) return undefined;
-			if (!Array.isArray(pkg.capabilities) || pkg.capabilities.length > TOOL_DETAILS_MAX_CAPABILITIES || !pkg.capabilities.every((item) => isShortString(item, TOOL_DETAILS_MAX_DESCRIPTION_CHARACTERS))) return undefined;
+			if (
+				!isPackageSummary(pkg) ||
+				!Array.isArray(pkg.keywords) ||
+				pkg.keywords.length > TOOL_DETAILS_MAX_KEYWORDS ||
+				!pkg.keywords.every((item) => isShortString(item, TOOL_DETAILS_MAX_DESCRIPTION_CHARACTERS))
+			)
+				return undefined;
+			if (
+				!Array.isArray(pkg.capabilities) ||
+				pkg.capabilities.length > TOOL_DETAILS_MAX_CAPABILITIES ||
+				!pkg.capabilities.every((item) => isShortString(item, TOOL_DETAILS_MAX_DESCRIPTION_CHARACTERS))
+			)
+				return undefined;
 			for (const field of ["homepage", "repository", "license", "provenance"] as const) {
 				if (pkg[field] !== undefined && !isShortString(pkg[field])) return undefined;
 			}
@@ -210,7 +233,8 @@ export function parsePackageToolDetails(value: unknown): PackageToolDetails | un
 		if (candidate.kind === "mutation") {
 			if (typeof candidate.operation !== "string" || !MUTATION_OPERATIONS.has(candidate.operation)) return undefined;
 			if (typeof candidate.status !== "string" || !MUTATION_STATUSES.has(candidate.status)) return undefined;
-			if (!isShortString(candidate.target) || !isShortString(candidate.output) || typeof candidate.reloadRequired !== "boolean") return undefined;
+			if (!isShortString(candidate.target) || !isShortString(candidate.output) || typeof candidate.reloadRequired !== "boolean")
+				return undefined;
 			return value as MutationToolDetails;
 		}
 	} catch {
@@ -222,15 +246,21 @@ export function parsePackageToolDetails(value: unknown): PackageToolDetails | un
 function isPackageSummary(value: unknown): boolean {
 	if (!value || typeof value !== "object") return false;
 	const item = value as Record<string, unknown>;
-	return isShortString(item.name, TOOL_DETAILS_MAX_DESCRIPTION_CHARACTERS)
-		&& isShortString(item.version, TOOL_DETAILS_MAX_DESCRIPTION_CHARACTERS)
-		&& isShortString(item.description, TOOL_DETAILS_MAX_DESCRIPTION_CHARACTERS)
-		&& typeof item.shape === "string" && PACKAGE_SHAPES.has(item.shape)
-		&& typeof item.verified === "boolean";
+	return (
+		isShortString(item.name, TOOL_DETAILS_MAX_DESCRIPTION_CHARACTERS) &&
+		isShortString(item.version, TOOL_DETAILS_MAX_DESCRIPTION_CHARACTERS) &&
+		isShortString(item.description, TOOL_DETAILS_MAX_DESCRIPTION_CHARACTERS) &&
+		typeof item.shape === "string" &&
+		PACKAGE_SHAPES.has(item.shape) &&
+		typeof item.verified === "boolean"
+	);
 }
 
 function contentFallback(result: AgentToolResult<unknown>): string {
-	return result.content.filter((item) => item.type === "text").map((item) => item.text).join("\n");
+	return result.content
+		.filter((item) => item.type === "text")
+		.map((item) => item.text)
+		.join("\n");
 }
 
 export function renderPackageToolCall(label: string, args: Record<string, unknown>, theme: Theme) {
@@ -255,9 +285,13 @@ export function renderPackageToolResult(
 				const heading = `${theme.bold(String(details.total))} packages · showing ${details.items.length}${details.truncated ? " · bounded" : ""}`;
 				const rows = shown.map((pkg) => {
 					const evidence = pkg.verified ? ` [verified ${pkg.shape}]` : " [keyword candidate]";
-					return truncateToWidth(`${theme.fg("accent", `${pkg.name}@${pkg.version}`)}${theme.fg("muted", evidence)}${options.expanded && pkg.description ? ` — ${pkg.description}` : ""}`, safeWidth);
+					return truncateToWidth(
+						`${theme.fg("accent", `${pkg.name}@${pkg.version}`)}${theme.fg("muted", evidence)}${options.expanded && pkg.description ? ` — ${pkg.description}` : ""}`,
+						safeWidth,
+					);
 				});
-				if (!options.expanded && details.items.length > shown.length) rows.push(theme.fg("muted", `… ${details.items.length - shown.length} more`));
+				if (!options.expanded && details.items.length > shown.length)
+					rows.push(theme.fg("muted", `… ${details.items.length - shown.length} more`));
 				return [truncateToWidth(heading, safeWidth), ...rows];
 			}
 			if (details.kind === "info") {
@@ -276,9 +310,7 @@ export function renderPackageToolResult(
 				return lines.filter(Boolean).map((line) => truncateToWidth(line, safeWidth));
 			}
 			const statusColor = details.status === "succeeded" ? "success" : "warning";
-			const lines = [
-				`${theme.fg(statusColor, details.status === "succeeded" ? "✓" : "○")} ${details.operation} ${details.target}`,
-			];
+			const lines = [`${theme.fg(statusColor, details.status === "succeeded" ? "✓" : "○")} ${details.operation} ${details.target}`];
 			if (options.expanded && details.output) lines.push(details.output);
 			if (details.reloadRequired) lines.push(theme.fg("warning", "Reload Pi with /reload to activate the update."));
 			return lines.map((line) => truncateToWidth(line, safeWidth));

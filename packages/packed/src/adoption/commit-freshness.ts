@@ -7,7 +7,10 @@
  */
 import { runBounded } from "../publish/publish.ts";
 import {
-	GITHUB_MAX_TOTAL_BACKOFF_MS, GITHUB_RETRY_MAX_ATTEMPTS, GITHUB_SECONDARY_RATE_LIMIT_FALLBACK_MS, GITHUB_TRANSIENT_BASE_DELAY_MS,
+	GITHUB_MAX_TOTAL_BACKOFF_MS,
+	GITHUB_RETRY_MAX_ATTEMPTS,
+	GITHUB_SECONDARY_RATE_LIMIT_FALLBACK_MS,
+	GITHUB_TRANSIENT_BASE_DELAY_MS,
 } from "../shared/constants.ts";
 import { createLogger } from "../shared/log.ts";
 
@@ -25,7 +28,7 @@ const GITHUB_REPO_PATTERN = /^(?:git\+)?(?:https?:\/\/|git:\/\/|git@)(?:www\.)?g
 function parseGithubRepo(repository: string | undefined): { owner: string; repo: string } | undefined {
 	if (!repository) return undefined;
 	const match = GITHUB_REPO_PATTERN.exec(repository.trim());
-	return match && match[1] && match[2] ? { owner: match[1], repo: match[2] } : undefined;
+	return match?.[1] && match[2] ? { owner: match[1], repo: match[2] } : undefined;
 }
 
 /** Seconds to wait before the next attempt, or undefined when the response
@@ -107,13 +110,21 @@ function packedUserAgent(): string {
 export async function lastLocalCommitAt(root: string, directory?: string): Promise<string | undefined> {
 	const args = ["git", "-C", root, "log", "-1", "--format=%cI"];
 	if (directory) args.push("--", directory);
-	const result = await runBounded(args).catch((): { code: number; stdout: string; stderr: string } => ({ code: 1, stdout: "", stderr: "" }));
+	const result = await runBounded(args).catch((): { code: number; stdout: string; stderr: string } => ({
+		code: 1,
+		stdout: "",
+		stderr: "",
+	}));
 	if (result.code !== 0) return undefined;
 	const date = result.stdout.trim();
 	return date && Number.isFinite(Date.parse(date)) ? date : undefined;
 }
 
-export type FetchGithubLastCommitAt = (repository: string | undefined, directory?: string, timeoutMs?: number) => Promise<string | undefined>;
+export type FetchGithubLastCommitAt = (
+	repository: string | undefined,
+	directory?: string,
+	timeoutMs?: number,
+) => Promise<string | undefined>;
 
 /**
  * Bounded, self-throttling, GitHub-only commit-date lookup for a candidate
@@ -136,10 +147,14 @@ export function createGithubLastCommitAt(baseUrl: string = GITHUB_API_BASE): Fet
 		const params = new URLSearchParams({ per_page: "1" });
 		if (directory) params.set("path", directory);
 		try {
-			const res = await fetchGithubWithBackoff(`${baseUrl}/repos/${parsed.owner}/${parsed.repo}/commits?${params}`, {
-				headers: { accept: "application/vnd.github+json", "user-agent": packedUserAgent() },
-			}, timeoutMs);
-			if (!res || !res.ok) return undefined;
+			const res = await fetchGithubWithBackoff(
+				`${baseUrl}/repos/${parsed.owner}/${parsed.repo}/commits?${params}`,
+				{
+					headers: { accept: "application/vnd.github+json", "user-agent": packedUserAgent() },
+				},
+				timeoutMs,
+			);
+			if (!res?.ok) return undefined;
 			const commits = (await res.json()) as Array<{ commit?: { committer?: { date?: unknown }; author?: { date?: unknown } } }>;
 			const date = commits[0]?.commit?.committer?.date ?? commits[0]?.commit?.author?.date;
 			return typeof date === "string" && Number.isFinite(Date.parse(date)) ? date : undefined;

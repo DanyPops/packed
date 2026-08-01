@@ -1,13 +1,14 @@
 /** install.ts — driven adapter: pi CLI mutations via Bun.spawn. */
-import { defaultPiHome, isPinnedNpmSource, readResolvedVersion } from "./installed.ts";
-import type { Installer, UpdateOutcome } from "../shared/ports.ts";
+
 import { HeadlessInstallValidator, type InstallValidator } from "../adoption/install-validation.ts";
+import type { Installer, UpdateOutcome } from "../shared/ports.ts";
+import { defaultPiHome, isPinnedNpmSource, readResolvedVersion } from "./installed.ts";
 
 /** Bare npm package name (for `packed remove`). */
 export const NAME_RE = /^(@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._-]+$/;
 
 export function defaultPiBin(): string {
-	return process.env["PI_PACKED_PI_BIN"] ?? process.env["PI_BIN"] ?? "pi";
+	return process.env.PI_PACKED_PI_BIN ?? process.env.PI_BIN ?? "pi";
 }
 
 export class ExecInstaller implements Installer {
@@ -19,10 +20,7 @@ export class ExecInstaller implements Installer {
 
 	private async run(args: string[]): Promise<string> {
 		const proc = Bun.spawn([this.bin, ...args], { stdout: "pipe", stderr: "pipe" });
-		const [stdout, stderr] = await Promise.all([
-			new Response(proc.stdout).text(),
-			new Response(proc.stderr).text(),
-		]);
+		const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
 		const out = [stdout.trim(), stderr.trim()].filter(Boolean).join("\n");
 		const code = await proc.exited;
 		if (code !== 0) throw new Error(out || `exit ${code}`);
@@ -32,7 +30,10 @@ export class ExecInstaller implements Installer {
 	async install(source: string, options?: { approved?: boolean; local?: boolean }): Promise<string> {
 		const validation = await this.validator.validate(source);
 		if (!validation.ok) {
-			const detail = validation.extensions.filter((extension) => !extension.ok).map((extension) => `${extension.path}: ${extension.message}`).join("; ");
+			const detail = validation.extensions
+				.filter((extension) => !extension.ok)
+				.map((extension) => `${extension.path}: ${extension.message}`)
+				.join("; ");
 			throw new Error(`install refused -- ${detail || validation.message || "extension failed a headless load check"}`);
 		}
 		return this.run(["install", ...(options?.local ? ["-l"] : []), source]);

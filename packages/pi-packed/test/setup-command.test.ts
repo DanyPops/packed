@@ -1,22 +1,38 @@
 import { describe, expect, it } from "bun:test";
-import { handleSetupCommand } from "../extension/src/setup-command.ts";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { handleSetupCommand } from "../extension/src/setup-command.ts";
 
 function fixture(options: { hasUI?: boolean; confirm?: boolean; reloadRequired?: boolean; planOperations?: any[] } = {}) {
 	const calls: string[] = [];
 	const notifications: string[] = [];
-	const operations = options.planOperations ?? [{ kind: "install-package", packageName: "x", scope: "global", source: "npm:x@1", resolved: "1" }];
+	const operations = options.planOperations ?? [
+		{ kind: "install-package", packageName: "x", scope: "global", source: "npm:x@1", resolved: "1" },
+	];
 	const natives = {
-		async setupPlan(path: string, prune?: boolean) { calls.push(`plan:${path}:${prune}`); return { ok: true, manifestPath: path, operations, diagnostics: [] }; },
-		async setupApply(path: string, approved?: boolean, prune?: boolean) { calls.push(`apply:${path}:${approved}:${prune}`); return { ok: true, manifestPath: path, operations: [], reloadRequired: options.reloadRequired ?? true, diagnostics: [] }; },
+		async setupPlan(path: string, prune?: boolean) {
+			calls.push(`plan:${path}:${prune}`);
+			return { ok: true, manifestPath: path, operations, diagnostics: [] };
+		},
+		async setupApply(path: string, approved?: boolean, prune?: boolean) {
+			calls.push(`apply:${path}:${approved}:${prune}`);
+			return { ok: true, manifestPath: path, operations: [], reloadRequired: options.reloadRequired ?? true, diagnostics: [] };
+		},
 	};
 	const ctx = {
-		cwd: "/work", hasUI: options.hasUI ?? true,
+		cwd: "/work",
+		hasUI: options.hasUI ?? true,
 		ui: {
-			async confirm() { calls.push("confirm"); return options.confirm ?? true; },
-			notify(message: string) { notifications.push(message); },
+			async confirm() {
+				calls.push("confirm");
+				return options.confirm ?? true;
+			},
+			notify(message: string) {
+				notifications.push(message);
+			},
 		},
-		async reload() { calls.push("reload"); },
+		async reload() {
+			calls.push("reload");
+		},
 	} as unknown as ExtensionCommandContext;
 	return { calls, notifications, natives, ctx };
 }
@@ -46,7 +62,10 @@ describe("in-Pi setup command", () => {
 	});
 
 	it("does not reload for profile-only or already-converged applies", async () => {
-		const profile = fixture({ reloadRequired: false, planOperations: [{ kind: "write-profile", name: "work", scope: "global", fields: ["model"] }] });
+		const profile = fixture({
+			reloadRequired: false,
+			planOperations: [{ kind: "write-profile", name: "work", scope: "global", fields: ["model"] }],
+		});
 		await handleSetupCommand("setup apply", profile.ctx, profile.natives);
 		expect(profile.calls.at(-1)).toBe("apply:/work/pi-setup.json:true:false");
 		expect(profile.notifications.at(-1)).toContain("Applied");

@@ -36,7 +36,7 @@ export function resolvePackedPaths(options: PathEnvironment = {}): PackedPaths {
 export function legacyPackedStateDirectory(options: Pick<PathEnvironment, "env" | "home"> = {}): string {
 	const env = options.env ?? process.env;
 	const home = options.home ?? homedir();
-	return join(env["XDG_CACHE_HOME"] ?? join(home, ".cache"), "pi-packed");
+	return join(env.XDG_CACHE_HOME ?? join(home, ".cache"), "pi-packed");
 }
 
 function copyIfMissing(source: string, destination: string): void {

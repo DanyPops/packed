@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { checkPackage, discoverPackageResources, formatCheckReport, type Diagnostic } from "../src/adoption/check.ts";
+import { join } from "node:path";
+import { checkPackage, type Diagnostic, discoverPackageResources, formatCheckReport } from "../src/adoption/check.ts";
 
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(() => {
+	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 
 function fixture(pkg: Record<string, unknown>, files: Record<string, string> = {}): string {
 	const root = mkdtempSync(join(tmpdir(), "packed-check-"));
@@ -67,10 +69,15 @@ describe("discoverPackageResources (pure resource discovery for the config overl
 
 describe("static capability and lifecycle-script signals (packed check)", () => {
 	function capabilityFixture(scripts: Record<string, string> | undefined, sourceFiles: Record<string, string>) {
-		return fixture({ ...base, ...(scripts ? { scripts } : {}) }, {
-			"skills/example/SKILL.md": "---\nname: example\ndescription: Example. Use for examples.\n---\n", "README.md": "# Example\n", "LICENSE": "MIT\n",
-			...sourceFiles,
-		});
+		return fixture(
+			{ ...base, ...(scripts ? { scripts } : {}) },
+			{
+				"skills/example/SKILL.md": "---\nname: example\ndescription: Example. Use for examples.\n---\n",
+				"README.md": "# Example\n",
+				LICENSE: "MIT\n",
+				...sourceFiles,
+			},
+		);
 	}
 
 	it("is silent for a package with no lifecycle scripts and no capability-suggestive imports", async () => {
@@ -81,7 +88,10 @@ describe("static capability and lifecycle-script signals (packed check)", () => 
 	});
 
 	it("flags each declared lifecycle script with its exact command as evidence, at warning tier", async () => {
-		const root = capabilityFixture({ postinstall: "node ./setup.js", prepare: "tsc -p ." }, { "extensions/index.ts": "export default function () {}" });
+		const root = capabilityFixture(
+			{ postinstall: "node ./setup.js", prepare: "tsc -p ." },
+			{ "extensions/index.ts": "export default function () {}" },
+		);
 		const report = await checkPackage(root, { generic: false });
 		const declared = report.diagnostics.filter((d) => d.code === "PI_LIFECYCLE_SCRIPT_DECLARED");
 		expect(declared).toHaveLength(2);
@@ -97,7 +107,9 @@ describe("static capability and lifecycle-script signals (packed check)", () => 
 	});
 
 	it("flags a capability-suggestive import with the exact file and module as evidence, at info tier", async () => {
-		const root = capabilityFixture(undefined, { "extensions/index.ts": 'import { spawn } from "child_process";\nexport default function () {}' });
+		const root = capabilityFixture(undefined, {
+			"extensions/index.ts": 'import { spawn } from "child_process";\nexport default function () {}',
+		});
 		const report = await checkPackage(root, { generic: false });
 		const found = report.diagnostics.filter((d) => d.code === "PI_CAPABILITY_IMPORT");
 		expect(found).toHaveLength(1);
@@ -107,7 +119,9 @@ describe("static capability and lifecycle-script signals (packed check)", () => 
 	});
 
 	it("normalizes a node:-prefixed specifier and a subpath to the same bare capability module", async () => {
-		const root = capabilityFixture(undefined, { "extensions/index.ts": 'import fs from "node:fs/promises";\nexport default function () {}' });
+		const root = capabilityFixture(undefined, {
+			"extensions/index.ts": 'import fs from "node:fs/promises";\nexport default function () {}',
+		});
 		const report = await checkPackage(root, { generic: false });
 		const found = report.diagnostics.filter((d) => d.code === "PI_CAPABILITY_IMPORT");
 		expect(found).toHaveLength(1);
@@ -115,19 +129,25 @@ describe("static capability and lifecycle-script signals (packed check)", () => 
 	});
 
 	it("flags bun:sqlite as a capability-suggestive import", async () => {
-		const root = capabilityFixture(undefined, { "extensions/index.ts": 'import { Database } from "bun:sqlite";\nexport default function () {}' });
+		const root = capabilityFixture(undefined, {
+			"extensions/index.ts": 'import { Database } from "bun:sqlite";\nexport default function () {}',
+		});
 		const report = await checkPackage(root, { generic: false });
 		expect(report.diagnostics.some((d) => d.code === "PI_CAPABILITY_IMPORT" && d.message.includes("bun:sqlite"))).toBe(true);
 	});
 
 	it("reports each capability once per file, not once per occurrence", async () => {
-		const root = capabilityFixture(undefined, { "extensions/index.ts": 'import { spawn } from "child_process";\nimport { exec } from "child_process";\nexport default function () {}' });
+		const root = capabilityFixture(undefined, {
+			"extensions/index.ts": 'import { spawn } from "child_process";\nimport { exec } from "child_process";\nexport default function () {}',
+		});
 		const report = await checkPackage(root, { generic: false });
 		expect(report.diagnostics.filter((d) => d.code === "PI_CAPABILITY_IMPORT")).toHaveLength(1);
 	});
 
 	it("never flags an ordinary third-party or relative import as a capability signal", async () => {
-		const root = capabilityFixture(undefined, { "extensions/index.ts": 'import lodash from "lodash";\nimport { helper } from "./helper.ts";\nexport default function () {}' });
+		const root = capabilityFixture(undefined, {
+			"extensions/index.ts": 'import lodash from "lodash";\nimport { helper } from "./helper.ts";\nexport default function () {}',
+		});
 		const report = await checkPackage(root, { generic: false });
 		expect(codes(report.diagnostics)).not.toContain("PI_CAPABILITY_IMPORT");
 	});
@@ -141,15 +161,24 @@ describe("static capability and lifecycle-script signals (packed check)", () => 
 
 describe("pi.cleanup static validation (packed check)", () => {
 	function cleanupFixture(cleanup: unknown) {
-		return fixture({ ...base, pi: { ...base.pi, cleanup } }, {
-			"extensions/index.ts": "export default function () {}",
-			"skills/example/SKILL.md": "---\nname: example\ndescription: Example. Use for examples.\n---\n",
-			"README.md": "# Example\n", "LICENSE": "MIT\n",
-		});
+		return fixture(
+			{ ...base, pi: { ...base.pi, cleanup } },
+			{
+				"extensions/index.ts": "export default function () {}",
+				"skills/example/SKILL.md": "---\nname: example\ndescription: Example. Use for examples.\n---\n",
+				"README.md": "# Example\n",
+				LICENSE: "MIT\n",
+			},
+		);
 	}
 
 	it("is silent for a package that never declares pi.cleanup -- zero behavior change", async () => {
-		const root = fixture(base, { "extensions/index.ts": "export default function () {}", "skills/example/SKILL.md": "---\nname: example\ndescription: Example. Use for examples.\n---\n", "README.md": "# Example\n", "LICENSE": "MIT\n" });
+		const root = fixture(base, {
+			"extensions/index.ts": "export default function () {}",
+			"skills/example/SKILL.md": "---\nname: example\ndescription: Example. Use for examples.\n---\n",
+			"README.md": "# Example\n",
+			LICENSE: "MIT\n",
+		});
 		const report = await checkPackage(root, { generic: false });
 		expect(codes(report.diagnostics)).not.toContain("PI_CLEANUP_INVALID");
 		expect(codes(report.diagnostics)).not.toContain("PI_CLEANUP_ESCAPES_PACKAGE");
@@ -172,7 +201,7 @@ describe("pi.cleanup static validation (packed check)", () => {
 		expect(report.ok).toBe(false);
 	});
 
-	it("flags a \"..\"-escaping path", async () => {
+	it('flags a ".."-escaping path', async () => {
 		const report = await checkPackage(cleanupFixture(["../../etc/passwd"]), { generic: false });
 		expect(codes(report.diagnostics)).toContain("PI_CLEANUP_ESCAPES_PACKAGE");
 	});
@@ -187,11 +216,13 @@ describe("pi.cleanup static validation (packed check)", () => {
 describe("packed check", () => {
 	it("accepts a complete static Pi package without executing it", async () => {
 		const root = fixture(base, {
-			"extensions/index.ts": 'import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"; export default function (pi: ExtensionAPI) { pi.registerCommand("example", { handler() {} }); }',
-			"skills/example/SKILL.md": "---\nname: example\ndescription: Runs the example workflow. Use for examples.\n---\n\nSee [reference](reference/guide.md).\n",
+			"extensions/index.ts":
+				'import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"; export default function (pi: ExtensionAPI) { pi.registerCommand("example", { handler() {} }); }',
+			"skills/example/SKILL.md":
+				"---\nname: example\ndescription: Runs the example workflow. Use for examples.\n---\n\nSee [reference](reference/guide.md).\n",
 			"skills/example/reference/guide.md": "# Guide\n",
 			"README.md": "# Example\n",
-			"LICENSE": "MIT\n",
+			LICENSE: "MIT\n",
 		});
 		const report = await checkPackage(root, { generic: false });
 		expect(report.ok).toBe(true);
@@ -201,34 +232,64 @@ describe("packed check", () => {
 	});
 
 	it("returns stable manifest, resource, containment, dependency, metadata, and skill codes", async () => {
-		const root = fixture({
-			name: "Bad Package",
-			version: "wat",
-			keywords: [],
-			pi: { extensions: ["../escape.ts", "extensions/[", "node_modules/pi-child/extensions"], skills: ["skills/*/SKILL.md"], prompts: "prompts/*.md", image: "https://example.test/image.svg", video: "https://example.test/video.webm" },
-			dependencies: { "@earendil-works/pi-coding-agent": "^1.0.0" },
-			devDependencies: { leftpad: "1.0.0" },
-		}, {
-			"skills/bad/SKILL.md": "---\nname: Bad_Name\n---\n\nSee [missing](reference/missing.md).\n",
-			"extensions/index.ts": 'import leftpad from "leftpad"; export default () => leftpad;',
-		});
+		const root = fixture(
+			{
+				name: "Bad Package",
+				version: "wat",
+				keywords: [],
+				pi: {
+					extensions: ["../escape.ts", "extensions/[", "node_modules/pi-child/extensions"],
+					skills: ["skills/*/SKILL.md"],
+					prompts: "prompts/*.md",
+					image: "https://example.test/image.svg",
+					video: "https://example.test/video.webm",
+				},
+				dependencies: { "@earendil-works/pi-coding-agent": "^1.0.0" },
+				devDependencies: { leftpad: "1.0.0" },
+			},
+			{
+				"skills/bad/SKILL.md": "---\nname: Bad_Name\n---\n\nSee [missing](reference/missing.md).\n",
+				"extensions/index.ts": 'import leftpad from "leftpad"; export default () => leftpad;',
+			},
+		);
 		const report = await checkPackage(root, { generic: false });
-		expect(codes(report.diagnostics)).toEqual(expect.arrayContaining([
-			"PKG_NAME_INVALID", "PKG_VERSION_INVALID", "PKG_LICENSE_MISSING", "PKG_REPOSITORY_MISSING",
-			"PKG_HOMEPAGE_MISSING", "PKG_BUGS_MISSING", "PI_KEYWORD_MISSING", "PI_MANIFEST_FIELD_INVALID",
-			"PI_RESOURCE_OUTSIDE_PACKAGE", "PI_RESOURCE_GLOB_INVALID", "PI_RESOURCE_NO_MATCH", "PI_IMAGE_FORMAT_INVALID", "PI_VIDEO_FORMAT_INVALID",
-			"PI_CORE_DEPENDENCY_PLACEMENT", "PI_PACKAGE_NOT_BUNDLED", "RUNTIME_DEPENDENCY_MISSING", "SKILL_NAME_INVALID",
-			"SKILL_DESCRIPTION_MISSING", "SKILL_REFERENCE_MISSING", "PACKAGE_README_MISSING", "PACKAGE_LICENSE_FILE_MISSING",
-		]));
+		expect(codes(report.diagnostics)).toEqual(
+			expect.arrayContaining([
+				"PKG_NAME_INVALID",
+				"PKG_VERSION_INVALID",
+				"PKG_LICENSE_MISSING",
+				"PKG_REPOSITORY_MISSING",
+				"PKG_HOMEPAGE_MISSING",
+				"PKG_BUGS_MISSING",
+				"PI_KEYWORD_MISSING",
+				"PI_MANIFEST_FIELD_INVALID",
+				"PI_RESOURCE_OUTSIDE_PACKAGE",
+				"PI_RESOURCE_GLOB_INVALID",
+				"PI_RESOURCE_NO_MATCH",
+				"PI_IMAGE_FORMAT_INVALID",
+				"PI_VIDEO_FORMAT_INVALID",
+				"PI_CORE_DEPENDENCY_PLACEMENT",
+				"PI_PACKAGE_NOT_BUNDLED",
+				"RUNTIME_DEPENDENCY_MISSING",
+				"SKILL_NAME_INVALID",
+				"SKILL_DESCRIPTION_MISSING",
+				"SKILL_REFERENCE_MISSING",
+				"PACKAGE_README_MISSING",
+				"PACKAGE_LICENSE_FILE_MISSING",
+			]),
+		);
 		expect(report.ok).toBe(false);
 	});
 
 	it("rejects declared resources excluded from the npm package", async () => {
-		const root = fixture({ ...base, files: ["README.md"], pi: { extensions: ["extensions/index.ts"] } }, {
-			"extensions/index.ts": "export default function () {}",
-			"README.md": "# Example",
-			"LICENSE": "MIT",
-		});
+		const root = fixture(
+			{ ...base, files: ["README.md"], pi: { extensions: ["extensions/index.ts"] } },
+			{
+				"extensions/index.ts": "export default function () {}",
+				"README.md": "# Example",
+				LICENSE: "MIT",
+			},
+		);
 		const report = await checkPackage(root, { generic: false });
 		expect(codes(report.diagnostics)).toContain("PI_RESOURCE_NOT_PUBLISHED");
 	});
@@ -237,7 +298,7 @@ describe("packed check", () => {
 		const outside = mkdtempSync(join(tmpdir(), "packed-check-outside-"));
 		roots.push(outside);
 		writeFileSync(join(outside, "extension.ts"), "export default function () {}");
-		const root = fixture({ ...base, pi: { extensions: ["extensions/outside.ts"] } }, { "README.md": "# Example", "LICENSE": "MIT" });
+		const root = fixture({ ...base, pi: { extensions: ["extensions/outside.ts"] } }, { "README.md": "# Example", LICENSE: "MIT" });
 		mkdirSync(join(root, "extensions"), { recursive: true });
 		symlinkSync(join(outside, "extension.ts"), join(root, "extensions/outside.ts"));
 		const report = await checkPackage(root, { generic: false });
@@ -245,35 +306,44 @@ describe("packed check", () => {
 	});
 
 	it("discovers conventional directories and reports empty resource sets", async () => {
-		const root = fixture({ ...base, pi: undefined }, { "README.md": "# Example", "LICENSE": "MIT" });
+		const root = fixture({ ...base, pi: undefined }, { "README.md": "# Example", LICENSE: "MIT" });
 		const report = await checkPackage(root, { generic: false });
 		expect(codes(report.diagnostics)).toContain("PI_NO_RESOURCES");
 	});
 
 	it("composes publint without running package lifecycle scripts", async () => {
-		const root = fixture({ ...base, scripts: { prepack: "node -e \\\"require('fs').writeFileSync('executed','yes')\\\"" } }, {
-			"extensions/index.ts": "export default function () {}",
-			"skills/example/SKILL.md": "---\nname: example\ndescription: Example skill.\n---\n",
-			"README.md": "# Example",
-			"LICENSE": "MIT",
-		});
+		const root = fixture(
+			{ ...base, scripts: { prepack: "node -e \\\"require('fs').writeFileSync('executed','yes')\\\"" } },
+			{
+				"extensions/index.ts": "export default function () {}",
+				"skills/example/SKILL.md": "---\nname: example\ndescription: Example skill.\n---\n",
+				"README.md": "# Example",
+				LICENSE: "MIT",
+			},
+		);
 		await checkPackage(root);
 		expect(existsSync(join(root, "executed"))).toBe(false);
 	});
 
 	it("maps publint messages into the stable diagnostic envelope", async () => {
-		const root = fixture({ ...base, pi: { extensions: ["extensions/index.ts"] }, main: "missing.js" }, {
-			"extensions/index.ts": "export default function () {}",
-			"README.md": "# Example",
-			"LICENSE": "MIT",
-		});
+		const root = fixture(
+			{ ...base, pi: { extensions: ["extensions/index.ts"] }, main: "missing.js" },
+			{
+				"extensions/index.ts": "export default function () {}",
+				"README.md": "# Example",
+				LICENSE: "MIT",
+			},
+		);
 		const report = await checkPackage(root);
 		expect(codes(report.diagnostics)).toContain("NPM_FILE_DOES_NOT_EXIST");
 	});
 
 	it("bounds diagnostics, files, and both human and JSON output", async () => {
 		const imports = Array.from({ length: 40 }, (_, i) => `import value${i} from "missing-${i}";`).join("\n");
-		const root = fixture({ name: "x", version: "1.0.0", pi: { extensions: ["extensions/index.ts"] } }, { "extensions/index.ts": `${imports}\nexport default function () {}` });
+		const root = fixture(
+			{ name: "x", version: "1.0.0", pi: { extensions: ["extensions/index.ts"] } },
+			{ "extensions/index.ts": `${imports}\nexport default function () {}` },
+		);
 		const report = await checkPackage(root, { generic: false, maxDiagnostics: 10, maxFiles: 20 });
 		expect(report.diagnostics).toHaveLength(10);
 		expect(report.truncated).toBe(true);

@@ -1,12 +1,14 @@
 import { describe, expect, it } from "bun:test";
-import { detectSelfInstallMethod, runSelfUpdate, PACKED_PACKAGE_NAME, type SelfUpdateDeps } from "../src/self-update/self-update.ts";
 import type { InteractiveRunResult } from "../src/publish/publish.ts";
+import { detectSelfInstallMethod, PACKED_PACKAGE_NAME, runSelfUpdate, type SelfUpdateDeps } from "../src/self-update/self-update.ts";
 import type { PkgInfo, Registry } from "../src/shared/ports.ts";
 import { VERSION } from "../src/shared/version.ts";
 
 class FakeRegistry implements Pick<Registry, "info"> {
 	constructor(private version: string) {}
-	async info(): Promise<PkgInfo> { return { name: PACKED_PACKAGE_NAME, version: this.version }; }
+	async info(): Promise<PkgInfo> {
+		return { name: PACKED_PACKAGE_NAME, version: this.version };
+	}
 }
 
 const ok = (code = 0): InteractiveRunResult => ({ ok: true, code });
@@ -32,10 +34,15 @@ describe("runSelfUpdate", () => {
 
 	it("never attempts an npm install for a local checkout -- update it with git, not packed", async () => {
 		let called = false;
-		const report = await runSelfUpdate(deps({
-			installMethod: { kind: "local-checkout", path: "/home/dev/packed" },
-			runNpmInstall: async () => { called = true; return ok(); },
-		}));
+		const report = await runSelfUpdate(
+			deps({
+				installMethod: { kind: "local-checkout", path: "/home/dev/packed" },
+				runNpmInstall: async () => {
+					called = true;
+					return ok();
+				},
+			}),
+		);
 		expect(called).toBe(false);
 		expect(report.updated).toBe(false);
 		expect(report.message).toContain("local checkout at /home/dev/packed");
@@ -44,11 +51,16 @@ describe("runSelfUpdate", () => {
 
 	it("still restarts the service for a local checkout -- that's the actual point for a dev loop", async () => {
 		let restarted = false;
-		const report = await runSelfUpdate(deps({
-			installMethod: { kind: "local-checkout", path: "/home/dev/packed" },
-			isServiceInstalled: () => true,
-			restartService: async () => { restarted = true; return ok(); },
-		}));
+		const report = await runSelfUpdate(
+			deps({
+				installMethod: { kind: "local-checkout", path: "/home/dev/packed" },
+				isServiceInstalled: () => true,
+				restartService: async () => {
+					restarted = true;
+					return ok();
+				},
+			}),
+		);
 		expect(restarted).toBe(true);
 		expect(report.ok).toBe(true);
 		expect(report.restarted).toBe(true);
@@ -57,10 +69,15 @@ describe("runSelfUpdate", () => {
 
 	it("runs npm install --global for an npm-global install and reports the version transition", async () => {
 		let args: string[] | undefined;
-		const report = await runSelfUpdate(deps({
-			runNpmInstall: async (a) => { args = a; return ok(); },
-			isServiceInstalled: () => false,
-		}));
+		const report = await runSelfUpdate(
+			deps({
+				runNpmInstall: async (a) => {
+					args = a;
+					return ok();
+				},
+				isServiceInstalled: () => false,
+			}),
+		);
 		expect(args).toEqual(["install", "--global", `${PACKED_PACKAGE_NAME}@latest`]);
 		expect(report.updated).toBe(true);
 		expect(report.previousVersion).toBe(VERSION);
@@ -70,11 +87,16 @@ describe("runSelfUpdate", () => {
 
 	it("fails, never restarting, when npm install itself fails", async () => {
 		let restartCalled = false;
-		const report = await runSelfUpdate(deps({
-			runNpmInstall: async () => failed(1),
-			isServiceInstalled: () => true,
-			restartService: async () => { restartCalled = true; return ok(); },
-		}));
+		const report = await runSelfUpdate(
+			deps({
+				runNpmInstall: async () => failed(1),
+				isServiceInstalled: () => true,
+				restartService: async () => {
+					restartCalled = true;
+					return ok();
+				},
+			}),
+		);
 		expect(report.ok).toBe(false);
 		expect(report.updated).toBe(false);
 		expect(report.restarted).toBe(false);
@@ -84,31 +106,41 @@ describe("runSelfUpdate", () => {
 	});
 
 	it("proceeds even when the registry lookup for the latest version fails -- best-effort only", async () => {
-		const report = await runSelfUpdate(deps({
-			registry: { info: async () => { throw new Error("registry down"); } },
-			runNpmInstall: async () => ok(),
-			isServiceInstalled: () => false,
-		}));
+		const report = await runSelfUpdate(
+			deps({
+				registry: {
+					info: async () => {
+						throw new Error("registry down");
+					},
+				},
+				runNpmInstall: async () => ok(),
+				isServiceInstalled: () => false,
+			}),
+		);
 		expect(report.updated).toBe(true);
 		expect(report.latestVersion).toBeUndefined();
 	});
 
 	it("reports no supervised service found, never guessing at a restart", async () => {
-		const report = await runSelfUpdate(deps({
-			runNpmInstall: async () => ok(),
-			isServiceInstalled: () => false,
-		}));
+		const report = await runSelfUpdate(
+			deps({
+				runNpmInstall: async () => ok(),
+				isServiceInstalled: () => false,
+			}),
+		);
 		expect(report.ok).toBe(true);
 		expect(report.restarted).toBe(false);
 		expect(report.message).toContain("no supervised pi-packed service was found");
 	});
 
 	it("reports restart-unsupported explicitly when the platform has no restart mechanism wired in", async () => {
-		const report = await runSelfUpdate(deps({
-			runNpmInstall: async () => ok(),
-			isServiceInstalled: () => true,
-			restartService: undefined,
-		}));
+		const report = await runSelfUpdate(
+			deps({
+				runNpmInstall: async () => ok(),
+				isServiceInstalled: () => true,
+				restartService: undefined,
+			}),
+		);
 		expect(report.ok).toBe(true);
 		expect(report.updated).toBe(true);
 		expect(report.restarted).toBe(false);
@@ -117,11 +149,13 @@ describe("runSelfUpdate", () => {
 	});
 
 	it("reports an updated-but-not-restarted outcome, never a full failure, when the restart command itself fails", async () => {
-		const report = await runSelfUpdate(deps({
-			runNpmInstall: async () => ok(),
-			isServiceInstalled: () => true,
-			restartService: async () => failed(3),
-		}));
+		const report = await runSelfUpdate(
+			deps({
+				runNpmInstall: async () => ok(),
+				isServiceInstalled: () => true,
+				restartService: async () => failed(3),
+			}),
+		);
 		expect(report.ok).toBe(true);
 		expect(report.updated).toBe(true);
 		expect(report.restarted).toBe(false);
@@ -129,13 +163,19 @@ describe("runSelfUpdate", () => {
 	});
 
 	it("reports full success when the update and restart both succeed", async () => {
-		const report = await runSelfUpdate(deps({
-			runNpmInstall: async () => ok(),
-			isServiceInstalled: () => true,
-			restartService: async () => ok(),
-		}));
+		const report = await runSelfUpdate(
+			deps({
+				runNpmInstall: async () => ok(),
+				isServiceInstalled: () => true,
+				restartService: async () => ok(),
+			}),
+		);
 		expect(report).toEqual({
-			ok: true, previousVersion: VERSION, latestVersion: "9.9.9", updated: true, restarted: true,
+			ok: true,
+			previousVersion: VERSION,
+			latestVersion: "9.9.9",
+			updated: true,
+			restarted: true,
 			message: "updated via npm; restarted the pi-packed service",
 		});
 	});

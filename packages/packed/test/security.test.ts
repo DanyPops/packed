@@ -2,12 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-	PACKAGE_OPERATIONS,
-	packagePermissionDecision,
-	readSecuritySettings,
-	writeSecuritySettings,
-} from "../src/security/security.ts";
+import { PACKAGE_OPERATIONS, packagePermissionDecision, readSecuritySettings, writeSecuritySettings } from "../src/security/security.ts";
 
 describe("package permission policy", () => {
 	it("defaults every arbitrary-code and settings/install-root mutation to approval", () => {
@@ -15,11 +10,35 @@ describe("package permission policy", () => {
 		const settings = readSecuritySettings(dir);
 		expect(settings).toEqual({ mutationApproval: "always" });
 		expect(PACKAGE_OPERATIONS).toEqual([
-		"search", "info", "installed", "catalog", "index.status", "index.build", "updates", "check", "setup.plan", "security.read",
-		"mirror", "setup.export", "setup.update", "install", "install_service", "setup.apply", "update", "update.self", "remove",
-		"resources.list", "resources.toggle", "security.write", "pi.status", "advisories.scan", "doctor",
-	]);
-		const decisions = Object.fromEntries(PACKAGE_OPERATIONS.map((operation) => [operation, packagePermissionDecision(settings, operation)]));
+			"search",
+			"info",
+			"installed",
+			"catalog",
+			"index.status",
+			"index.build",
+			"updates",
+			"check",
+			"setup.plan",
+			"security.read",
+			"mirror",
+			"setup.export",
+			"setup.update",
+			"install",
+			"install_service",
+			"setup.apply",
+			"update",
+			"update.self",
+			"remove",
+			"resources.list",
+			"resources.toggle",
+			"security.write",
+			"pi.status",
+			"advisories.scan",
+			"doctor",
+		]);
+		const decisions = Object.fromEntries(
+			PACKAGE_OPERATIONS.map((operation) => [operation, packagePermissionDecision(settings, operation)]),
+		);
 		expect(decisions).toMatchObject({
 			search: { classification: "read", approvalRequired: false },
 			info: { classification: "read", approvalRequired: false },

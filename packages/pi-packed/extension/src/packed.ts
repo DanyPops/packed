@@ -9,13 +9,27 @@
  * that on the failing call itself and reconnects, so the happy path reuses
  * one connected client instead of reconnecting on every single operation.
  */
-import { createRetryingClient } from "@danypops/vehicle-client/daemon-client";
-import { ensurePackedClient, InstallServiceError, type PackedExtensionClient } from "@danypops/packed/client";
-import { PI_COMMAND_NAME, type InstalledPackage, type PackageInfo, type PackageResources, type PackageSummary, type PiStatus, type ResourceField, type SecuritySettings, type ServiceSpecSummary, type SetupApplyResult, type SetupPlan, type UpdateEntry, type UpdateOutcome } from "@danypops/packed/protocol";
 
-export { InstallServiceError, PI_COMMAND_NAME };
+import { ensurePackedClient, InstallServiceError, type PackedExtensionClient } from "@danypops/packed/client";
+import {
+	type InstalledPackage,
+	type PackageInfo,
+	type PackageResources,
+	type PackageSummary,
+	PI_COMMAND_NAME,
+	type PiStatus,
+	type ResourceField,
+	type SecuritySettings,
+	type ServiceSpecSummary,
+	type SetupApplyResult,
+	type SetupPlan,
+	type UpdateEntry,
+	type UpdateOutcome,
+} from "@danypops/packed/protocol";
+import { createRetryingClient } from "@danypops/vehicle-client/daemon-client";
 
 export type { PackageInfo, PackageResources, PackageSummary, PiStatus, ResourceField, UpdateEntry, UpdateOutcome };
+export { InstallServiceError, PI_COMMAND_NAME };
 export type InstalledPkg = InstalledPackage;
 export type PackageDaemonPort = PackedExtensionClient;
 type MutationApproval = SecuritySettings["mutationApproval"];
@@ -42,7 +56,14 @@ export interface Natives {
 	setupPlan(manifestPath: string, prune?: boolean): Promise<SetupPlan>;
 	setupApply(manifestPath: string, approved?: boolean, prune?: boolean): Promise<SetupApplyResult>;
 	listResources(projectRoot?: string): Promise<{ global: PackageResources[]; project: PackageResources[] }>;
-	toggleResource(source: string, field: ResourceField, path: string, enabled: boolean, projectRoot?: string, approved?: boolean): Promise<string>;
+	toggleResource(
+		source: string,
+		field: ResourceField,
+		path: string,
+		enabled: boolean,
+		projectRoot?: string,
+		approved?: boolean,
+	): Promise<string>;
 	piStatus(): Promise<PiStatus>;
 }
 
@@ -70,7 +91,8 @@ export async function createNatives(connect: PackageDaemonConnector = connectDef
 		setupPlan: (manifestPath, prune) => client.call((daemon) => daemon.setupPlan(manifestPath, prune)),
 		setupApply: (manifestPath, approved, prune) => client.call((daemon) => daemon.setupApply(manifestPath, approved, prune)),
 		listResources: (projectRoot) => client.call((daemon) => daemon.listResources(projectRoot)),
-		toggleResource: (source, field, path, enabled, projectRoot, approved) => client.call((daemon) => daemon.toggleResource(source, field, path, enabled, projectRoot, approved)),
+		toggleResource: (source, field, path, enabled, projectRoot, approved) =>
+			client.call((daemon) => daemon.toggleResource(source, field, path, enabled, projectRoot, approved)),
 		piStatus: () => client.call((daemon) => daemon.piStatus()),
 	};
 }

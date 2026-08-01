@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { ensureClient } from "../src/public/client.ts";
 
 describe("ensureClient (packed daemon auto-spawn-or-wait decision)", () => {
@@ -8,8 +8,13 @@ describe("ensureClient (packed daemon auto-spawn-or-wait decision)", () => {
 		const client = { fake: true } as never;
 		const result = await ensureClient({
 			connect: async () => client,
-			isServiceInstalled: () => { serviceChecks++; return false; },
-			spawn: () => { spawnCalls++; },
+			isServiceInstalled: () => {
+				serviceChecks++;
+				return false;
+			},
+			spawn: () => {
+				spawnCalls++;
+			},
 			sleep: async () => {},
 		});
 		expect(result).toBe(client);
@@ -22,11 +27,18 @@ describe("ensureClient (packed daemon auto-spawn-or-wait decision)", () => {
 		let connectAttempts = 0;
 		const client = { fake: true } as never;
 		const result = await ensureClient({
-			connect: async () => { connectAttempts++; if (connectAttempts < 3) throw new Error("not yet"); return client; },
+			connect: async () => {
+				connectAttempts++;
+				if (connectAttempts < 3) throw new Error("not yet");
+				return client;
+			},
 			isServiceInstalled: () => false,
-			spawn: () => { spawnCalls++; },
+			spawn: () => {
+				spawnCalls++;
+			},
 			sleep: async () => {},
-			retryAttempts: 5, retryDelayMs: 0,
+			retryAttempts: 5,
+			retryDelayMs: 0,
 		});
 		expect(result).toBe(client);
 		expect(spawnCalls).toBe(1);
@@ -37,11 +49,18 @@ describe("ensureClient (packed daemon auto-spawn-or-wait decision)", () => {
 		let connectAttempts = 0;
 		const client = { fake: true } as never;
 		const result = await ensureClient({
-			connect: async () => { connectAttempts++; if (connectAttempts < 3) throw new Error("not yet"); return client; },
+			connect: async () => {
+				connectAttempts++;
+				if (connectAttempts < 3) throw new Error("not yet");
+				return client;
+			},
 			isServiceInstalled: () => true,
-			spawn: () => { spawnCalls++; },
+			spawn: () => {
+				spawnCalls++;
+			},
 			sleep: async () => {},
-			retryAttempts: 5, retryDelayMs: 0,
+			retryAttempts: 5,
+			retryDelayMs: 0,
 		});
 		expect(result).toBe(client);
 		expect(spawnCalls).toBe(0); // waited for the supervised service instead
@@ -49,24 +68,38 @@ describe("ensureClient (packed daemon auto-spawn-or-wait decision)", () => {
 	});
 
 	it("fails with a message pointing at the service, not a generic timeout, when a service is installed but never becomes reachable", async () => {
-		await expect(ensureClient({
-			connect: async () => { throw new Error("never reachable"); },
-			isServiceInstalled: () => true,
-			spawn: () => { throw new Error("must never be called"); },
-			sleep: async () => {},
-			retryAttempts: 2, retryDelayMs: 0,
-		})).rejects.toThrow(/supervised service is installed/);
+		await expect(
+			ensureClient({
+				connect: async () => {
+					throw new Error("never reachable");
+				},
+				isServiceInstalled: () => true,
+				spawn: () => {
+					throw new Error("must never be called");
+				},
+				sleep: async () => {},
+				retryAttempts: 2,
+				retryDelayMs: 0,
+			}),
+		).rejects.toThrow(/supervised service is installed/);
 	});
 
 	it("fails with a plain timeout message, and did spawn, when no service is installed and nothing ever becomes reachable", async () => {
 		let spawnCalls = 0;
-		await expect(ensureClient({
-			connect: async () => { throw new Error("never reachable"); },
-			isServiceInstalled: () => false,
-			spawn: () => { spawnCalls++; },
-			sleep: async () => {},
-			retryAttempts: 2, retryDelayMs: 0,
-		})).rejects.toThrow(/did not become ready/);
+		await expect(
+			ensureClient({
+				connect: async () => {
+					throw new Error("never reachable");
+				},
+				isServiceInstalled: () => false,
+				spawn: () => {
+					spawnCalls++;
+				},
+				sleep: async () => {},
+				retryAttempts: 2,
+				retryDelayMs: 0,
+			}),
+		).rejects.toThrow(/did not become ready/);
 		expect(spawnCalls).toBe(1);
 	});
 
@@ -75,11 +108,19 @@ describe("ensureClient (packed daemon auto-spawn-or-wait decision)", () => {
 		let connectAttempts = 0;
 		const client = { fake: true } as never;
 		await ensureClient({
-			connect: async () => { connectAttempts++; if (connectAttempts < 4) throw new Error("not yet"); return client; },
-			isServiceInstalled: () => { serviceChecks++; return true; },
+			connect: async () => {
+				connectAttempts++;
+				if (connectAttempts < 4) throw new Error("not yet");
+				return client;
+			},
+			isServiceInstalled: () => {
+				serviceChecks++;
+				return true;
+			},
 			spawn: () => {},
 			sleep: async () => {},
-			retryAttempts: 10, retryDelayMs: 0,
+			retryAttempts: 10,
+			retryDelayMs: 0,
 		});
 		expect(serviceChecks).toBe(1);
 	});

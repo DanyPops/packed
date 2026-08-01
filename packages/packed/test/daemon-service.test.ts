@@ -11,7 +11,10 @@ function fakePiHome(): string {
 function writePackage(piHome: string, name: string, manifest: unknown): void {
 	const dir = join(piHome, "npm", "node_modules", name);
 	mkdirSync(dir, { recursive: true });
-	writeFileSync(join(dir, "package.json"), JSON.stringify({ name, version: "1.0.0", ...(manifest ? { packed: { daemonService: manifest } } : {}) }));
+	writeFileSync(
+		join(dir, "package.json"),
+		JSON.stringify({ name, version: "1.0.0", ...(manifest ? { packed: { daemonService: manifest } } : {}) }),
+	);
 }
 
 function writeRawPackage(dir: string, pkg: Record<string, unknown>): void {
@@ -53,7 +56,11 @@ describe("resolveDaemonServiceSpec", () => {
 		writePackage(piHome, "some-pkg", undefined);
 
 		const result = resolveDaemonServiceSpec(piHome, "npm:some-pkg");
-		expect(result).toEqual({ ok: false, notADaemon: true, reason: expect.stringContaining("does not declare a packed.daemonService manifest") as unknown as string });
+		expect(result).toEqual({
+			ok: false,
+			notADaemon: true,
+			reason: expect.stringContaining("does not declare a packed.daemonService manifest") as unknown as string,
+		});
 	});
 
 	it("fails closed for a package that was never actually installed", () => {
@@ -71,7 +78,12 @@ describe("resolveDaemonServiceSpec", () => {
 	it("falls back to detection when the package itself is the daemon (bin + real vehicle-server dependency, no manifest)", () => {
 		const piHome = fakePiHome();
 		const dir = join(piHome, "npm", "node_modules", "@danypops/papyrus");
-		writeRawPackage(dir, { name: "@danypops/papyrus", version: "1.0.0", bin: { papyrus: "src/cli.ts" }, dependencies: { "@danypops/vehicle-server": "^0.1.0" } });
+		writeRawPackage(dir, {
+			name: "@danypops/papyrus",
+			version: "1.0.0",
+			bin: { papyrus: "src/cli.ts" },
+			dependencies: { "@danypops/vehicle-server": "^0.1.0" },
+		});
 
 		const result = resolveDaemonServiceSpec(piHome, "npm:@danypops/papyrus");
 		expect(result).toEqual({
@@ -91,7 +103,12 @@ describe("resolveDaemonServiceSpec", () => {
 		const extDir = join(piHome, "npm", "node_modules", "@danypops/pi-papyrus");
 		writeRawPackage(extDir, { name: "@danypops/pi-papyrus", version: "1.0.0", dependencies: { "@danypops/papyrus": "^0.38.0" } });
 		const depDir = join(extDir, "node_modules", "@danypops/papyrus");
-		writeRawPackage(depDir, { name: "@danypops/papyrus", version: "0.38.0", bin: { papyrus: "src/cli.ts" }, dependencies: { "@danypops/vehicle-server": "^0.1.0" } });
+		writeRawPackage(depDir, {
+			name: "@danypops/papyrus",
+			version: "0.38.0",
+			bin: { papyrus: "src/cli.ts" },
+			dependencies: { "@danypops/vehicle-server": "^0.1.0" },
+		});
 
 		const result = resolveDaemonServiceSpec(piHome, "npm:@danypops/pi-papyrus");
 		expect(result.ok).toBe(true);
@@ -110,7 +127,12 @@ describe("resolveDaemonServiceSpec", () => {
 		// own piHome/npm install target), as opposed to the nested-dependency layout the prior test
 		// exercises. Both are real, both must resolve.
 		const depDir = join(piHome, "npm", "node_modules", "@danypops/papyrus");
-		writeRawPackage(depDir, { name: "@danypops/papyrus", version: "0.38.0", bin: { papyrus: "src/cli.ts" }, dependencies: { "@danypops/vehicle-server": "^0.1.0" } });
+		writeRawPackage(depDir, {
+			name: "@danypops/papyrus",
+			version: "0.38.0",
+			bin: { papyrus: "src/cli.ts" },
+			dependencies: { "@danypops/vehicle-server": "^0.1.0" },
+		});
 
 		const result = resolveDaemonServiceSpec(piHome, "npm:@danypops/pi-papyrus");
 		expect(result.ok).toBe(true);
@@ -123,7 +145,12 @@ describe("resolveDaemonServiceSpec", () => {
 	it("also detects the legacy @danypops/daemon-kit dependency name, not just vehicle-server", () => {
 		const piHome = fakePiHome();
 		const dir = join(piHome, "npm", "node_modules", "@danypops/web-spider-daemon");
-		writeRawPackage(dir, { name: "@danypops/web-spider-daemon", version: "1.0.0", bin: { "web-spider": "src/cli.ts" }, dependencies: { "@danypops/daemon-kit": "^0.18.0" } });
+		writeRawPackage(dir, {
+			name: "@danypops/web-spider-daemon",
+			version: "1.0.0",
+			bin: { "web-spider": "src/cli.ts" },
+			dependencies: { "@danypops/daemon-kit": "^0.18.0" },
+		});
 
 		const result = resolveDaemonServiceSpec(piHome, "npm:@danypops/web-spider-daemon");
 		expect(result.ok).toBe(true);
@@ -135,7 +162,8 @@ describe("resolveDaemonServiceSpec", () => {
 		const piHome = fakePiHome();
 		const dir = join(piHome, "npm", "node_modules", "@danypops/papyrus");
 		writeRawPackage(dir, {
-			name: "@danypops/papyrus", version: "1.0.0",
+			name: "@danypops/papyrus",
+			version: "1.0.0",
 			bin: { papyrus: "src/cli.ts" },
 			dependencies: { "@danypops/vehicle-server": "^0.1.0" },
 			packed: { daemonService: { binPath: "dist/cli.js", args: ["serve", "--custom"], name: "papyrus-custom" } },

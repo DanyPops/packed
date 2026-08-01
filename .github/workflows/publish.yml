@@ -30,6 +30,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y bubblewrap util-linux
 
       - run: bun install
+      - run: bun run lint:ci
       - run: bun run --cwd packages/packed build
       - run: bun run --cwd packages/packed typecheck
       - run: bun run --cwd packages/packed test
@@ -61,6 +62,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun run lint:ci
       # --ignore-scripts skips @danypops/packed's own build; its dist/
       # subpath exports (client.js, protocol.js) must exist before
       # pi-packed can typecheck/test against them.

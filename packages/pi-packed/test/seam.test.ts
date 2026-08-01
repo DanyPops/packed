@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
+import type { SetupApplyResult, SetupPlan } from "@danypops/packed/protocol";
 import { verifyLoadableUnderPi } from "@danypops/vehicle-client-pi/pi-load-harness";
 import { filterRows, formatUpdateNotice, mergeRows, nextMode, visibleRows } from "../extension/src/model.ts";
 import { createNatives, type PackageDaemonPort, type PackageInfo } from "../extension/src/packed.ts";
-import type { SetupApplyResult, SetupPlan } from "@danypops/packed/protocol";
 
 const installed = [
 	{ name: "pi-extension-manager", pinned: "0.8.2" },
@@ -77,10 +77,29 @@ class FakePackageDaemon implements PackageDaemonPort {
 		return [{ name: "pi-lsp", installed: "1.0.0", latest: "1.1.0" }];
 	}
 
-	async setupPlan(manifestPath: string, prune = false): Promise<SetupPlan> { this.calls.push({ operation: "setupPlan", input: { manifestPath, prune } }); return { ok: true, manifestPath, operations: [], diagnostics: [] }; }
-	async setupApply(manifestPath: string, approved = false, prune = false): Promise<SetupApplyResult> { this.calls.push({ operation: "setupApply", input: { manifestPath, approved, prune } }); return { ok: true, manifestPath, operations: [], reloadRequired: false, diagnostics: [] }; }
-	async listResources(projectRoot?: string) { this.calls.push({ operation: "listResources", input: { projectRoot } }); return { global: [], project: [] }; }
-	async toggleResource(source: string, field: "extensions" | "skills" | "prompts" | "themes", path: string, enabled: boolean, projectRoot?: string, approved = false) { this.calls.push({ operation: "toggleResource", input: { source, field, path, enabled, projectRoot, approved } }); return "ok"; }
+	async setupPlan(manifestPath: string, prune = false): Promise<SetupPlan> {
+		this.calls.push({ operation: "setupPlan", input: { manifestPath, prune } });
+		return { ok: true, manifestPath, operations: [], diagnostics: [] };
+	}
+	async setupApply(manifestPath: string, approved = false, prune = false): Promise<SetupApplyResult> {
+		this.calls.push({ operation: "setupApply", input: { manifestPath, approved, prune } });
+		return { ok: true, manifestPath, operations: [], reloadRequired: false, diagnostics: [] };
+	}
+	async listResources(projectRoot?: string) {
+		this.calls.push({ operation: "listResources", input: { projectRoot } });
+		return { global: [], project: [] };
+	}
+	async toggleResource(
+		source: string,
+		field: "extensions" | "skills" | "prompts" | "themes",
+		path: string,
+		enabled: boolean,
+		projectRoot?: string,
+		approved = false,
+	) {
+		this.calls.push({ operation: "toggleResource", input: { source, field, path, enabled, projectRoot, approved } });
+		return "ok";
+	}
 
 	async security() {
 		this.calls.push({ operation: "security" });
@@ -136,7 +155,18 @@ describe("packed extension seam", () => {
 		expect((await natives.setupPlan("/tmp/pi-setup.json", true)).ok).toBe(true);
 		expect((await natives.setupApply("/tmp/pi-setup.json", true, true)).ok).toBe(true);
 		expect(daemon.calls.map((call) => call.operation)).toEqual([
-			"search", "search", "info", "installed", "updates", "security", "setMutationApproval", "install", "remove", "update", "setupPlan", "setupApply",
+			"search",
+			"search",
+			"info",
+			"installed",
+			"updates",
+			"security",
+			"setMutationApproval",
+			"install",
+			"remove",
+			"update",
+			"setupPlan",
+			"setupApply",
 		]);
 		expect(daemon.calls[1]?.input).toEqual({ query: "lsp", limit: 5, offline: true });
 	});
@@ -164,7 +194,7 @@ describe("packed extension seam", () => {
 	it("does not retry a genuine domain-level rejection from the daemon itself -- the actual behavior fix this migration makes", async () => {
 		let operationCalls = 0;
 		class FailingDaemon extends FakePackageDaemon {
-			override async info(name: string): Promise<PackageInfo> {
+			override async info(_name: string): Promise<PackageInfo> {
 				operationCalls++;
 				throw new Error("ValidationError: package name is required");
 			}

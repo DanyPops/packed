@@ -9,13 +9,13 @@
  * Install: pi install git:github.com/DanyPops/pi-packed
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { formatUpdateNotice } from "./model.js";
+import { createNatives } from "./packed.js";
+import { registerProfiles } from "./profile.js";
+import { handleResourceConfigCommand } from "./resource-config.js";
+import { handleSetupCommand } from "./setup-command.js";
 import { registerTools } from "./tools.js";
 import { showPackedPanel } from "./tui.js";
-import { createNatives } from "./packed.js";
-import { formatUpdateNotice } from "./model.js";
-import { registerProfiles } from "./profile.js";
-import { handleSetupCommand } from "./setup-command.js";
-import { handleResourceConfigCommand } from "./resource-config.js";
 
 // Async factory (pi awaits it): the seam creates authenticated daemon
 // clients lazily. It never executes Bun-only adapters or opens SQLite.
@@ -25,7 +25,8 @@ export default async function (pi: ExtensionAPI) {
 	registerTools(pi, natives);
 
 	pi.registerCommand("packed", {
-		description: "Browse and manage installed Pi packages -- u/U update, x remove, d disable, c config, f find, s settings -- or run setup plan/apply or config directly",
+		description:
+			"Browse and manage installed Pi packages -- u/U update, x remove, d disable, c config, f find, s settings -- or run setup plan/apply or config directly",
 		handler: async (args, ctx) => {
 			if (await handleSetupCommand(args, ctx, natives)) return;
 			if (await handleResourceConfigCommand(args, ctx, natives, showPackedPanel)) return;

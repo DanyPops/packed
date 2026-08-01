@@ -1,25 +1,47 @@
-import { describe, it, expect, afterEach } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Server } from "bun";
 import { AuthenticatedRpcClient } from "@danypops/vehicle-client/rpc-client";
-import { checkPiVersion, createFetchLatestPiRelease, piUpdateSelfArgs, runPiStatusInteractive, runPiUpdateSelf, type PiReleaseInfo, type PiVersionReport } from "../src/pi/pi-version.ts";
-import type { VersionCommand } from "../src/publish/publish.ts";
+import type { Server } from "bun";
 import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/daemon/service.ts";
+import {
+	checkPiVersion,
+	createFetchLatestPiRelease,
+	type PiReleaseInfo,
+	type PiVersionReport,
+	piUpdateSelfArgs,
+	runPiStatusInteractive,
+	runPiUpdateSelf,
+} from "../src/pi/pi-version.ts";
+import type { VersionCommand } from "../src/publish/publish.ts";
 import type { Installer, PkgInfo, Registry, SearchPage } from "../src/shared/ports.ts";
 
 class NoopRegistry implements Registry {
-	async search(): Promise<SearchPage> { return { results: [], total: 0 }; }
-	async searchPage(): Promise<SearchPage> { return { results: [], total: 0 }; }
-	async searchAll() { return []; }
-	async info(name: string): Promise<PkgInfo> { return { name, version: "1.0.0" }; }
+	async search(): Promise<SearchPage> {
+		return { results: [], total: 0 };
+	}
+	async searchPage(): Promise<SearchPage> {
+		return { results: [], total: 0 };
+	}
+	async searchAll() {
+		return [];
+	}
+	async info(name: string): Promise<PkgInfo> {
+		return { name, version: "1.0.0" };
+	}
 }
 
 class NoopInstaller implements Installer {
-	async install() { return "ok"; }
-	async remove() { return "ok"; }
-	async update() { return { output: "ok", reloadRequired: false, alreadyUpToDate: true, pinned: false }; }
+	async install() {
+		return "ok";
+	}
+	async remove() {
+		return "ok";
+	}
+	async update() {
+		return { output: "ok", reloadRequired: false, alreadyUpToDate: true, pinned: false };
+	}
 }
 
 const okVersion: VersionCommand = async () => ({ code: 0, stdout: "0.82.1\n", stderr: "" });
@@ -76,7 +98,9 @@ describe("checkPiVersion", () => {
 	});
 
 	it("never throws when the version command itself throws", async () => {
-		const throwing: VersionCommand = async () => { throw new Error("spawn failed"); };
+		const throwing: VersionCommand = async () => {
+			throw new Error("spawn failed");
+		};
 		const report = await checkPiVersion({ versionCommand: throwing, fetchLatest: fakeLatest({ version: "0.83.0" }) });
 		expect(report.current).toBeUndefined();
 		expect(report.latest).toBe("0.83.0");
@@ -126,14 +150,24 @@ describe("createFetchLatestPiRelease", () => {
 	});
 
 	it("PI_SKIP_VERSION_CHECK short-circuits before any network call", async () => {
-		server = Bun.serve({ port: 0, fetch: () => { throw new Error("must never be called"); } });
+		server = Bun.serve({
+			port: 0,
+			fetch: () => {
+				throw new Error("must never be called");
+			},
+		});
 		process.env.PI_SKIP_VERSION_CHECK = "1";
 		const fetchLatest = createFetchLatestPiRelease(`http://127.0.0.1:${server.port}`);
 		expect(await fetchLatest()).toBeUndefined();
 	});
 
 	it("PI_OFFLINE short-circuits before any network call", async () => {
-		server = Bun.serve({ port: 0, fetch: () => { throw new Error("must never be called"); } });
+		server = Bun.serve({
+			port: 0,
+			fetch: () => {
+				throw new Error("must never be called");
+			},
+		});
 		process.env.PI_OFFLINE = "1";
 		const fetchLatest = createFetchLatestPiRelease(`http://127.0.0.1:${server.port}`);
 		expect(await fetchLatest()).toBeUndefined();
@@ -168,8 +202,14 @@ describe("runPiStatusInteractive", () => {
 		let updateCalls = 0;
 		const report = await runPiStatusInteractive({
 			check: fakeCheck([{ current: "0.82.1", latest: "0.82.1", upToDate: true }]),
-			confirm: async (q) => { confirms.push(q); return true; },
-			runUpdate: async () => { updateCalls++; return { ok: true }; },
+			confirm: async (q) => {
+				confirms.push(q);
+				return true;
+			},
+			runUpdate: async () => {
+				updateCalls++;
+				return { ok: true };
+			},
 		});
 		expect(confirms).toEqual([]);
 		expect(updateCalls).toBe(0);
@@ -180,7 +220,10 @@ describe("runPiStatusInteractive", () => {
 		let confirmCalls = 0;
 		const report = await runPiStatusInteractive({
 			check: fakeCheck([{ latest: "0.83.0" }]),
-			confirm: async () => { confirmCalls++; return true; },
+			confirm: async () => {
+				confirmCalls++;
+				return true;
+			},
 			runUpdate: async () => ({ ok: true }),
 		});
 		expect(confirmCalls).toBe(0);
@@ -191,8 +234,15 @@ describe("runPiStatusInteractive", () => {
 		let updateCalls = 0;
 		const report = await runPiStatusInteractive({
 			check: fakeCheck([{ current: "0.82.1", latest: "0.83.0", upToDate: false }]),
-			confirm: async (q) => { expect(q).toContain("0.82.1"); expect(q).toContain("0.83.0"); return false; },
-			runUpdate: async () => { updateCalls++; return { ok: true }; },
+			confirm: async (q) => {
+				expect(q).toContain("0.82.1");
+				expect(q).toContain("0.83.0");
+				return false;
+			},
+			runUpdate: async () => {
+				updateCalls++;
+				return { ok: true };
+			},
 		});
 		expect(updateCalls).toBe(0);
 		expect(report).toEqual({ current: "0.82.1", latest: "0.83.0", upToDate: false });
@@ -205,7 +255,10 @@ describe("runPiStatusInteractive", () => {
 		]);
 		let checkCalls = 0;
 		const report = await runPiStatusInteractive({
-			check: async () => { checkCalls++; return check(); },
+			check: async () => {
+				checkCalls++;
+				return check();
+			},
 			confirm: async () => true,
 			runUpdate: async () => ({ ok: true }),
 		});
@@ -217,7 +270,10 @@ describe("runPiStatusInteractive", () => {
 		const check = fakeCheck([{ current: "0.82.1", latest: "0.83.0", upToDate: false }]);
 		let checkCalls = 0;
 		const report = await runPiStatusInteractive({
-			check: async () => { checkCalls++; return check(); },
+			check: async () => {
+				checkCalls++;
+				return check();
+			},
 			confirm: async () => true,
 			runUpdate: async () => ({ ok: false }),
 		});
@@ -229,22 +285,34 @@ describe("runPiStatusInteractive", () => {
 describe("pi.status operation", () => {
 	it("routes through the daemon's authenticated operation registry", async () => {
 		const app = createApp({
-			reg: new NoopRegistry(), inst: new NoopInstaller(), token: "test-token",
-			stateDir: mkdtempSync(join(tmpdir(), "packed-pi-version-state-")), dataDir: mkdtempSync(join(tmpdir(), "packed-pi-version-data-")),
+			reg: new NoopRegistry(),
+			inst: new NoopInstaller(),
+			token: "test-token",
+			stateDir: mkdtempSync(join(tmpdir(), "packed-pi-version-state-")),
+			dataDir: mkdtempSync(join(tmpdir(), "packed-pi-version-data-")),
 			piVersion: { check: async () => ({ current: "0.82.1", latest: "0.83.0", upToDate: false }) },
 		});
-		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", { label: "Packed", transport: (request) => app.fetch(request) });
+		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", {
+			label: "Packed",
+			transport: (request) => app.fetch(request),
+		});
 		expect(await client.operations()).toContain("pi.status");
 		expect(await client.call("pi.status", {})).toEqual({ current: "0.82.1", latest: "0.83.0", upToDate: false });
 	});
 
 	it("is unguarded read access -- never requires approval", async () => {
 		const app = createApp({
-			reg: new NoopRegistry(), inst: new NoopInstaller(), token: "test-token",
-			stateDir: mkdtempSync(join(tmpdir(), "packed-pi-version-state-")), dataDir: mkdtempSync(join(tmpdir(), "packed-pi-version-data-")),
+			reg: new NoopRegistry(),
+			inst: new NoopInstaller(),
+			token: "test-token",
+			stateDir: mkdtempSync(join(tmpdir(), "packed-pi-version-state-")),
+			dataDir: mkdtempSync(join(tmpdir(), "packed-pi-version-data-")),
 			piVersion: { check: async () => ({}) },
 		});
-		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", { label: "Packed", transport: (request) => app.fetch(request) });
+		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", {
+			label: "Packed",
+			transport: (request) => app.fetch(request),
+		});
 		expect(await client.call("pi.status", {})).toEqual({});
 	});
 });

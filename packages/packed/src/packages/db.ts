@@ -7,8 +7,9 @@
 // node:sqlite under Node ≥22.5 (pi's extension host — jiti runs on Node).
 // Both share the better-sqlite3 API shape; transactions are done manually
 // because node:sqlite has no .transaction() helper.
-import { createRequire } from "node:module";
+
 import { mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
 
 const require_ = createRequire(import.meta.url);
 const IS_BUN = typeof (globalThis as { Bun?: unknown }).Bun !== "undefined";
@@ -18,9 +19,10 @@ const backend = IS_BUN
 
 // Constructor + options differ: bun:sqlite exports Database({create}),
 // node:sqlite exports DatabaseSync (creates by default).
-const DatabaseCtor = (
-	"DatabaseSync" in backend ? (backend as { DatabaseSync: unknown }).DatabaseSync : backend.Database
-) as new (path: string, opts?: { create?: boolean }) => Db;
+const DatabaseCtor = ("DatabaseSync" in backend ? (backend as { DatabaseSync: unknown }).DatabaseSync : backend.Database) as new (
+	path: string,
+	opts?: { create?: boolean },
+) => Db;
 
 export interface DbStatement {
 	run(...params: unknown[]): { lastInsertRowid: number | bigint };
@@ -45,10 +47,11 @@ function inTransaction<T>(db: Db, fn: () => T): T {
 		throw e;
 	}
 }
-import { join } from "node:path";
+
 import { createHash } from "node:crypto";
-import type { Pkg } from "../shared/ports.ts";
+import { join } from "node:path";
 import { DB_FILE } from "../shared/constants.ts";
+import type { Pkg } from "../shared/ports.ts";
 
 export interface SyncMeta {
 	source: string;
@@ -84,9 +87,7 @@ export function openDb(path: string): Db {
 		sha256 TEXT NOT NULL
 	)`);
 	// FTS5 mirror; rebuilt wholesale on each sync.
-	db.exec(
-		`CREATE VIRTUAL TABLE IF NOT EXISTS packages_fts USING fts5(name, description)`,
-	);
+	db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS packages_fts USING fts5(name, description)`);
 	return db;
 }
 
@@ -99,7 +100,10 @@ function ensureColumn(db: Db, table: string, column: string, declaration: string
  * change detection between syncs and integrity for the local mirror. */
 function payloadHash(pkgs: Pkg[]): string {
 	const h = createHash("sha256");
-	for (const p of pkgs) h.update(`${p.name}@${p.version}:${p.packageEvidence?.shape ?? "keyword-only"}:${p.packageEvidence?.verified === true ? 1 : 0}:${p.publication?.provenanceUrl ?? ""}\n`);
+	for (const p of pkgs)
+		h.update(
+			`${p.name}@${p.version}:${p.packageEvidence?.shape ?? "keyword-only"}:${p.packageEvidence?.verified === true ? 1 : 0}:${p.publication?.provenanceUrl ?? ""}\n`,
+		);
 	return h.digest("hex");
 }
 
@@ -113,16 +117,23 @@ export function replaceAll(db: Db, pkgs: Pkg[], source: string): SyncMeta {
 	};
 	// INSERT OR REPLACE: npm pagination is unstable — rankings shift between
 	// pages and a package can appear twice in one sync (rowid reuse is fine).
-	const insert = db.prepare("INSERT OR REPLACE INTO packages (name, version, description, date, shape, verified, evidence, provenance_url, trusted_publisher) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+	const insert = db.prepare(
+		"INSERT OR REPLACE INTO packages (name, version, description, date, shape, verified, evidence, provenance_url, trusted_publisher) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+	);
 	const insertFts = db.prepare("INSERT INTO packages_fts (rowid, name, description) VALUES (?, ?, ?)");
 	inTransaction(db, () => {
 		db.exec("DELETE FROM packages");
 		db.exec("DELETE FROM packages_fts");
 		for (const p of pkgs) {
 			const { lastInsertRowid } = insert.run(
-				p.name, p.version, p.description ?? null, p.date ?? null,
-				p.packageEvidence?.shape ?? "keyword-only", p.packageEvidence?.verified === true ? 1 : 0,
-				JSON.stringify(p.packageEvidence?.evidence ?? []), p.publication?.provenanceUrl ?? null,
+				p.name,
+				p.version,
+				p.description ?? null,
+				p.date ?? null,
+				p.packageEvidence?.shape ?? "keyword-only",
+				p.packageEvidence?.verified === true ? 1 : 0,
+				JSON.stringify(p.packageEvidence?.evidence ?? []),
+				p.publication?.provenanceUrl ?? null,
 				p.publication?.trustedPublisher ?? "unknown",
 			);
 			insertFts.run(Number(lastInsertRowid), p.name, p.description ?? "");
@@ -137,9 +148,9 @@ export function replaceAll(db: Db, pkgs: Pkg[], source: string): SyncMeta {
 }
 
 export function getSyncMeta(db: Db): SyncMeta | undefined {
-	return db
-		.prepare("SELECT source, fetched_at AS fetchedAt, package_count AS packageCount, sha256 FROM sync_meta WHERE id = 1")
-		.get() as SyncMeta | undefined;
+	return db.prepare("SELECT source, fetched_at AS fetchedAt, package_count AS packageCount, sha256 FROM sync_meta WHERE id = 1").get() as
+		| SyncMeta
+		| undefined;
 }
 
 export function catalogList(db: Db, limit = 0, offset = 0): Pkg[] {
@@ -156,26 +167,33 @@ export function searchLocal(db: Db, q: string, limit = 50): Pkg[] {
 	if (terms.length === 0) return [];
 	try {
 		const match = terms.map((t) => `"${t.replaceAll('"', '""')}"*`).join(" ");
-		return mapPackageRows(db
-			.prepare(
-				`SELECT p.name, p.version, p.description, p.date, p.shape, p.verified, p.evidence,
+		return mapPackageRows(
+			db
+				.prepare(
+					`SELECT p.name, p.version, p.description, p.date, p.shape, p.verified, p.evidence,
 				        p.provenance_url AS provenanceUrl, p.trusted_publisher AS trustedPublisher
 				 FROM packages_fts f JOIN packages p ON p.rowid = f.rowid
 				 WHERE packages_fts MATCH ? ORDER BY p.verified DESC, rank LIMIT ?`,
-			)
-			.all(match, limit));
+				)
+				.all(match, limit),
+		);
 	} catch {
 		// FTS syntax hostility → substring fallback
 		const like = `%${q}%`;
-		return mapPackageRows(db
-			.prepare("SELECT name, version, description, date, shape, verified, evidence, provenance_url AS provenanceUrl, trusted_publisher AS trustedPublisher FROM packages WHERE name LIKE ? OR description LIKE ? ORDER BY verified DESC, name LIMIT ?")
-			.all(like, like, limit));
+		return mapPackageRows(
+			db
+				.prepare(
+					"SELECT name, version, description, date, shape, verified, evidence, provenance_url AS provenanceUrl, trusted_publisher AS trustedPublisher FROM packages WHERE name LIKE ? OR description LIKE ? ORDER BY verified DESC, name LIMIT ?",
+				)
+				.all(like, like, limit),
+		);
 	}
 }
 
 function mapPackageRows(rows: unknown[]): Pkg[] {
 	return (rows as Array<Record<string, unknown>>).map((row) => ({
-		name: String(row.name), version: String(row.version ?? ""),
+		name: String(row.name),
+		version: String(row.version ?? ""),
 		description: typeof row.description === "string" ? row.description : undefined,
 		date: typeof row.date === "string" ? row.date : undefined,
 		packageEvidence: {
@@ -194,7 +212,9 @@ function parseEvidence(value: unknown): string[] {
 	try {
 		const parsed = JSON.parse(typeof value === "string" ? value : "[]") as unknown;
 		return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string").slice(0, 20) : [];
-	} catch { return []; }
+	} catch {
+		return [];
+	}
 }
 
 /** Latest mirrored version of one package (watcher's lookup). */

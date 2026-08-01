@@ -1,17 +1,17 @@
 /** Agent-facing package tools over the authenticated daemon. */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { packagePermissionDecision, type PackageOperation } from "./permission.js";
-import { InstallServiceError, PI_COMMAND_NAME, type Natives } from "./packed.js";
+import { InstallServiceError, type Natives, PI_COMMAND_NAME } from "./packed.js";
+import { type PackageOperation, packagePermissionDecision } from "./permission.js";
 import { reloadWarning } from "./reload.js";
 import {
 	createInfoDetails,
 	createModelContent,
 	createMutationDetails,
 	createSearchDetails,
+	type PackageToolDetails,
 	renderPackageToolCall,
 	renderPackageToolResult,
-	type PackageToolDetails,
 } from "./tool-output.js";
 
 function text(value: string, details: PackageToolDetails) {
@@ -44,7 +44,9 @@ export async function approvePackageOperation(
 		`${operation[0]!.toUpperCase()}${operation.slice(1)} Pi package`,
 		`Run: ${command}\n\nThis operation can execute package code or mutate Pi settings/install roots. ${reloadWarning(operation)} Continue?`,
 	);
-	return approved ? { allowed: true, approved: true } : { allowed: false, approved: false, reason: "cancelled", message: `${operation} cancelled by user.` };
+	return approved
+		? { allowed: true, approved: true }
+		: { allowed: false, approved: false, reason: "cancelled", message: `${operation} cancelled by user.` };
 }
 
 export async function installPackageWithPolicy(
@@ -57,7 +59,7 @@ export async function installPackageWithPolicy(
 		const output = approval.message ?? "install denied";
 		return text(output, createMutationDetails("install", source, approval.reason ?? "denied", output));
 	}
-	let output = await natives.install(source, approval.approved) || `Installed ${source}. Reload with /reload to activate.`;
+	let output = (await natives.install(source, approval.approved)) || `Installed ${source}. Reload with /reload to activate.`;
 	// Piggybacks on the same approval already granted for install -- both are
 	// the same code-execution mutation tier, not a new consent surface. Silent
 	// for the overwhelmingly common case (most Pi packages aren't daemons at
@@ -77,11 +79,7 @@ export async function installPackageWithPolicy(
 	return text(output, createMutationDetails("install", source, "succeeded", output));
 }
 
-export async function updatePackageWithPolicy(
-	source: string,
-	natives: Pick<Natives, "security" | "update">,
-	ctx: ApprovalContext,
-) {
+export async function updatePackageWithPolicy(source: string, natives: Pick<Natives, "security" | "update">, ctx: ApprovalContext) {
 	const approval = await approvePackageOperation("update", `pi update --extension ${source}`, natives, ctx);
 	if (!approval.allowed) {
 		const output = approval.message ?? "update denied";
@@ -101,17 +99,13 @@ export async function updatePackageWithPolicy(
 	return text(message, createMutationDetails("update", source, "succeeded", outcome.output || message, true));
 }
 
-export async function removePackageWithPolicy(
-	name: string,
-	natives: Pick<Natives, "security" | "remove">,
-	ctx: ApprovalContext,
-) {
+export async function removePackageWithPolicy(name: string, natives: Pick<Natives, "security" | "remove">, ctx: ApprovalContext) {
 	const approval = await approvePackageOperation("remove", `pi remove npm:${name}`, natives, ctx);
 	if (!approval.allowed) {
 		const output = approval.message ?? "remove denied";
 		return text(output, createMutationDetails("remove", name, approval.reason ?? "denied", output));
 	}
-	const output = await natives.remove(name, approval.approved) || `Removed ${name}. Reload with /reload to deactivate.`;
+	const output = (await natives.remove(name, approval.approved)) || `Removed ${name}. Reload with /reload to deactivate.`;
 	return text(output, createMutationDetails("remove", name, "succeeded", output));
 }
 
@@ -124,8 +118,12 @@ export function registerTools(pi: ExtensionAPI, natives: Natives): void {
 			query: Type.String({ description: "Search terms, e.g. 'lsp' or 'telegram'" }),
 			limit: Type.Optional(Type.Number({ description: "Max results (default 10, max 50)" })),
 		}),
-		renderCall(args, theme) { return renderPackageToolCall("Search packages", args, theme); },
-		renderResult(result, options, theme, context) { return renderPackageToolResult(result, options, theme, context); },
+		renderCall(args, theme) {
+			return renderPackageToolCall("Search packages", args, theme);
+		},
+		renderResult(result, options, theme, context) {
+			return renderPackageToolResult(result, options, theme, context);
+		},
 		async execute(_id, params) {
 			try {
 				const response = await natives.search(params.query, params.limit ?? 10);
@@ -144,8 +142,12 @@ export function registerTools(pi: ExtensionAPI, natives: Natives): void {
 		label: "Pi Package Info",
 		description: `Show bounded metadata and declared Pi resources for one package. Special case: querying ${PI_COMMAND_NAME} (Pi itself) also reports the locally running version against the latest published release -- a different question from, and in addition to, the generic npm registry metadata every other package gets.`,
 		parameters: Type.Object({ name: Type.String({ description: "npm package name" }) }),
-		renderCall(args, theme) { return renderPackageToolCall("Package info", args, theme); },
-		renderResult(result, options, theme, context) { return renderPackageToolResult(result, options, theme, context); },
+		renderCall(args, theme) {
+			return renderPackageToolCall("Package info", args, theme);
+		},
+		renderResult(result, options, theme, context) {
+			return renderPackageToolResult(result, options, theme, context);
+		},
 		async execute(_id, params) {
 			try {
 				const info = await natives.info(params.name);
@@ -165,11 +167,12 @@ export function registerTools(pi: ExtensionAPI, natives: Natives): void {
 				if (params.name === PI_COMMAND_NAME) {
 					const status = await natives.piStatus().catch(() => undefined);
 					if (status?.current) {
-						const comparison = status.latest === undefined
-							? "latest release unknown"
-							: status.upToDate === false
-								? `behind -- latest is ${status.latest}, run pi update --self`
-								: `up to date with the latest ${status.latest}`;
+						const comparison =
+							status.latest === undefined
+								? "latest release unknown"
+								: status.upToDate === false
+									? `behind -- latest is ${status.latest}, run pi update --self`
+									: `up to date with the latest ${status.latest}`;
 						lines.push(`--- Pi runtime (not npm registry data) ---`, `currently running: ${status.current}`, comparison);
 					}
 				}
@@ -185,8 +188,12 @@ export function registerTools(pi: ExtensionAPI, natives: Natives): void {
 		label: "Pi Package Install",
 		description: "Install a Pi package through the authenticated daemon. Operation-aware approval is secure by default.",
 		parameters: Type.Object({ source: Type.String({ description: "npm:, git:, or https source" }) }),
-		renderCall(args, theme) { return renderPackageToolCall("Install package", args, theme); },
-		renderResult(result, options, theme, context) { return renderPackageToolResult(result, options, theme, context); },
+		renderCall(args, theme) {
+			return renderPackageToolCall("Install package", args, theme);
+		},
+		renderResult(result, options, theme, context) {
+			return renderPackageToolResult(result, options, theme, context);
+		},
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			return installPackageWithPolicy(params.source, natives, ctx);
 		},
@@ -197,8 +204,12 @@ export function registerTools(pi: ExtensionAPI, natives: Natives): void {
 		label: "Pi Package Update",
 		description: "Update one configured Pi package through Pi's documented update command. Operation-aware approval is secure by default.",
 		parameters: Type.Object({ source: Type.String({ description: "configured npm:, git:, or https source" }) }),
-		renderCall(args, theme) { return renderPackageToolCall("Update package", args, theme); },
-		renderResult(result, options, theme, context) { return renderPackageToolResult(result, options, theme, context); },
+		renderCall(args, theme) {
+			return renderPackageToolCall("Update package", args, theme);
+		},
+		renderResult(result, options, theme, context) {
+			return renderPackageToolResult(result, options, theme, context);
+		},
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			return updatePackageWithPolicy(params.source, natives, ctx);
 		},
@@ -209,8 +220,12 @@ export function registerTools(pi: ExtensionAPI, natives: Natives): void {
 		label: "Pi Package Remove",
 		description: "Remove an installed npm Pi package through the authenticated daemon. Operation-aware approval is secure by default.",
 		parameters: Type.Object({ name: Type.String({ description: "bare npm name, e.g. pi-lsp or @scope/pkg" }) }),
-		renderCall(args, theme) { return renderPackageToolCall("Remove package", args, theme); },
-		renderResult(result, options, theme, context) { return renderPackageToolResult(result, options, theme, context); },
+		renderCall(args, theme) {
+			return renderPackageToolCall("Remove package", args, theme);
+		},
+		renderResult(result, options, theme, context) {
+			return renderPackageToolResult(result, options, theme, context);
+		},
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			return removePackageWithPolicy(params.name, natives, ctx);
 		},

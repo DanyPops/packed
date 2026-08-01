@@ -1,20 +1,33 @@
 import { describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createGithubLastCommitAt, type FetchGithubLastCommitAt } from "../src/adoption/commit-freshness.ts";
 import { formatPackReport, NpmPackVerifier, type PackCommand } from "../src/adoption/pack.ts";
 import { assessLocalAdoption, assessRegistryAdoption, scoreTarget } from "../src/adoption/score.ts";
-import type { PkgInfo, Registry, SearchPage } from "../src/shared/ports.ts";
 import { runBounded } from "../src/publish/publish.ts";
-import { createGithubLastCommitAt, type FetchGithubLastCommitAt } from "../src/adoption/commit-freshness.ts";
+import type { PkgInfo, Registry, SearchPage } from "../src/shared/ports.ts";
 
 class FakeRegistry implements Registry {
-	constructor(private info_: PkgInfo, private modifiedByName: Record<string, string | undefined> = {}) {}
-	async search(): Promise<SearchPage> { return { results: [], total: 0 }; }
-	async searchPage(): Promise<SearchPage> { return { results: [], total: 0 }; }
-	async searchAll() { return []; }
-	async info(): Promise<PkgInfo> { return this.info_; }
-	async modifiedAt(name: string): Promise<string | undefined> { return this.modifiedByName[name]; }
+	constructor(
+		private info_: PkgInfo,
+		private modifiedByName: Record<string, string | undefined> = {},
+	) {}
+	async search(): Promise<SearchPage> {
+		return { results: [], total: 0 };
+	}
+	async searchPage(): Promise<SearchPage> {
+		return { results: [], total: 0 };
+	}
+	async searchAll() {
+		return [];
+	}
+	async info(): Promise<PkgInfo> {
+		return this.info_;
+	}
+	async modifiedAt(name: string): Promise<string | undefined> {
+		return this.modifiedByName[name];
+	}
 }
 
 function fixture(manifest: Record<string, unknown>, readme = ""): string {
@@ -28,10 +41,22 @@ const successfulPack: PackCommand = async (_cwd, args) => {
 	expect(args).toEqual(["pack", "--dry-run", "--json", "--ignore-scripts"]);
 	return {
 		code: 0,
-		stdout: JSON.stringify([{ id: "pi-demo@1.0.0", name: "pi-demo", version: "1.0.0", size: 500, unpackedSize: 1000, shasum: "abc", integrity: "sha512-test", filename: "pi-demo-1.0.0.tgz", files: [
-			{ path: "package.json", size: 200, mode: 420 },
-			{ path: "extensions/demo.ts", size: 800, mode: 420 },
-		] }]),
+		stdout: JSON.stringify([
+			{
+				id: "pi-demo@1.0.0",
+				name: "pi-demo",
+				version: "1.0.0",
+				size: 500,
+				unpackedSize: 1000,
+				shasum: "abc",
+				integrity: "sha512-test",
+				filename: "pi-demo-1.0.0.tgz",
+				files: [
+					{ path: "package.json", size: 200, mode: 420 },
+					{ path: "extensions/demo.ts", size: 800, mode: 420 },
+				],
+			},
+		]),
 		stderr: "",
 	};
 };
@@ -49,7 +74,12 @@ describe("npm tarball verification", () => {
 	});
 
 	it("suppresses npm lifecycle scripts in the real dry-run", async () => {
-		const root = fixture({ name: "pi-no-scripts", version: "1.0.0", scripts: { prepack: "touch lifecycle-ran" }, pi: { extensions: ["extension.ts"] } });
+		const root = fixture({
+			name: "pi-no-scripts",
+			version: "1.0.0",
+			scripts: { prepack: "touch lifecycle-ran" },
+			pi: { extensions: ["extension.ts"] },
+		});
 		writeFileSync(join(root, "extension.ts"), "export default () => {};");
 		const report = await new NpmPackVerifier().verify(root);
 		expect(report.ok).toBe(true);
@@ -58,7 +88,11 @@ describe("npm tarball verification", () => {
 
 	it("reports excluded resources and sensitive tarball paths with stable codes", async () => {
 		const root = fixture({ name: "pi-demo", version: "1.0.0", pi: { extensions: ["extensions/missing.ts"] } });
-		const command: PackCommand = async () => ({ code: 0, stderr: "", stdout: JSON.stringify([{ name: "pi-demo", version: "1.0.0", files: [{ path: ".env", size: 20 }], size: 20, unpackedSize: 20 }]) });
+		const command: PackCommand = async () => ({
+			code: 0,
+			stderr: "",
+			stdout: JSON.stringify([{ name: "pi-demo", version: "1.0.0", files: [{ path: ".env", size: 20 }], size: 20, unpackedSize: 20 }]),
+		});
 		const report = await new NpmPackVerifier(command).verify(root);
 		expect(report.ok).toBe(false);
 		expect(report.diagnostics.map((item) => item.code)).toContain("PACK_DECLARED_RESOURCE_MISSING");
@@ -66,7 +100,18 @@ describe("npm tarball verification", () => {
 	});
 
 	it("keeps bounded JSON output valid", () => {
-		const output = formatPackReport({ root: "/tmp/pkg", ok: true, command: ["npm", "pack"], files: Array.from({ length: 2_000 }, (_, index) => ({ path: `${"x".repeat(500)}/${index}`, size: 1 })), shape: { kind: "conventional", verified: true, evidence: ["extensions"] }, diagnostics: [], truncated: false }, true);
+		const output = formatPackReport(
+			{
+				root: "/tmp/pkg",
+				ok: true,
+				command: ["npm", "pack"],
+				files: Array.from({ length: 2_000 }, (_, index) => ({ path: `${"x".repeat(500)}/${index}`, size: 1 })),
+				shape: { kind: "conventional", verified: true, evidence: ["extensions"] },
+				diagnostics: [],
+				truncated: false,
+			},
+			true,
+		);
 		expect(output.length).toBeLessThanOrEqual(64 * 1024);
 		expect(JSON.parse(output).outputTruncated).toBe(true);
 	});
@@ -82,17 +127,20 @@ describe("npm tarball verification", () => {
 
 describe("adoption readiness evidence", () => {
 	it("reports transparent local dimensions without turning traction into quality", async () => {
-		const root = fixture({
-			name: "pi-demo",
-			version: "1.0.0",
-			description: "Focused Pi demo extension",
-			keywords: ["pi-package", "pi-extension"],
-			license: "MIT",
-			repository: "https://github.com/example/pi-demo",
-			bugs: "https://github.com/example/pi-demo/issues",
-			peerDependencies: { "@earendil-works/pi-coding-agent": "*" },
-			pi: { extensions: ["extensions/demo.ts"] },
-		}, "# pi-demo\n\nInstall: `pi install npm:pi-demo`\n\n## Usage\nRun `/demo`.\n\n![demo](demo.png)\n");
+		const root = fixture(
+			{
+				name: "pi-demo",
+				version: "1.0.0",
+				description: "Focused Pi demo extension",
+				keywords: ["pi-package", "pi-extension"],
+				license: "MIT",
+				repository: "https://github.com/example/pi-demo",
+				bugs: "https://github.com/example/pi-demo/issues",
+				peerDependencies: { "@earendil-works/pi-coding-agent": "*" },
+				pi: { extensions: ["extensions/demo.ts"] },
+			},
+			"# pi-demo\n\nInstall: `pi install npm:pi-demo`\n\n## Usage\nRun `/demo`.\n\n![demo](demo.png)\n",
+		);
 		const pack = await new NpmPackVerifier(successfulPack).verify(root);
 		const report = await assessLocalAdoption(root, pack);
 		expect(report.dimensions.discoverability.met).toBeGreaterThan(0);
@@ -106,8 +154,13 @@ describe("adoption readiness evidence", () => {
 
 	it("shows provenance and bounded download observations while leaving trusted publisher unknown", () => {
 		const report = assessRegistryAdoption({
-			name: "pi-demo", version: "1.0.0", description: "demo", keywords: ["pi-package"], license: "MIT",
-			repository: "https://github.com/example/pi-demo", pi: { extensions: ["extension.ts"] },
+			name: "pi-demo",
+			version: "1.0.0",
+			description: "demo",
+			keywords: ["pi-package"],
+			license: "MIT",
+			repository: "https://github.com/example/pi-demo",
+			pi: { extensions: ["extension.ts"] },
 			publication: { integrity: "sha512-test", provenanceUrl: "https://registry.example/attestation", trustedPublisher: "unknown" },
 			downloads: { weekly: 12, monthly: 34, observedAt: "2026-07-27T00:00:00.000Z" },
 		});
@@ -120,16 +173,36 @@ describe("adoption readiness evidence", () => {
 describe("freshness (npm publish-date proxy for commit recency)", () => {
 	it("is unknown when neither a real commit date nor a publish date is available for the candidate", () => {
 		const report = assessRegistryAdoption({ name: "pi-demo", version: "1.0.0" }, undefined, "2026-07-25T12:47:12.883Z");
-		expect(report.dimensions.freshness).toEqual({ status: "unknown", met: 0, total: 0, evidence: ["candidate's commit history and npm publish date are both unavailable"], actions: [] });
+		expect(report.dimensions.freshness).toEqual({
+			status: "unknown",
+			met: 0,
+			total: 0,
+			evidence: ["candidate's commit history and npm publish date are both unavailable"],
+			actions: [],
+		});
 	});
 
 	it("is unknown when pi-coding-agent's own publish date is unavailable", () => {
-		const report = assessRegistryAdoption({ name: "pi-demo", version: "1.0.0", modified: "2026-06-01T00:00:00.000Z" }, undefined, undefined);
-		expect(report.dimensions.freshness).toEqual({ status: "unknown", met: 0, total: 0, evidence: ["pi-coding-agent's own latest npm publish date is unavailable"], actions: [] });
+		const report = assessRegistryAdoption(
+			{ name: "pi-demo", version: "1.0.0", modified: "2026-06-01T00:00:00.000Z" },
+			undefined,
+			undefined,
+		);
+		expect(report.dimensions.freshness).toEqual({
+			status: "unknown",
+			met: 0,
+			total: 0,
+			evidence: ["pi-coding-agent's own latest npm publish date is unavailable"],
+			actions: [],
+		});
 	});
 
 	it("reports a signed day-delta as observational evidence, never a pass/fail gate", () => {
-		const report = assessRegistryAdoption({ name: "pi-demo", version: "1.0.0", modified: "2026-06-01T00:00:00.000Z" }, undefined, "2026-07-25T00:00:00.000Z");
+		const report = assessRegistryAdoption(
+			{ name: "pi-demo", version: "1.0.0", modified: "2026-06-01T00:00:00.000Z" },
+			undefined,
+			"2026-07-25T00:00:00.000Z",
+		);
 		expect(report.dimensions.freshness.status).toBe("observed");
 		expect(report.dimensions.freshness.met).toBe(0);
 		expect(report.dimensions.freshness.total).toBe(0);
@@ -137,7 +210,11 @@ describe("freshness (npm publish-date proxy for commit recency)", () => {
 	});
 
 	it("reports the candidate publishing after pi-coding-agent's latest, not just before", () => {
-		const report = assessRegistryAdoption({ name: "pi-demo", version: "1.0.0", modified: "2026-08-01T00:00:00.000Z" }, undefined, "2026-07-25T00:00:00.000Z");
+		const report = assessRegistryAdoption(
+			{ name: "pi-demo", version: "1.0.0", modified: "2026-08-01T00:00:00.000Z" },
+			undefined,
+			"2026-07-25T00:00:00.000Z",
+		);
 		expect(report.dimensions.freshness.evidence.join(" ")).toContain("7d after pi-coding-agent's latest publish");
 	});
 
@@ -153,7 +230,13 @@ describe("freshness (npm publish-date proxy for commit recency)", () => {
 			{ name: "pi-demo", version: "1.0.0" },
 			{ "pi-demo": "2026-06-01T00:00:00.000Z", "@earendil-works/pi-coding-agent": "2026-07-25T00:00:00.000Z" },
 		);
-		const report = await scoreTarget("pi-demo", registry, new NpmPackVerifier(successfulPack), async () => undefined, async () => undefined);
+		const report = await scoreTarget(
+			"pi-demo",
+			registry,
+			new NpmPackVerifier(successfulPack),
+			async () => undefined,
+			async () => undefined,
+		);
 		expect(report.dimensions.freshness.status).toBe("observed");
 		expect(report.dimensions.freshness.evidence.join(" ")).toContain("54d before");
 		expect(report.dimensions.freshness.evidence.join(" ")).toContain("npm publish date (commit history unavailable");
@@ -161,12 +244,26 @@ describe("freshness (npm publish-date proxy for commit recency)", () => {
 
 	it("scoreTarget leaves freshness unknown when the registry has no modifiedAt method at all", async () => {
 		class NoModifiedAtRegistry implements Registry {
-			async search(): Promise<SearchPage> { return { results: [], total: 0 }; }
-			async searchPage(): Promise<SearchPage> { return { results: [], total: 0 }; }
-			async searchAll() { return []; }
-			async info(): Promise<PkgInfo> { return { name: "pi-demo", version: "1.0.0" }; }
+			async search(): Promise<SearchPage> {
+				return { results: [], total: 0 };
+			}
+			async searchPage(): Promise<SearchPage> {
+				return { results: [], total: 0 };
+			}
+			async searchAll() {
+				return [];
+			}
+			async info(): Promise<PkgInfo> {
+				return { name: "pi-demo", version: "1.0.0" };
+			}
 		}
-		const report = await scoreTarget("pi-demo", new NoModifiedAtRegistry(), new NpmPackVerifier(successfulPack), async () => undefined, async () => undefined);
+		const report = await scoreTarget(
+			"pi-demo",
+			new NoModifiedAtRegistry(),
+			new NpmPackVerifier(successfulPack),
+			async () => undefined,
+			async () => undefined,
+		);
 		expect(report.dimensions.freshness.status).toBe("unknown");
 	});
 });
@@ -175,7 +272,9 @@ describe("freshness: real commit-date source (preferred over the npm publish-dat
 	it("prefers a real commit date over the publish-date proxy when both are available", () => {
 		const report = assessRegistryAdoption(
 			{ name: "pi-demo", version: "1.0.0", modified: "2026-05-01T00:00:00.000Z" },
-			undefined, "2026-07-25T00:00:00.000Z", "2026-07-20T00:00:00.000Z",
+			undefined,
+			"2026-07-25T00:00:00.000Z",
+			"2026-07-20T00:00:00.000Z",
 		);
 		expect(report.dimensions.freshness.evidence.join(" ")).toContain("last real commit: 2026-07-20");
 		expect(report.dimensions.freshness.evidence.join(" ")).not.toContain("2026-05-01");
@@ -281,7 +380,10 @@ describe("freshness: real commit-date source (preferred over the npm publish-dat
 			port: 0,
 			fetch: () => {
 				calls++;
-				return new Response("primary rate limit exhausted", { status: 403, headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(farFutureReset) } });
+				return new Response("primary rate limit exhausted", {
+					status: 403,
+					headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(farFutureReset) },
+				});
 			},
 		});
 		const fetchGithubCommit = createGithubLastCommitAt(`http://127.0.0.1:${server.port}`);
@@ -295,7 +397,10 @@ describe("freshness: real commit-date source (preferred over the npm publish-dat
 		let calls = 0;
 		await using server = Bun.serve({
 			port: 0,
-			fetch: () => { calls++; return new Response("server error", { status: 500 }); },
+			fetch: () => {
+				calls++;
+				return new Response("server error", { status: 500 });
+			},
 		});
 		const fetchGithubCommit = createGithubLastCommitAt(`http://127.0.0.1:${server.port}`);
 		expect(await fetchGithubCommit("https://github.com/example/pi-demo")).toBeUndefined();
@@ -308,12 +413,18 @@ describe("compatibility (informal Pi peer-range signal)", () => {
 		return { name: "pi-demo", version: "1.0.0", ...(range ? { peerDependencies: { "@earendil-works/pi-coding-agent": range } } : {}) };
 	}
 
-	it("is unknown (not missing) when undeclared -- matches Pi's own recommended \"*\" convention", () => {
+	it('is unknown (not missing) when undeclared -- matches Pi\'s own recommended "*" convention', () => {
 		const report = assessRegistryAdoption(withPeerRange(undefined), "0.82.1");
-		expect(report.dimensions.compatibility).toEqual({ status: "unknown", met: 0, total: 0, evidence: ["no declared Pi peer range (matches Pi's own recommended \"*\" convention)"], actions: [] });
+		expect(report.dimensions.compatibility).toEqual({
+			status: "unknown",
+			met: 0,
+			total: 0,
+			evidence: ['no declared Pi peer range (matches Pi\'s own recommended "*" convention)'],
+			actions: [],
+		});
 	});
 
-	it("treats an explicit \"*\" identically to undeclared -- a wildcard carries no real signal", () => {
+	it('treats an explicit "*" identically to undeclared -- a wildcard carries no real signal', () => {
 		const report = assessRegistryAdoption(withPeerRange("*"), "0.82.1");
 		expect(report.dimensions.compatibility.status).toBe("unknown");
 		expect(report.dimensions.compatibility.evidence.join(" ")).toContain("carries no real signal");
@@ -337,7 +448,9 @@ describe("compatibility (informal Pi peer-range signal)", () => {
 		// this fixture stays within that same 0.82.x window on purpose.
 		const report = assessRegistryAdoption(withPeerRange("^0.82.0"), "0.82.1");
 		expect(report.dimensions.compatibility).toEqual({
-			status: "ready", met: 1, total: 1,
+			status: "ready",
+			met: 1,
+			total: 1,
 			evidence: ["declared Pi peer range ^0.82.0 is satisfied by the running pi 0.82.1"],
 			actions: [],
 		});
@@ -353,7 +466,11 @@ describe("compatibility (informal Pi peer-range signal)", () => {
 	});
 
 	it("scoreTarget threads an injected current-Pi-version resolver through to the compatibility dimension, never invoking a real subprocess in tests", async () => {
-		const registry = new FakeRegistry({ name: "pi-demo", version: "1.0.0", peerDependencies: { "@earendil-works/pi-coding-agent": "^0.82.0" } });
+		const registry = new FakeRegistry({
+			name: "pi-demo",
+			version: "1.0.0",
+			peerDependencies: { "@earendil-works/pi-coding-agent": "^0.82.0" },
+		});
 		const report = await scoreTarget("pi-demo", registry, new NpmPackVerifier(successfulPack), async () => "0.82.1");
 		expect(report.dimensions.compatibility.status).toBe("ready");
 	});

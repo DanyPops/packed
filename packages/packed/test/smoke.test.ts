@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { runExtensionSmoke } from "../src/adoption/smoke.ts";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { checkPackage } from "../src/adoption/check.ts";
+import { runExtensionSmoke } from "../src/adoption/smoke.ts";
 
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(() => {
+	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 
 /**
  * Binary presence alone doesn't prove bwrap actually works -- some container
@@ -32,7 +34,16 @@ function extension(source: string): { root: string; path: string } {
 	mkdirSync(join(root, "extensions"));
 	const path = join(root, "extensions/index.ts");
 	writeFileSync(path, source);
-	writeFileSync(join(root, "package.json"), JSON.stringify({ name: "pi-smoke", version: "1.0.0", keywords: ["pi-package"], files: ["extensions"], pi: { extensions: ["extensions/index.ts"] } }));
+	writeFileSync(
+		join(root, "package.json"),
+		JSON.stringify({
+			name: "pi-smoke",
+			version: "1.0.0",
+			keywords: ["pi-package"],
+			files: ["extensions"],
+			pi: { extensions: ["extensions/index.ts"] },
+		}),
+	);
 	return { root, path };
 }
 
@@ -49,7 +60,13 @@ describeIfSandboxed("isolated extension smoke runner", () => {
 		const result = await runExtensionSmoke(fixture.root, fixture.path);
 		expect(result.status).toBe("ok");
 		expect(result.registrations).toEqual({
-			tools: ["hello"], commands: ["hello"], shortcuts: ["ctrl+h"], flags: ["hello"], providers: ["local"], events: ["session_start"], renderers: [],
+			tools: ["hello"],
+			commands: ["hello"],
+			shortcuts: ["ctrl+h"],
+			flags: ["hello"],
+			providers: ["local"],
+			events: ["session_start"],
+			renderers: [],
 		});
 		expect(result.durationMs).toBeLessThan(2_000);
 	});
@@ -70,21 +87,27 @@ describeIfSandboxed("isolated extension smoke runner", () => {
 	});
 
 	it("denies filesystem and network capabilities", async () => {
-		const filesystem = extension('import { writeFileSync } from "node:fs"; export default function () { writeFileSync("/forbidden", "x"); }');
+		const filesystem = extension(
+			'import { writeFileSync } from "node:fs"; export default function () { writeFileSync("/forbidden", "x"); }',
+		);
 		const network = extension('export default async function () { await fetch("https://example.com"); }');
 		expect((await runExtensionSmoke(filesystem.root, filesystem.path)).status).toBe("capability-denied");
 		expect((await runExtensionSmoke(network.root, network.path)).status).toBe("capability-denied");
 	});
 
 	it("bounds subprocess creation and captured output", async () => {
-		const processes = extension('export default async function () { const children = []; for (let i = 0; i < 100; i++) children.push(Bun.spawn(["/usr/bin/sleep", "2"])); await Promise.all(children.map((child) => child.exited)); }');
+		const processes = extension(
+			'export default async function () { const children = []; for (let i = 0; i < 100; i++) children.push(Bun.spawn(["/usr/bin/sleep", "2"])); await Promise.all(children.map((child) => child.exited)); }',
+		);
 		const output = extension('export default function () { process.stdout.write("x".repeat(200000)); }');
 		expect((await runExtensionSmoke(processes.root, processes.path)).status).toBe("capability-denied");
 		expect((await runExtensionSmoke(output.root, output.path, { maxOutputBytes: 4_096 })).status).toBe("output-limit");
 	});
 
 	it("keeps default package checks static and adds smoke results only when requested", async () => {
-		const fixture = extension('import { writeFileSync } from "node:fs"; export default function (pi: any) { writeFileSync("executed", "yes"); pi.registerCommand("x", { handler() {} }); }');
+		const fixture = extension(
+			'import { writeFileSync } from "node:fs"; export default function (pi: any) { writeFileSync("executed", "yes"); pi.registerCommand("x", { handler() {} }); }',
+		);
 		const staticReport = await checkPackage(fixture.root, { generic: false });
 		expect(existsSync(join(fixture.root, "executed"))).toBe(false);
 		expect(staticReport.smoke).toBeUndefined();

@@ -3,40 +3,47 @@
  * handler: (Request) → Response. Bun.serve wraps it for the network;
  * tests call it in-process. Same port, two adapters — Cockburn's symmetry.
  */
-import { errorResponse, healthResponse, jsonResponse, readyResponse, requireBearerToken } from "@danypops/vehicle-server/rpc-http";
-import { buildSearchQuery, clampLimit } from "../shared/ports.ts";
-import type { InstalledPkg, Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome, UpdatesSnapshot } from "../shared/ports.ts";
-import { TTLCache } from "../shared/cache.ts";
-import { syncCatalog } from "../packages/catalog.ts";
-import { buildIndex, indexPath, readIndex, writeIndex, type PackageIndex } from "../index/build-index.ts";
-import { checkUpdates, loadUpdates } from "./watcher.ts";
-import { readInstalledPackages, readInstalledPackagesAcrossScopes, defaultPiHome } from "../packages/installed.ts";
-import { openDb, searchLocal, catalogList, getSyncMeta, dbPath, latestVersion } from "../packages/db.ts";
-import { SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT } from "../shared/constants.ts";
-import { VERSION } from "../shared/version.ts";
-import { createLogger } from "../shared/log.ts";
-import { StaticPackageChecker, type CheckReport, type PackageChecker } from "../adoption/check.ts";
-import { NpmPackVerifier, type PackReport } from "../adoption/pack.ts";
-import { scoreTarget, type AdoptionReport } from "../adoption/score.ts";
-import { SetupManager, type SetupApplyResult, type SetupExportReport, type SetupPlan, type SetupUpdateReport } from "../setup/setup.ts";
-import { listPackageResources, resolveToggleSettingsPath, toggleResource, RESOURCE_FIELDS, type PackageResources, type ResourceField } from "../packages/resources.ts";
-import { checkPiVersion, type PiVersionReport } from "../pi/pi-version.ts";
-import { runDoctor, type DoctorReport } from "../adoption/doctor.ts";
-import { formatCleanupSummary, runCleanup } from "./cleanup.ts";
-import { resolveInstalledDir } from "../packages/resources.ts";
-import { scanInstalledPackages, resolveInstalledVersions, type AdvisoryReport } from "../adoption/advisories.ts";
-import { join as joinPath } from "node:path";
+
 import { existsSync as fileExistsSync } from "node:fs";
-import { RealDaemonServiceInstaller, type DaemonServiceInstaller } from "./daemon-service.ts";
-import type { ServiceInstallResult, ServiceSpec } from "@danypops/vehicle-server/service";
+import { errorResponse, healthResponse, jsonResponse, readyResponse, requireBearerToken } from "@danypops/vehicle-server/rpc-http";
+import type { ServiceSpec } from "@danypops/vehicle-server/service";
+import { type AdvisoryReport, resolveInstalledVersions, scanInstalledPackages } from "../adoption/advisories.ts";
+import { type CheckReport, type PackageChecker, StaticPackageChecker } from "../adoption/check.ts";
+import { type DoctorReport, runDoctor } from "../adoption/doctor.ts";
+import { NpmPackVerifier, type PackReport } from "../adoption/pack.ts";
+import { type AdoptionReport, scoreTarget } from "../adoption/score.ts";
+import { buildIndex, indexPath, type PackageIndex, readIndex, writeIndex } from "../index/build-index.ts";
+import { syncCatalog } from "../packages/catalog.ts";
+import { catalogList, dbPath, getSyncMeta, latestVersion, openDb, searchLocal } from "../packages/db.ts";
+import { defaultPiHome, readInstalledPackages, readInstalledPackagesAcrossScopes } from "../packages/installed.ts";
+import {
+	listPackageResources,
+	type PackageResources,
+	RESOURCE_FIELDS,
+	type ResourceField,
+	resolveInstalledDir,
+	resolveToggleSettingsPath,
+	toggleResource,
+} from "../packages/resources.ts";
+import { checkPiVersion, type PiVersionReport } from "../pi/pi-version.ts";
 import {
 	assertPackagePermission,
+	type MutationApproval,
 	PackageApprovalRequiredError,
+	type PackageOperation,
 	readSecuritySettings,
 	writeSecuritySettings,
-	type MutationApproval,
-	type PackageOperation,
 } from "../security/security.ts";
+import { type SetupApplyResult, type SetupExportReport, SetupManager, type SetupPlan, type SetupUpdateReport } from "../setup/setup.ts";
+import { TTLCache } from "../shared/cache.ts";
+import { SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT } from "../shared/constants.ts";
+import { createLogger } from "../shared/log.ts";
+import type { InstalledPkg, Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome, UpdatesSnapshot } from "../shared/ports.ts";
+import { buildSearchQuery, clampLimit } from "../shared/ports.ts";
+import { VERSION } from "../shared/version.ts";
+import { formatCleanupSummary, runCleanup } from "./cleanup.ts";
+import { type DaemonServiceInstaller, RealDaemonServiceInstaller } from "./daemon-service.ts";
+import { checkUpdates, loadUpdates } from "./watcher.ts";
 
 const log = createLogger("service");
 
@@ -121,9 +128,17 @@ export interface OperationInputs {
 	"package.updates.project": { projectRoot: string };
 }
 
-interface MutationResponse { ok: boolean; output: string }
+interface MutationResponse {
+	ok: boolean;
+	output: string;
+}
 interface UpdateMutationResponse extends MutationResponse, Partial<Omit<UpdateOutcome, "output">> {}
-interface InstallServiceResponse { ok: boolean; output: string; spec?: Pick<ServiceSpec, "name" | "binPath" | "descriptorPath">; notADaemon?: boolean }
+interface InstallServiceResponse {
+	ok: boolean;
+	output: string;
+	spec?: Pick<ServiceSpec, "name" | "binPath" | "descriptorPath">;
+	notADaemon?: boolean;
+}
 
 export interface OperationOutputs {
 	"package.search": { query: string; total: number; results: SearchPage["results"]; offline?: boolean };
@@ -156,15 +171,40 @@ export interface OperationOutputs {
 }
 
 export const OPERATION_NAMES: readonly OperationName[] = [
-	"package.search", "package.info", "package.installed", "package.catalog", "package.catalog.sync", "package.index", "package.index.build", "package.updates", "package.check", "package.pack", "package.score",
-	"setup.export", "setup.update", "setup.plan", "setup.apply",
-	"package.security.get", "package.security.set", "package.install", "package.install_service", "package.remove", "package.update",
-	"resources.list", "resources.toggle",
-	"pi.status", "advisories.scan", "doctor.run", "package.updates.project",
+	"package.search",
+	"package.info",
+	"package.installed",
+	"package.catalog",
+	"package.catalog.sync",
+	"package.index",
+	"package.index.build",
+	"package.updates",
+	"package.check",
+	"package.pack",
+	"package.score",
+	"setup.export",
+	"setup.update",
+	"setup.plan",
+	"setup.apply",
+	"package.security.get",
+	"package.security.set",
+	"package.install",
+	"package.install_service",
+	"package.remove",
+	"package.update",
+	"resources.list",
+	"resources.toggle",
+	"pi.status",
+	"advisories.scan",
+	"doctor.run",
+	"package.updates.project",
 ];
 
 class PackageOperationError extends Error {
-	constructor(message: string, readonly status: number) {
+	constructor(
+		message: string,
+		readonly status: number,
+	) {
 		super(message);
 	}
 }
@@ -390,55 +430,70 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 		}
 		if (op === "package.check" || op === "package.pack") {
 			const packagePath = (input as OperationInputs["package.check"] | OperationInputs["package.pack"]).path;
-			if (typeof packagePath !== "string" || packagePath.length === 0 || packagePath.length > 4_096) throw new PackageOperationError("path must be a non-empty string up to 4096 characters", 400);
-			if (op === "package.pack") return await packer.verify(packagePath) as OperationOutputs[Name];
-			return await checker.check(packagePath, { smoke: (input as OperationInputs["package.check"]).smoke === true }) as OperationOutputs[Name];
+			if (typeof packagePath !== "string" || packagePath.length === 0 || packagePath.length > 4_096)
+				throw new PackageOperationError("path must be a non-empty string up to 4096 characters", 400);
+			if (op === "package.pack") return (await packer.verify(packagePath)) as OperationOutputs[Name];
+			return (await checker.check(packagePath, {
+				smoke: (input as OperationInputs["package.check"]).smoke === true,
+			})) as OperationOutputs[Name];
 		}
 		if (op === "package.score") {
 			const target = (input as OperationInputs["package.score"]).target;
-			if (typeof target !== "string" || target.length === 0 || target.length > 4_096) throw new PackageOperationError("target must be a non-empty string up to 4096 characters", 400);
+			if (typeof target !== "string" || target.length === 0 || target.length > 4_096)
+				throw new PackageOperationError("target must be a non-empty string up to 4096 characters", 400);
 			return (deps.scorer ? await deps.scorer.score(target) : await scoreTarget(target, deps.reg, packer)) as OperationOutputs[Name];
 		}
 		if (op === "setup.export") {
 			const value = input as OperationInputs["setup.export"];
-			if (typeof value.projectRoot !== "string" || value.projectRoot.length === 0 || value.projectRoot.length > 4_096) throw new PackageOperationError("projectRoot must be a non-empty string up to 4096 characters", 400);
-			return await setup.export(value.projectRoot, { force: value.force === true, machineLocal: value.machineLocal === true }) as OperationOutputs[Name];
+			if (typeof value.projectRoot !== "string" || value.projectRoot.length === 0 || value.projectRoot.length > 4_096)
+				throw new PackageOperationError("projectRoot must be a non-empty string up to 4096 characters", 400);
+			return (await setup.export(value.projectRoot, {
+				force: value.force === true,
+				machineLocal: value.machineLocal === true,
+			})) as OperationOutputs[Name];
 		}
 		if (op === "setup.update" || op === "setup.plan" || op === "setup.apply") {
 			const value = input as OperationInputs["setup.update"] | OperationInputs["setup.plan"] | OperationInputs["setup.apply"];
-			if (typeof value.manifestPath !== "string" || value.manifestPath.length === 0 || value.manifestPath.length > 4_096) throw new PackageOperationError("manifestPath must be a non-empty string up to 4096 characters", 400);
-			if (op === "setup.update") return await setup.update(value.manifestPath) as OperationOutputs[Name];
+			if (typeof value.manifestPath !== "string" || value.manifestPath.length === 0 || value.manifestPath.length > 4_096)
+				throw new PackageOperationError("manifestPath must be a non-empty string up to 4096 characters", 400);
+			if (op === "setup.update") return (await setup.update(value.manifestPath)) as OperationOutputs[Name];
 			if (op === "setup.apply") {
 				const applyInput = input as OperationInputs["setup.apply"];
 				const denied = authorize("setup.apply", applyInput.approved === true);
-				if (denied) throw new PackageOperationError((await denied.json() as { error: string }).error, denied.status);
-				return await setup.apply(value.manifestPath, { prune: applyInput.prune === true }) as OperationOutputs[Name];
+				if (denied) throw new PackageOperationError(((await denied.json()) as { error: string }).error, denied.status);
+				return (await setup.apply(value.manifestPath, { prune: applyInput.prune === true })) as OperationOutputs[Name];
 			}
-			return await setup.plan(value.manifestPath, { prune: (input as OperationInputs["setup.plan"]).prune === true }) as OperationOutputs[Name];
+			return (await setup.plan(value.manifestPath, {
+				prune: (input as OperationInputs["setup.plan"]).prune === true,
+			})) as OperationOutputs[Name];
 		}
 		if (op === "pi.status") {
 			return (deps.piVersion ? await deps.piVersion.check() : await checkPiVersion()) as OperationOutputs[Name];
 		}
 		if (op === "advisories.scan") {
 			const value = input as OperationInputs["advisories.scan"];
-			if (value.name !== undefined && (typeof value.name !== "string" || value.name.length === 0 || value.name.length > 214)) throw new PackageOperationError("name must be a non-empty string up to 214 characters", 400);
+			if (value.name !== undefined && (typeof value.name !== "string" || value.name.length === 0 || value.name.length > 214))
+				throw new PackageOperationError("name must be a non-empty string up to 214 characters", 400);
 			const installed = resolveInstalledVersions(deps.piHome ?? defaultPiHome(), value.name);
 			const scan = deps.advisories?.scan ?? scanInstalledPackages;
 			return (await scan(installed)) as OperationOutputs[Name];
 		}
 		if (op === "resources.list") {
 			const value = input as OperationInputs["resources.list"];
-			if (value.projectRoot !== undefined && (typeof value.projectRoot !== "string" || value.projectRoot.length > 4_096)) throw new PackageOperationError("projectRoot must be a string up to 4096 characters", 400);
+			if (value.projectRoot !== undefined && (typeof value.projectRoot !== "string" || value.projectRoot.length > 4_096))
+				throw new PackageOperationError("projectRoot must be a string up to 4096 characters", 400);
 			return listPackageResources(deps.piHome ?? defaultPiHome(), value.projectRoot) as OperationOutputs[Name];
 		}
 		if (op === "doctor.run") {
 			const value = input as OperationInputs["doctor.run"];
-			if (value.projectRoot !== undefined && (typeof value.projectRoot !== "string" || value.projectRoot.length > 4_096)) throw new PackageOperationError("projectRoot must be a string up to 4096 characters", 400);
+			if (value.projectRoot !== undefined && (typeof value.projectRoot !== "string" || value.projectRoot.length > 4_096))
+				throw new PackageOperationError("projectRoot must be a string up to 4096 characters", 400);
 			return (await runDoctor(deps.piHome ?? defaultPiHome(), value.projectRoot)) as OperationOutputs[Name];
 		}
 		if (op === "package.updates.project") {
 			const value = input as OperationInputs["package.updates.project"];
-			if (typeof value.projectRoot !== "string" || value.projectRoot.length === 0 || value.projectRoot.length > 4_096) throw new PackageOperationError("projectRoot must be a non-empty string up to 4096 characters", 400);
+			if (typeof value.projectRoot !== "string" || value.projectRoot.length === 0 || value.projectRoot.length > 4_096)
+				throw new PackageOperationError("projectRoot must be a non-empty string up to 4096 characters", 400);
 			// Live, on-demand, cross-scope -- distinct from package.updates' own persisted,
 			// global-only background snapshot (startWatcher), which has no project context.
 			const db = openDb(dbPath(dataDir));
@@ -452,16 +507,22 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 		}
 		if (op === "resources.toggle") {
 			const value = input as OperationInputs["resources.toggle"];
-			if (typeof value.source !== "string" || value.source.length === 0 || value.source.length > 4_096) throw new PackageOperationError("source must be a non-empty string up to 4096 characters", 400);
-			if (!RESOURCE_FIELDS.includes(value.field)) throw new PackageOperationError("field must be one of extensions, skills, prompts, themes", 400);
-			if (typeof value.path !== "string" || value.path.length === 0 || value.path.length > 4_096 || value.path.includes("..")) throw new PackageOperationError("path must be a non-empty, non-escaping relative path up to 4096 characters", 400);
+			if (typeof value.source !== "string" || value.source.length === 0 || value.source.length > 4_096)
+				throw new PackageOperationError("source must be a non-empty string up to 4096 characters", 400);
+			if (!RESOURCE_FIELDS.includes(value.field))
+				throw new PackageOperationError("field must be one of extensions, skills, prompts, themes", 400);
+			if (typeof value.path !== "string" || value.path.length === 0 || value.path.length > 4_096 || value.path.includes(".."))
+				throw new PackageOperationError("path must be a non-empty, non-escaping relative path up to 4096 characters", 400);
 			const denied = authorize("resources.toggle", value.approved === true);
-			if (denied) throw new PackageOperationError((await denied.json() as { error: string }).error, denied.status);
+			if (denied) throw new PackageOperationError(((await denied.json()) as { error: string }).error, denied.status);
 			const piHome = deps.piHome ?? defaultPiHome();
 			const settingsPath = resolveToggleSettingsPath(piHome, value.projectRoot);
 			if (value.projectRoot && !fileExistsSync(settingsPath)) throw new PackageOperationError("no project settings file to toggle", 404);
 			const result = toggleResource({ settingsPath, source: value.source, field: value.field, path: value.path, enabled: value.enabled });
-			return { ok: result.ok, output: result.ok ? `${value.enabled ? "enabled" : "disabled"} ${value.path}` : (result.error ?? "toggle failed") } as OperationOutputs[Name];
+			return {
+				ok: result.ok,
+				output: result.ok ? `${value.enabled ? "enabled" : "disabled"} ${value.path}` : (result.error ?? "toggle failed"),
+			} as OperationOutputs[Name];
 		}
 		let path: string;
 		let init: RequestInit = {};
@@ -473,22 +534,51 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 				path = `/search?${params}`;
 				break;
 			}
-			case "package.info": path = `/info?name=${encodeURIComponent((input as OperationInputs["package.info"]).name)}`; break;
-			case "package.installed": path = "/installed"; break;
-			case "package.catalog": path = "/catalog"; break;
-			case "package.updates": path = "/updates"; break;
-			case "package.security.get": path = "/security"; break;
-			case "package.security.set": path = "/security"; init = { method: "POST", body: JSON.stringify(input) }; break;
-			case "package.install": path = "/install"; init = { method: "POST", body: JSON.stringify(input) }; break;
-			case "package.install_service": path = "/install-service"; init = { method: "POST", body: JSON.stringify(input) }; break;
-			case "package.remove": path = "/remove"; init = { method: "POST", body: JSON.stringify(input) }; break;
-			case "package.update": path = "/update"; init = { method: "POST", body: JSON.stringify(input) }; break;
-			default: throw new PackageOperationError(`unknown operation: ${String(op)}`, 404);
+			case "package.info":
+				path = `/info?name=${encodeURIComponent((input as OperationInputs["package.info"]).name)}`;
+				break;
+			case "package.installed":
+				path = "/installed";
+				break;
+			case "package.catalog":
+				path = "/catalog";
+				break;
+			case "package.updates":
+				path = "/updates";
+				break;
+			case "package.security.get":
+				path = "/security";
+				break;
+			case "package.security.set":
+				path = "/security";
+				init = { method: "POST", body: JSON.stringify(input) };
+				break;
+			case "package.install":
+				path = "/install";
+				init = { method: "POST", body: JSON.stringify(input) };
+				break;
+			case "package.install_service":
+				path = "/install-service";
+				init = { method: "POST", body: JSON.stringify(input) };
+				break;
+			case "package.remove":
+				path = "/remove";
+				init = { method: "POST", body: JSON.stringify(input) };
+				break;
+			case "package.update":
+				path = "/update";
+				init = { method: "POST", body: JSON.stringify(input) };
+				break;
+			default:
+				throw new PackageOperationError(`unknown operation: ${String(op)}`, 404);
 		}
 		const response = await route(new Request(`http://packed.internal${path}`, init));
-		const body = await response.json() as { error?: unknown };
+		const body = (await response.json()) as { error?: unknown };
 		if (!response.ok) {
-			throw new PackageOperationError(typeof body.error === "string" ? body.error : `operation failed with HTTP ${response.status}`, response.status);
+			throw new PackageOperationError(
+				typeof body.error === "string" ? body.error : `operation failed with HTTP ${response.status}`,
+				response.status,
+			);
 		}
 		return body as OperationOutputs[Name];
 	}
@@ -501,14 +591,17 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			if (req.method === "GET" && requestUrl.pathname === "/api/v1/ops") return jsonResponse({ operations: OPERATION_NAMES });
 			if (req.method === "POST" && requestUrl.pathname === "/api/v1/ops") {
 				try {
-					const body = await req.json() as { op?: unknown; input?: unknown };
+					const body = (await req.json()) as { op?: unknown; input?: unknown };
 					if (typeof body.op !== "string") return errorResponse("op is required", 400);
 					const input = body.input ?? {};
 					if (typeof input !== "object" || input === null || Array.isArray(input)) return errorResponse("input must be an object", 400);
 					const result = await executeOperation(body.op as OperationName, input as OperationInputs[OperationName]);
 					return jsonResponse({ result });
 				} catch (error) {
-					return errorResponse(error instanceof Error ? error.message : String(error), error instanceof PackageOperationError ? error.status : 400);
+					return errorResponse(
+						error instanceof Error ? error.message : String(error),
+						error instanceof PackageOperationError ? error.status : 400,
+					);
 				}
 			}
 			// Cache successful GETs by URI (smart-proxy concern).

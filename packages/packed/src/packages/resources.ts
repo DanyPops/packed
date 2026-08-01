@@ -15,7 +15,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { discoverPackageResources, matchesPattern, walk, type ResourceField } from "../adoption/check.ts";
+import { discoverPackageResources, matchesPattern, type ResourceField, walk } from "../adoption/check.ts";
 
 export type { ResourceField };
 
@@ -57,7 +57,10 @@ function parseEntry(raw: unknown): PackageEntry | undefined {
 function readSettingsPackages(settingsPath: string): PackageEntry[] {
 	try {
 		const settings = JSON.parse(readFileSync(settingsPath, "utf8")) as { packages?: unknown[] };
-		return (settings.packages ?? []).map(parseEntry).filter((entry): entry is PackageEntry => entry !== undefined).slice(0, MAX_PACKAGE_ENTRIES);
+		return (settings.packages ?? [])
+			.map(parseEntry)
+			.filter((entry): entry is PackageEntry => entry !== undefined)
+			.slice(0, MAX_PACKAGE_ENTRIES);
 	} catch {
 		return [];
 	}
@@ -95,7 +98,8 @@ function applyFilter(baseFiles: string[], filter: string[] | undefined): Set<str
 		else if (raw.startsWith("!")) excludes.push(raw.slice(1));
 		else includes.push(raw);
 	}
-	let result = includes.length === 0 ? [...baseFiles] : baseFiles.filter((file) => includes.some((pattern) => matchesPattern(file, pattern)));
+	let result =
+		includes.length === 0 ? [...baseFiles] : baseFiles.filter((file) => includes.some((pattern) => matchesPattern(file, pattern)));
 	if (excludes.length > 0) result = result.filter((file) => !excludes.some((pattern) => matchesPattern(file, pattern)));
 	if (forceIncludes.length > 0) {
 		for (const file of baseFiles) {
@@ -110,7 +114,11 @@ function resourcesForEntry(entry: PackageEntry, piHome: string, scope: "global" 
 	const dir = resolveInstalledDir(piHome, entry.source);
 	if (!dir) return undefined;
 	let pkg: Record<string, unknown>;
-	try { pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")); } catch { return undefined; }
+	try {
+		pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+	} catch {
+		return undefined;
+	}
 	const { files } = walk(dir, MAX_RESOURCE_FILES, []);
 	const discovered = discoverPackageResources(dir, pkg, files);
 	const result = { source: entry.source, name: npmName(entry.source), scope } as PackageResources;
@@ -148,8 +156,12 @@ function atomicWriteJson(path: string, value: unknown): void {
 	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
 	if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw new Error(`RESOURCE_PATH_UNSAFE: refusing to replace symlink ${path}`);
 	const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-	try { writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx", mode: 0o644 }); renameSync(temporary, path); }
-	finally { rmSync(temporary, { force: true }); }
+	try {
+		writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx", mode: 0o644 });
+		renameSync(temporary, path);
+	} finally {
+		rmSync(temporary, { force: true });
+	}
 }
 
 export interface ToggleResourceInput {
@@ -173,8 +185,11 @@ export interface ToggleResourceInput {
  * a locally "nicer" model the actual loader wouldn't agree with. */
 export function toggleResource(input: ToggleResourceInput): { ok: boolean; error?: string } {
 	let settings: Record<string, unknown>;
-	try { settings = JSON.parse(readFileSync(input.settingsPath, "utf8")); }
-	catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
+	try {
+		settings = JSON.parse(readFileSync(input.settingsPath, "utf8"));
+	} catch (error) {
+		return { ok: false, error: error instanceof Error ? error.message : String(error) };
+	}
 	const packages = Array.isArray(settings.packages) ? [...settings.packages] : [];
 	const index = packages.findIndex((raw) => parseEntry(raw)?.source === input.source);
 	if (index === -1) return { ok: false, error: `package not found in settings: ${input.source}` };
@@ -183,10 +198,14 @@ export function toggleResource(input: ToggleResourceInput): { ok: boolean; error
 	const current = existing[input.field] ?? [];
 	const withoutOverride = current.filter((entry) => entry !== `+${input.path}` && entry !== `-${input.path}`);
 	const updated = [...withoutOverride, `${input.enabled ? "+" : "-"}${input.path}`];
-	const merged: Record<string, unknown> = typeof packages[index] === "string" ? { source: packages[index] } : { ...(packages[index] as Record<string, unknown>) };
+	const merged: Record<string, unknown> =
+		typeof packages[index] === "string" ? { source: packages[index] } : { ...(packages[index] as Record<string, unknown>) };
 	merged[input.field] = updated;
 	packages[index] = merged;
-	try { atomicWriteJson(input.settingsPath, { ...settings, packages }); }
-	catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
+	try {
+		atomicWriteJson(input.settingsPath, { ...settings, packages });
+	} catch (error) {
+		return { ok: false, error: error instanceof Error ? error.message : String(error) };
+	}
 	return { ok: true };
 }

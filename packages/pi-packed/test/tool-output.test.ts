@@ -24,11 +24,15 @@ describe("pi-packed dual-channel tool output", () => {
 		expect(content.text.length).toBeLessThanOrEqual(2_000);
 		expect(content.text).toContain(`[truncated ${content.omitted} characters]`);
 
-		const details = createSearchDetails("theme", 500, Array.from({ length: 80 }, (_, index) => ({
-			name: `pkg-${index}`,
-			version: "1.0.0",
-			description: "d".repeat(1_000),
-		})));
+		const details = createSearchDetails(
+			"theme",
+			500,
+			Array.from({ length: 80 }, (_, index) => ({
+				name: `pkg-${index}`,
+				version: "1.0.0",
+				description: "d".repeat(1_000),
+			})),
+		);
 		expect(details.items).toHaveLength(50);
 		expect(details.items[0]?.description.length).toBeLessThanOrEqual(240);
 		expect(details.truncated).toBe(true);
@@ -49,7 +53,12 @@ describe("pi-packed dual-channel tool output", () => {
 			publication: { provenanceUrl: "https://registry.example/provenance?token=secret", trustedPublisher: "unknown" },
 		});
 		expect(details.package.keywords).toHaveLength(20);
-		expect(details.package).toMatchObject({ shape: "manifest", verified: true, provenance: "https://registry.example/provenance", trustedPublisher: "unknown" });
+		expect(details.package).toMatchObject({
+			shape: "manifest",
+			verified: true,
+			provenance: "https://registry.example/provenance",
+			trustedPublisher: "unknown",
+		});
 		expect(JSON.stringify(details)).not.toContain("private/internal");
 		expect(JSON.stringify(details)).not.toContain("secret");
 	});
@@ -79,8 +88,12 @@ describe("pi-packed dual-channel tool output", () => {
 	it("falls back safely for absent or malformed persisted details", () => {
 		const fallback = renderPackageToolResult(
 			{ content: [{ type: "text" as const, text: "safe fallback" }], details: { kind: "unknown" } },
-			{ expanded: false, isPartial: false }, theme, context,
-		).render(80).join("\n");
+			{ expanded: false, isPartial: false },
+			theme,
+			context,
+		)
+			.render(80)
+			.join("\n");
 		expect(fallback).toContain("safe fallback");
 		expect(parsePackageToolDetails({ kind: "unknown" })).toBeUndefined();
 		const invalidTotal = createSearchDetails("query", 1, []);

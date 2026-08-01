@@ -1,15 +1,17 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 import { AuthenticatedRpcClient } from "@danypops/vehicle-client/rpc-client";
 import { runDoctor } from "../src/adoption/doctor.ts";
 import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/daemon/service.ts";
-import type { Installer, Registry, SearchPage, PkgInfo } from "../src/shared/ports.ts";
+import type { Installer, PkgInfo, Registry, SearchPage } from "../src/shared/ports.ts";
 
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(() => {
+	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 
 // Same sandbox-availability probe as smoke.test.ts: binary presence alone
 // doesn't prove bwrap actually works under this host's user namespaces.
@@ -40,12 +42,22 @@ function installNpmPackage(home: string, name: string, pi: Record<string, unknow
 describeIfSandboxed("runDoctor", () => {
 	it("reports no conflicts when every package's tools are distinct", async () => {
 		const home = piHome(["npm:pi-a", "npm:pi-b"]);
-		installNpmPackage(home, "pi-a", { extensions: ["extension/index.ts"] }, {
-			"extension/index.ts": 'export default function (pi: any) { pi.registerTool({ name: "alpha" }); }',
-		});
-		installNpmPackage(home, "pi-b", { extensions: ["extension/index.ts"] }, {
-			"extension/index.ts": 'export default function (pi: any) { pi.registerTool({ name: "beta" }); }',
-		});
+		installNpmPackage(
+			home,
+			"pi-a",
+			{ extensions: ["extension/index.ts"] },
+			{
+				"extension/index.ts": 'export default function (pi: any) { pi.registerTool({ name: "alpha" }); }',
+			},
+		);
+		installNpmPackage(
+			home,
+			"pi-b",
+			{ extensions: ["extension/index.ts"] },
+			{
+				"extension/index.ts": 'export default function (pi: any) { pi.registerTool({ name: "beta" }); }',
+			},
+		);
 
 		const report = await runDoctor(home);
 
@@ -56,17 +68,28 @@ describeIfSandboxed("runDoctor", () => {
 
 	it("reproduces the real jittor incident: a stale project-scoped package re-registering a globally-loaded package's tool names", async () => {
 		const home = piHome(["npm:pi-papyrus"]);
-		installNpmPackage(home, "pi-papyrus", { extensions: ["extension/index.ts"] }, {
-			"extension/index.ts": 'export default function (pi: any) { pi.registerTool({ name: "tasks" }); pi.registerTool({ name: "docs" }); }',
-		});
+		installNpmPackage(
+			home,
+			"pi-papyrus",
+			{ extensions: ["extension/index.ts"] },
+			{
+				"extension/index.ts":
+					'export default function (pi: any) { pi.registerTool({ name: "tasks" }); pi.registerTool({ name: "docs" }); }',
+			},
+		);
 		const projectRoot = mkdtempSync(join(tmpdir(), "packed-doctor-project-"));
 		roots.push(projectRoot);
 		const projectHome = join(projectRoot, ".pi");
 		mkdirSync(projectHome, { recursive: true });
 		writeFileSync(join(projectHome, "settings.json"), JSON.stringify({ packages: ["npm:papyrus"] }));
-		installNpmPackage(projectHome, "papyrus", { extensions: ["extension/index.ts"] }, {
-			"extension/index.ts": 'export default function (pi: any) { pi.registerTool({ name: "tasks" }); }',
-		});
+		installNpmPackage(
+			projectHome,
+			"papyrus",
+			{ extensions: ["extension/index.ts"] },
+			{
+				"extension/index.ts": 'export default function (pi: any) { pi.registerTool({ name: "tasks" }); }',
+			},
+		);
 
 		const report = await runDoctor(home, projectRoot);
 
@@ -81,12 +104,22 @@ describeIfSandboxed("runDoctor", () => {
 
 	it("never treats a disabled extension as a claimant", async () => {
 		const home = piHome([{ source: "npm:pi-a", extensions: [] }, "npm:pi-b"]);
-		installNpmPackage(home, "pi-a", { extensions: ["extension/index.ts"] }, {
-			"extension/index.ts": 'export default function (pi: any) { pi.registerTool({ name: "shared" }); }',
-		});
-		installNpmPackage(home, "pi-b", { extensions: ["extension/index.ts"] }, {
-			"extension/index.ts": 'export default function (pi: any) { pi.registerTool({ name: "shared" }); }',
-		});
+		installNpmPackage(
+			home,
+			"pi-a",
+			{ extensions: ["extension/index.ts"] },
+			{
+				"extension/index.ts": 'export default function (pi: any) { pi.registerTool({ name: "shared" }); }',
+			},
+		);
+		installNpmPackage(
+			home,
+			"pi-b",
+			{ extensions: ["extension/index.ts"] },
+			{
+				"extension/index.ts": 'export default function (pi: any) { pi.registerTool({ name: "shared" }); }',
+			},
+		);
 
 		const report = await runDoctor(home);
 
@@ -96,9 +129,14 @@ describeIfSandboxed("runDoctor", () => {
 
 	it("surfaces a genuinely crashing extension as a non-ok result without treating it as a conflict", async () => {
 		const home = piHome(["npm:pi-broken"]);
-		installNpmPackage(home, "pi-broken", { extensions: ["extension/index.ts"] }, {
-			"extension/index.ts": 'export default function () { throw new Error("boom"); }',
-		});
+		installNpmPackage(
+			home,
+			"pi-broken",
+			{ extensions: ["extension/index.ts"] },
+			{
+				"extension/index.ts": 'export default function () { throw new Error("boom"); }',
+			},
+		);
 
 		const report = await runDoctor(home);
 
@@ -110,9 +148,14 @@ describeIfSandboxed("runDoctor", () => {
 
 	it("is unaffected by a missing project settings file", async () => {
 		const home = piHome(["npm:pi-a"]);
-		installNpmPackage(home, "pi-a", { extensions: ["extension/index.ts"] }, {
-			"extension/index.ts": 'export default function (pi: any) { pi.registerTool({ name: "alpha" }); }',
-		});
+		installNpmPackage(
+			home,
+			"pi-a",
+			{ extensions: ["extension/index.ts"] },
+			{
+				"extension/index.ts": 'export default function (pi: any) { pi.registerTool({ name: "alpha" }); }',
+			},
+		);
 		const projectRoot = mkdtempSync(join(tmpdir(), "packed-doctor-project-"));
 		roots.push(projectRoot);
 
@@ -124,29 +167,63 @@ describeIfSandboxed("runDoctor", () => {
 });
 
 class NoopRegistry implements Registry {
-	async search(): Promise<SearchPage> { return { results: [], total: 0 }; }
-	async searchPage(): Promise<SearchPage> { return { results: [], total: 0 }; }
-	async searchAll() { return []; }
-	async info(name: string): Promise<PkgInfo> { return { name, version: "1.0.0" }; }
+	async search(): Promise<SearchPage> {
+		return { results: [], total: 0 };
+	}
+	async searchPage(): Promise<SearchPage> {
+		return { results: [], total: 0 };
+	}
+	async searchAll() {
+		return [];
+	}
+	async info(name: string): Promise<PkgInfo> {
+		return { name, version: "1.0.0" };
+	}
 }
 
 class NoopInstaller implements Installer {
-	async install() { return "ok"; }
-	async remove() { return "ok"; }
-	async update() { return { output: "ok", reloadRequired: false, alreadyUpToDate: true, pinned: false }; }
+	async install() {
+		return "ok";
+	}
+	async remove() {
+		return "ok";
+	}
+	async update() {
+		return { output: "ok", reloadRequired: false, alreadyUpToDate: true, pinned: false };
+	}
 }
 
 describeIfSandboxed("doctor.run (daemon RPC wiring)", () => {
 	it("reports the same conflict through the authenticated RPC operation as the pure domain function", async () => {
 		const home = piHome(["npm:pi-a", "npm:pi-b"]);
-		installNpmPackage(home, "pi-a", { extensions: ["extension/index.ts"] }, {
-			"extension/index.ts": 'export default function (pi: any) { pi.registerTool({ name: "shared" }); }',
+		installNpmPackage(
+			home,
+			"pi-a",
+			{ extensions: ["extension/index.ts"] },
+			{
+				"extension/index.ts": 'export default function (pi: any) { pi.registerTool({ name: "shared" }); }',
+			},
+		);
+		installNpmPackage(
+			home,
+			"pi-b",
+			{ extensions: ["extension/index.ts"] },
+			{
+				"extension/index.ts": 'export default function (pi: any) { pi.registerTool({ name: "shared" }); }',
+			},
+		);
+		const app = createApp({
+			reg: new NoopRegistry(),
+			inst: new NoopInstaller(),
+			token: "test-token",
+			stateDir: mkdtempSync(join(tmpdir(), "packed-doctor-state-")),
+			dataDir: mkdtempSync(join(tmpdir(), "packed-doctor-data-")),
+			piHome: home,
 		});
-		installNpmPackage(home, "pi-b", { extensions: ["extension/index.ts"] }, {
-			"extension/index.ts": 'export default function (pi: any) { pi.registerTool({ name: "shared" }); }',
+		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", {
+			label: "Packed",
+			transport: (request) => app.fetch(request),
 		});
-		const app = createApp({ reg: new NoopRegistry(), inst: new NoopInstaller(), token: "test-token", stateDir: mkdtempSync(join(tmpdir(), "packed-doctor-state-")), dataDir: mkdtempSync(join(tmpdir(), "packed-doctor-data-")), piHome: home });
-		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", { label: "Packed", transport: (request) => app.fetch(request) });
 
 		const result = await client.call("doctor.run", {});
 

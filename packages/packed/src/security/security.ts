@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { SECURITY_FILE } from "../shared/constants.ts";
 
 export const MUTATION_APPROVAL_VALUES = ["always", "never"] as const;
-export type MutationApproval = typeof MUTATION_APPROVAL_VALUES[number];
+export type MutationApproval = (typeof MUTATION_APPROVAL_VALUES)[number];
 
 export const PACKAGE_OPERATIONS = [
 	"search",
@@ -32,10 +32,12 @@ export const PACKAGE_OPERATIONS = [
 	"advisories.scan",
 	"doctor",
 ] as const;
-export type PackageOperation = typeof PACKAGE_OPERATIONS[number];
+export type PackageOperation = (typeof PACKAGE_OPERATIONS)[number];
 export type PackageOperationClassification = "read" | "maintenance" | "code-execution" | "settings-mutation" | "security-mutation";
 
-export interface SecuritySettings { mutationApproval: MutationApproval }
+export interface SecuritySettings {
+	mutationApproval: MutationApproval;
+}
 export interface SecuritySettingsPort {
 	security(): Promise<SecuritySettings>;
 	setMutationApproval(value: MutationApproval, options?: { approved?: boolean }): Promise<SecuritySettings>;

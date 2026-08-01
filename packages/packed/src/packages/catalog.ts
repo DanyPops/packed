@@ -3,12 +3,14 @@
  * Paginates the upstream registry into the local SQLite mirror and records
  * sync metadata (the Release/repomd checksum role) in sync_meta.
  */
-import type { Pkg, Registry } from "../shared/ports.ts";
+
 import { PI_PACKAGE_KEYWORD } from "../shared/constants.ts";
-import { openDb, replaceAll, getSyncMeta, dbPath } from "./db.ts";
 import { createLogger } from "../shared/log.ts";
+import type { Registry } from "../shared/ports.ts";
+import { dbPath, getSyncMeta, openDb, replaceAll } from "./db.ts";
 
 const log = createLogger("catalog");
+
 import type { SyncMeta } from "./db.ts";
 
 export interface CatalogStatus {
@@ -34,7 +36,7 @@ export async function syncCatalog(reg: Registry, dir: string, query: string = PI
 	const packages = await reg.searchAll(query);
 	const db = openDb(dbPath(dir));
 	try {
-		replaceAll(db, packages, "npm:" + query);
+		replaceAll(db, packages, `npm:${query}`);
 		log.info("mirror sync complete", { packages: packages.length, ms: Date.now() - t0 });
 		return packages.length;
 	} finally {
@@ -42,12 +44,7 @@ export async function syncCatalog(reg: Registry, dir: string, query: string = PI
 	}
 }
 
-export function startCatalogSync(
-	reg: Registry,
-	dir: string,
-	ttlMs: number,
-	onError?: (e: unknown) => void,
-): () => void {
+export function startCatalogSync(reg: Registry, dir: string, ttlMs: number, onError?: (e: unknown) => void): () => void {
 	async function sync(): Promise<void> {
 		try {
 			if (catalogStatus(dir, ttlMs).stale) {

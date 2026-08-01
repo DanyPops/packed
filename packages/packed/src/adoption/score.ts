@@ -1,10 +1,10 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import type { PkgInfo, Registry } from "../shared/ports.ts";
-import { NpmPackVerifier, type PackReport } from "./pack.ts";
-import { satisfiesRange } from "../publish/publish.ts";
 import { resolveCurrentPiVersion } from "../pi/pi-version.ts";
-import { lastLocalCommitAt, githubLastCommitAt, type FetchGithubLastCommitAt } from "./commit-freshness.ts";
+import { satisfiesRange } from "../publish/publish.ts";
+import type { PkgInfo, Registry } from "../shared/ports.ts";
+import { type FetchGithubLastCommitAt, githubLastCommitAt, lastLocalCommitAt } from "./commit-freshness.ts";
+import { NpmPackVerifier, type PackReport } from "./pack.ts";
 
 /** Exported so bulk index generation can resolve pi's own last-publish
  * date once per run without duplicating the literal. */
@@ -48,12 +48,23 @@ function dimension(met: number, total: number, evidence: string[], actions: stri
 }
 
 function readText(path: string): string {
-	try { return readFileSync(path).subarray(0, MAX_TEXT_BYTES).toString(); } catch { return ""; }
+	try {
+		return readFileSync(path).subarray(0, MAX_TEXT_BYTES).toString();
+	} catch {
+		return "";
+	}
 }
 
 function localManifest(root: string): Record<string, unknown> {
-	try { return JSON.parse(readFileSync(join(root, "package.json")).subarray(0, 1024 * 1024).toString()) as Record<string, unknown>; }
-	catch { return {}; }
+	try {
+		return JSON.parse(
+			readFileSync(join(root, "package.json"))
+				.subarray(0, 1024 * 1024)
+				.toString(),
+		) as Record<string, unknown>;
+	} catch {
+		return {};
+	}
 }
 
 function stringField(value: unknown): string | undefined {
@@ -73,24 +84,54 @@ function discoverability(info: PkgInfo): AdoptionDimension {
 	const evidence: string[] = [];
 	const actions: string[] = [];
 	let met = 0;
-	if (info.name && info.name.length <= 64) { met++; evidence.push(`focused package name: ${info.name}`); } else actions.push("use a focused package name");
-	if (info.description && info.description.length >= 10 && info.description.length <= 160) { met++; evidence.push("bounded package description"); } else actions.push("add a 10-160 character description");
-	if (info.keywords?.includes("pi-package")) { met++; evidence.push("pi-package keyword"); } else actions.push("add the pi-package keyword");
+	if (info.name && info.name.length <= 64) {
+		met++;
+		evidence.push(`focused package name: ${info.name}`);
+	} else actions.push("use a focused package name");
+	if (info.description && info.description.length >= 10 && info.description.length <= 160) {
+		met++;
+		evidence.push("bounded package description");
+	} else actions.push("add a 10-160 character description");
+	if (info.keywords?.includes("pi-package")) {
+		met++;
+		evidence.push("pi-package keyword");
+	} else actions.push("add the pi-package keyword");
 	let total = 4;
-	if (info.readmeAvailable === false) { total = 3; evidence.push("README content is unavailable from the bounded registry metadata endpoint"); }
-	else if ((info.readme ?? "").trim().length > 0) { met++; evidence.push("README published"); } else actions.push("publish a README");
+	if (info.readmeAvailable === false) {
+		total = 3;
+		evidence.push("README content is unavailable from the bounded registry metadata endpoint");
+	} else if ((info.readme ?? "").trim().length > 0) {
+		met++;
+		evidence.push("README published");
+	} else actions.push("publish a README");
 	return dimension(met, total, evidence, actions);
 }
 
 function firstRun(info: PkgInfo): AdoptionDimension {
-	if (info.readmeAvailable === false) return { status: "unknown", met: 0, total: 0, evidence: ["README content is unavailable from the bounded registry metadata endpoint"], actions: ["run packed score against a checkout for first-run evidence"] };
+	if (info.readmeAvailable === false)
+		return {
+			status: "unknown",
+			met: 0,
+			total: 0,
+			evidence: ["README content is unavailable from the bounded registry metadata endpoint"],
+			actions: ["run packed score against a checkout for first-run evidence"],
+		};
 	const readme = info.readme ?? "";
 	const evidence: string[] = [];
 	const actions: string[] = [];
 	let met = 0;
-	if (/pi\s+install\s+(?:npm:|git:|https:)/i.test(readme)) { met++; evidence.push("Pi install command in README"); } else actions.push("add one copyable pi install command");
-	if (/(^|\n)#{1,3}\s+(usage|example)|```[\s\S]{0,2000}```/i.test(readme)) { met++; evidence.push("usage example in README"); } else actions.push("add one concrete usage example");
-	if (/!\[[^\]]*\]\([^)]*\)|pi\.(?:gallery|image|video)/i.test(readme)) { met++; evidence.push("visual/gallery evidence"); } else actions.push("add a screenshot or Pi gallery image/video when UI behavior benefits from it");
+	if (/pi\s+install\s+(?:npm:|git:|https:)/i.test(readme)) {
+		met++;
+		evidence.push("Pi install command in README");
+	} else actions.push("add one copyable pi install command");
+	if (/(^|\n)#{1,3}\s+(usage|example)|```[\s\S]{0,2000}```/i.test(readme)) {
+		met++;
+		evidence.push("usage example in README");
+	} else actions.push("add one concrete usage example");
+	if (/!\[[^\]]*\]\([^)]*\)|pi\.(?:gallery|image|video)/i.test(readme)) {
+		met++;
+		evidence.push("visual/gallery evidence");
+	} else actions.push("add a screenshot or Pi gallery image/video when UI behavior benefits from it");
 	return dimension(met, 3, evidence, actions);
 }
 
@@ -98,15 +139,34 @@ function trust(info: PkgInfo): AdoptionDimension {
 	const evidence: string[] = [];
 	const actions: string[] = [];
 	let met = 0;
-	if (info.repository && /^(?:git\+)?https?:\/\//.test(info.repository)) { met++; evidence.push("public repository URL declared"); } else actions.push("declare a public repository URL");
-	if (info.license) { met++; evidence.push(`license: ${info.license}`); } else actions.push("declare a license");
-	if (info.bugs?.startsWith("http")) { met++; evidence.push("issue tracker declared"); } else actions.push("declare an issue tracker");
-	if (info.publication?.integrity) { met++; evidence.push("npm tarball integrity published"); } else actions.push("publish an integrity-bound npm tarball");
-	if (info.publication?.provenanceUrl) { met++; evidence.push("npm provenance attestation published"); } else actions.push("publish with provenance");
-	if (info.publication?.trustedPublisher === "verified") { met++; evidence.push("trusted publisher verified"); }
-	else actions.push("verify trusted publisher configuration separately; provenance alone does not prove it");
-	if (info.packageEvidence?.verified) { met++; evidence.push(`${info.packageEvidence.shape} Pi shape verified from tarball contents`); }
-	else actions.push("verify the exact tarball's Pi shape with packed pack");
+	if (info.repository && /^(?:git\+)?https?:\/\//.test(info.repository)) {
+		met++;
+		evidence.push("public repository URL declared");
+	} else actions.push("declare a public repository URL");
+	if (info.license) {
+		met++;
+		evidence.push(`license: ${info.license}`);
+	} else actions.push("declare a license");
+	if (info.bugs?.startsWith("http")) {
+		met++;
+		evidence.push("issue tracker declared");
+	} else actions.push("declare an issue tracker");
+	if (info.publication?.integrity) {
+		met++;
+		evidence.push("npm tarball integrity published");
+	} else actions.push("publish an integrity-bound npm tarball");
+	if (info.publication?.provenanceUrl) {
+		met++;
+		evidence.push("npm provenance attestation published");
+	} else actions.push("publish with provenance");
+	if (info.publication?.trustedPublisher === "verified") {
+		met++;
+		evidence.push("trusted publisher verified");
+	} else actions.push("verify trusted publisher configuration separately; provenance alone does not prove it");
+	if (info.packageEvidence?.verified) {
+		met++;
+		evidence.push(`${info.packageEvidence.shape} Pi shape verified from tarball contents`);
+	} else actions.push("verify the exact tarball's Pi shape with packed pack");
 	actions.push("run packed check --smoke when bounded extension startup evidence is needed");
 	return dimension(met, 7, evidence, actions);
 }
@@ -117,13 +177,20 @@ function maintenance(info: PkgInfo): AdoptionDimension {
 	let met = 0;
 	if (info.modified) {
 		const age = Date.now() - Date.parse(info.modified);
-		if (Number.isFinite(age) && age <= 366 * 24 * 60 * 60 * 1000) { met++; evidence.push(`release metadata updated ${info.modified}`); }
-		else actions.push("publish a compatible maintenance release or explain maintenance status");
+		if (Number.isFinite(age) && age <= 366 * 24 * 60 * 60 * 1000) {
+			met++;
+			evidence.push(`release metadata updated ${info.modified}`);
+		} else actions.push("publish a compatible maintenance release or explain maintenance status");
 	} else actions.push("registry release recency is unavailable");
-	if (info.peerDependencies?.["@earendil-works/pi-coding-agent"]) { met++; evidence.push(`Pi compatibility: ${info.peerDependencies["@earendil-works/pi-coding-agent"]}`); }
-	else actions.push("declare the supported Pi peer range");
+	if (info.peerDependencies?.["@earendil-works/pi-coding-agent"]) {
+		met++;
+		evidence.push(`Pi compatibility: ${info.peerDependencies["@earendil-works/pi-coding-agent"]}`);
+	} else actions.push("declare the supported Pi peer range");
 	const readme = info.readme ?? "";
-	if (/changelog|release notes/i.test(readme)) { met++; evidence.push("changelog or release notes linked"); } else actions.push("link release notes or a changelog");
+	if (/changelog|release notes/i.test(readme)) {
+		met++;
+		evidence.push("changelog or release notes linked");
+	} else actions.push("link release notes or a changelog");
 	return dimension(met, 3, evidence, actions);
 }
 
@@ -152,7 +219,13 @@ interface FreshnessCandidate {
  */
 function freshness(candidate: FreshnessCandidate | undefined, piModified: string | undefined): AdoptionDimension {
 	if (!candidate) {
-		return { status: "unknown", met: 0, total: 0, evidence: ["candidate's commit history and npm publish date are both unavailable"], actions: [] };
+		return {
+			status: "unknown",
+			met: 0,
+			total: 0,
+			evidence: ["candidate's commit history and npm publish date are both unavailable"],
+			actions: [],
+		};
 	}
 	if (!piModified) {
 		return { status: "unknown", met: 0, total: 0, evidence: ["pi-coding-agent's own latest npm publish date is unavailable"], actions: [] };
@@ -163,10 +236,18 @@ function freshness(candidate: FreshnessCandidate | undefined, piModified: string
 		return { status: "unknown", met: 0, total: 0, evidence: ["dates could not be parsed"], actions: [] };
 	}
 	const deltaDays = Math.round((piMs - candidateMs) / MS_PER_DAY);
-	const relation = deltaDays > 0 ? `${deltaDays}d before pi-coding-agent's latest publish` : deltaDays < 0 ? `${-deltaDays}d after pi-coding-agent's latest publish` : "the same day as pi-coding-agent's latest publish";
-	const sourceLabel = candidate.source === "commit" ? "last real commit" : "npm publish date (commit history unavailable; proxy for commit recency)";
+	const relation =
+		deltaDays > 0
+			? `${deltaDays}d before pi-coding-agent's latest publish`
+			: deltaDays < 0
+				? `${-deltaDays}d after pi-coding-agent's latest publish`
+				: "the same day as pi-coding-agent's latest publish";
+	const sourceLabel =
+		candidate.source === "commit" ? "last real commit" : "npm publish date (commit history unavailable; proxy for commit recency)";
 	return {
-		status: "observed", met: 0, total: 0,
+		status: "observed",
+		met: 0,
+		total: 0,
 		evidence: [`candidate's ${sourceLabel}: ${candidate.date}`, `pi-coding-agent last published ${piModified} -- candidate is ${relation}`],
 		actions: [],
 	};
@@ -175,7 +256,13 @@ function freshness(candidate: FreshnessCandidate | undefined, piModified: string
 function traction(info: PkgInfo): AdoptionDimension {
 	const observations = info.downloads;
 	if (!observations || (observations.weekly === undefined && observations.monthly === undefined)) {
-		return { status: "unknown", met: 0, total: 0, evidence: ["traction is observational, not a quality signal; npm download data unavailable"], actions: [] };
+		return {
+			status: "unknown",
+			met: 0,
+			total: 0,
+			evidence: ["traction is observational, not a quality signal; npm download data unavailable"],
+			actions: [],
+		};
 	}
 	const evidence = [
 		`${observations.weekly ?? "unknown"} weekly npm downloads`,
@@ -198,14 +285,22 @@ function compatibility(info: PkgInfo, currentPiVersion: string | undefined): Ado
 	const declared = info.peerDependencies?.[PI_PEER_DEPENDENCY]?.trim();
 	if (!declared || declared === WILDCARD_PI_RANGE) {
 		return {
-			status: "unknown", met: 0, total: 0,
-			evidence: [declared ? `declared Pi peer range is "*" (Pi's own recommended convention; carries no real signal)` : "no declared Pi peer range (matches Pi's own recommended \"*\" convention)"],
+			status: "unknown",
+			met: 0,
+			total: 0,
+			evidence: [
+				declared
+					? `declared Pi peer range is "*" (Pi's own recommended convention; carries no real signal)`
+					: 'no declared Pi peer range (matches Pi\'s own recommended "*" convention)',
+			],
 			actions: [],
 		};
 	}
 	if (!currentPiVersion) {
 		return {
-			status: "unknown", met: 0, total: 0,
+			status: "unknown",
+			met: 0,
+			total: 0,
 			evidence: [`declared Pi peer range ${declared}, but the running Pi version could not be determined`],
 			actions: ["run packed pi status to check pi's own version detection"],
 		};
@@ -213,38 +308,66 @@ function compatibility(info: PkgInfo, currentPiVersion: string | undefined): Ado
 	const satisfied = satisfiesRange(currentPiVersion, declared);
 	if (satisfied === undefined) {
 		return {
-			status: "unknown", met: 0, total: 0,
+			status: "unknown",
+			met: 0,
+			total: 0,
 			evidence: [`declared Pi peer range ${declared} could not be evaluated (only exact, ^, and ~ ranges are supported)`],
 			actions: [],
 		};
 	}
 	if (satisfied) {
 		return {
-			status: "ready", met: 1, total: 1,
+			status: "ready",
+			met: 1,
+			total: 1,
 			evidence: [`declared Pi peer range ${declared} is satisfied by the running pi ${currentPiVersion}`],
 			actions: [],
 		};
 	}
 	return {
-		status: "missing", met: 0, total: 1,
+		status: "missing",
+		met: 0,
+		total: 1,
 		evidence: [`declared Pi peer range ${declared} is NOT satisfied by the running pi ${currentPiVersion}`],
-		actions: ["this is an informal, Pi-unenforced signal (see earendil-works/pi#4907) -- packed never blocks install on it, but this package may not work correctly on the currently running Pi version"],
+		actions: [
+			"this is an informal, Pi-unenforced signal (see earendil-works/pi#4907) -- packed never blocks install on it, but this package may not work correctly on the currently running Pi version",
+		],
 	};
 }
 
-export function assessRegistryAdoption(info: PkgInfo, currentPiVersion?: string, piModified?: string, candidateCommitAt?: string): AdoptionReport {
+export function assessRegistryAdoption(
+	info: PkgInfo,
+	currentPiVersion?: string,
+	piModified?: string,
+	candidateCommitAt?: string,
+): AdoptionReport {
 	const candidate: FreshnessCandidate | undefined = candidateCommitAt
 		? { date: candidateCommitAt, source: "commit" }
 		: info.modified
 			? { date: info.modified, source: "publish" }
 			: undefined;
 	return {
-		target: info.name, source: "registry", package: { name: info.name, version: info.version },
-		dimensions: { discoverability: discoverability(info), firstRun: firstRun(info), trust: trust(info), maintenance: maintenance(info), traction: traction(info), compatibility: compatibility(info, currentPiVersion), freshness: freshness(candidate, piModified) },
+		target: info.name,
+		source: "registry",
+		package: { name: info.name, version: info.version },
+		dimensions: {
+			discoverability: discoverability(info),
+			firstRun: firstRun(info),
+			trust: trust(info),
+			maintenance: maintenance(info),
+			traction: traction(info),
+			compatibility: compatibility(info, currentPiVersion),
+			freshness: freshness(candidate, piModified),
+		},
 	};
 }
 
-export async function assessLocalAdoption(packagePath: string, pack: PackReport, currentPiVersion?: string, piModified?: string): Promise<AdoptionReport> {
+export async function assessLocalAdoption(
+	packagePath: string,
+	pack: PackReport,
+	currentPiVersion?: string,
+	piModified?: string,
+): Promise<AdoptionReport> {
 	const root = realpathSync(resolve(packagePath));
 	const pkg = localManifest(root);
 	const readmeName = ["README.md", "README", "readme.md"].find((name) => existsSync(join(root, name)));
@@ -252,10 +375,15 @@ export async function assessLocalAdoption(packagePath: string, pack: PackReport,
 		name: typeof pkg.name === "string" ? pkg.name.slice(0, 214) : basename(root),
 		version: typeof pkg.version === "string" ? pkg.version.slice(0, 128) : "",
 		description: typeof pkg.description === "string" ? pkg.description.slice(0, 512) : undefined,
-		keywords: strings(pkg.keywords), license: stringField(pkg.license), repository: stringField(pkg.repository), bugs: stringField(pkg.bugs),
-		peerDependencies: pkg.peerDependencies && typeof pkg.peerDependencies === "object" ? pkg.peerDependencies as Record<string, string> : undefined,
-		pi: pkg.pi && typeof pkg.pi === "object" ? pkg.pi as Record<string, unknown> : undefined,
-		readme: readmeName ? readText(join(root, readmeName)) : undefined, readmeAvailable: true,
+		keywords: strings(pkg.keywords),
+		license: stringField(pkg.license),
+		repository: stringField(pkg.repository),
+		bugs: stringField(pkg.bugs),
+		peerDependencies:
+			pkg.peerDependencies && typeof pkg.peerDependencies === "object" ? (pkg.peerDependencies as Record<string, string>) : undefined,
+		pi: pkg.pi && typeof pkg.pi === "object" ? (pkg.pi as Record<string, unknown>) : undefined,
+		readme: readmeName ? readText(join(root, readmeName)) : undefined,
+		readmeAvailable: true,
 		publication: { integrity: pack.integrity, trustedPublisher: "unknown" },
 		packageEvidence: { shape: pack.shape.kind, verified: pack.shape.verified, evidence: pack.shape.evidence },
 	};
@@ -276,7 +404,8 @@ export async function assessLocalAdoption(packagePath: string, pack: PackReport,
 }
 
 export async function scoreTarget(
-	target: string, registry: Registry,
+	target: string,
+	registry: Registry,
 	verifier: Pick<NpmPackVerifier, "verify"> = new NpmPackVerifier(),
 	currentPiVersion: () => Promise<string | undefined> = resolveCurrentPiVersion,
 	fetchGithubCommit: FetchGithubLastCommitAt = githubLastCommitAt,
@@ -284,7 +413,11 @@ export async function scoreTarget(
 	const piVersion = await currentPiVersion();
 	let piModified: string | undefined;
 	if (registry.modifiedAt) {
-		try { piModified = await registry.modifiedAt(PI_COMMAND_NAME); } catch { /* freshness remains explicitly unknown */ }
+		try {
+			piModified = await registry.modifiedAt(PI_COMMAND_NAME);
+		} catch {
+			/* freshness remains explicitly unknown */
+		}
 	}
 	if (existsSync(resolve(target))) {
 		const pack = await verifier.verify(target);
@@ -292,10 +425,18 @@ export async function scoreTarget(
 	}
 	const info = await registry.info(target);
 	if (registry.downloads) {
-		try { info.downloads = await registry.downloads(target); } catch { /* traction remains explicitly unknown */ }
+		try {
+			info.downloads = await registry.downloads(target);
+		} catch {
+			/* traction remains explicitly unknown */
+		}
 	}
 	if (registry.modifiedAt) {
-		try { info.modified = await registry.modifiedAt(target); } catch { /* freshness proxy remains explicitly unknown */ }
+		try {
+			info.modified = await registry.modifiedAt(target);
+		} catch {
+			/* freshness proxy remains explicitly unknown */
+		}
 	}
 	// githubLastCommitAt never throws -- undefined for a non-GitHub host, a
 	// missing repository field, a rate limit, or any other failure.
@@ -304,7 +445,7 @@ export async function scoreTarget(
 }
 
 export function formatAdoptionReport(report: AdoptionReport, json = false): string {
-	if (json) return JSON.stringify(report) + "\n";
+	if (json) return `${JSON.stringify(report)}\n`;
 	let out = `${report.package.name}@${report.package.version} adoption readiness (${report.source})\n`;
 	for (const [name, value] of Object.entries(report.dimensions)) {
 		out += `\n${name}: ${value.status}${value.total ? ` (${value.met}/${value.total})` : ""}\n`;

@@ -17,8 +17,7 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { rawKeyHint } from "@earendil-works/pi-coding-agent";
 import { Input, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { Component } from "malevich-tui-components";
-import type { PackageResources, ResourceField } from "./packed.js";
-import type { Natives } from "./packed.js";
+import type { Natives, PackageResources, ResourceField } from "./packed.js";
 import { packagePermissionDecision } from "./permission.js";
 import { confirmReload } from "./reload.js";
 import type { TabHost } from "./tab-host.js";
@@ -39,7 +38,8 @@ export function flatten(groups: PackageResources[], scope: Scope): FlatItem[] {
 	const items: FlatItem[] = [];
 	for (const group of groups) {
 		for (const field of RESOURCE_FIELDS) {
-			for (const item of group[field]) items.push({ scope, source: group.source, packageName: group.name, field, path: item.path, enabled: item.enabled });
+			for (const item of group[field])
+				items.push({ scope, source: group.source, packageName: group.name, field, path: item.path, enabled: item.enabled });
 		}
 	}
 	return items.sort((a, b) => a.packageName.localeCompare(b.packageName) || a.field.localeCompare(b.field) || a.path.localeCompare(b.path));
@@ -77,10 +77,17 @@ export type ToggleOutcome = "toggled" | "cancelled" | "failed";
  * actually reached the daemon. Extracted from the render loop so this
  * approve-then-mutate decision is directly testable without faking a full
  * ctx.ui.custom interaction. */
-export async function applyResourceToggle(item: FlatItem, natives: Pick<Natives, "security" | "toggleResource">, ctx: ExtensionCommandContext): Promise<ToggleOutcome> {
+export async function applyResourceToggle(
+	item: FlatItem,
+	natives: Pick<Natives, "security" | "toggleResource">,
+	ctx: ExtensionCommandContext,
+): Promise<ToggleOutcome> {
 	const nextEnabled = !item.enabled;
 	const approved = await approveToggle(natives, ctx, item, nextEnabled);
-	if (!approved) { ctx.ui.notify("toggle cancelled", "warning"); return "cancelled"; }
+	if (!approved) {
+		ctx.ui.notify("toggle cancelled", "warning");
+		return "cancelled";
+	}
 	try {
 		await natives.toggleResource(item.source, item.field, item.path, nextEnabled, item.scope === "project" ? ctx.cwd : undefined, true);
 		return "toggled";
@@ -106,7 +113,10 @@ export async function handleResourceConfigCommand(
 	return true;
 }
 
-interface Theme { fg(color: string, s: string): string; bold(s: string): string; }
+interface Theme {
+	fg(color: string, s: string): string;
+	bold(s: string): string;
+}
 
 /** /packed's Config tab -- a real Component, not its own ctx.ui.custom
  * overlay. Each toggle's reload decision (confirmReload) fires
@@ -129,6 +139,7 @@ export class ConfigTab implements Component {
 	constructor(
 		private readonly natives: Pick<Natives, "listResources" | "security" | "toggleResource">,
 		private readonly host: TabHost,
+		// biome-ignore lint/correctness/noUnusedPrivateClassMembers: read via `const { theme } = this` in render(), which Biome's usage check doesn't trace
 		private readonly theme: Theme,
 		initialFilter?: string,
 	) {
@@ -167,10 +178,20 @@ export class ConfigTab implements Component {
 		const scopeLabel = theme.bold(this.scope === "project" ? "Project Resources" : "Global Resources");
 		const hint = this.searchActive
 			? rawKeyHint("esc", "clear")
-			: rawKeyHint("space", "toggle") + theme.fg("muted", " · ") + rawKeyHint("/", "filter") + theme.fg("muted", " · ") + rawKeyHint("v", "scope") + theme.fg("muted", " · ") + rawKeyHint("r", "refresh");
+			: rawKeyHint("space", "toggle") +
+				theme.fg("muted", " · ") +
+				rawKeyHint("/", "filter") +
+				theme.fg("muted", " · ") +
+				rawKeyHint("v", "scope") +
+				theme.fg("muted", " · ") +
+				rawKeyHint("r", "refresh");
 		const spacing = Math.max(1, width - visibleWidth(scopeLabel) - visibleWidth(hint));
 		const line1 = truncateToWidth(`${scopeLabel}${" ".repeat(spacing)}${hint}`, width, "");
-		const line2 = truncateToWidth(theme.fg("muted", `${this.items.length} resource(s) \u00b7 extensions need a reload after a change`), width, "");
+		const line2 = truncateToWidth(
+			theme.fg("muted", `${this.items.length} resource(s) \u00b7 extensions need a reload after a change`),
+			width,
+			"",
+		);
 		const lines = [line1, line2];
 		if (this.searchActive) lines.push(...this.searchInput.render(width));
 		lines.push("");
@@ -197,25 +218,42 @@ export class ConfigTab implements Component {
 	handleInput(raw: string): void {
 		if (this.busy) return;
 		if (this.searchActive) {
-			if (raw === "\x1b") { this.searchActive = false; this.searchInput.setValue?.(""); this.applyFilter(); }
-			else if (raw === "\r") this.searchActive = false;
-			else { this.searchInput.handleInput(raw); this.applyFilter(); }
+			if (raw === "\x1b") {
+				this.searchActive = false;
+				this.searchInput.setValue?.("");
+				this.applyFilter();
+			} else if (raw === "\r") this.searchActive = false;
+			else {
+				this.searchInput.handleInput(raw);
+				this.applyFilter();
+			}
 			this.host.requestRender();
 			return;
 		}
 		switch (raw) {
-			case "\x1b[A": this.selectedIndex = (this.selectedIndex - 1 + this.filtered.length) % Math.max(this.filtered.length, 1); break;
-			case "\x1b[B": this.selectedIndex = (this.selectedIndex + 1) % Math.max(this.filtered.length, 1); break;
+			case "\x1b[A":
+				this.selectedIndex = (this.selectedIndex - 1 + this.filtered.length) % Math.max(this.filtered.length, 1);
+				break;
+			case "\x1b[B":
+				this.selectedIndex = (this.selectedIndex + 1) % Math.max(this.filtered.length, 1);
+				break;
 			case "v": // Tab is now reserved globally for sweeping between menus (TabbedContainer)
 				this.scope = this.scope === "global" ? "project" : "global";
 				this.rebuildItems();
 				this.applyFilter();
 				break;
-			case "/": this.searchActive = true; break;
-			case "r": void this.refresh(); return;
+			case "/":
+				this.searchActive = true;
+				break;
+			case "r":
+				void this.refresh();
+				return;
 			case " ":
-			case "\r": void this.toggleSelected(); return;
-			default: return;
+			case "\r":
+				void this.toggleSelected();
+				return;
+			default:
+				return;
 		}
 		this.host.requestRender();
 	}

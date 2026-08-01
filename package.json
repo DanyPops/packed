@@ -8,18 +8,26 @@
   "scripts": {
     "test": "bun run --cwd packages/packed build && bun test packages/packed/test packages/pi-packed/test",
     "typecheck": "bunx tsc --noEmit && bunx tsc -p packages/packed/tsconfig.json --noEmit && bunx tsc -p packages/packed/tsconfig.consumer.json && bunx tsc -p packages/pi-packed/tsconfig.json --noEmit",
-    "prepare": "git config core.hooksPath .githooks"
+    "prepare": "git config core.hooksPath .githooks",
+    "format": "biome format --write .",
+    "lint": "biome check --write . && eslint packages --max-warnings 0",
+    "lint:ci": "biome ci . && eslint packages --max-warnings 0"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "@earendil-works/pi-coding-agent": "^0.82.1",
-    "@earendil-works/pi-tui": "^0.82.1",
+    "@biomejs/biome": "^2.5.6",
     "@danypops/daemon-kit": "^0.4.0",
     "@danypops/packed": "workspace:*",
-    "typebox": "^1.3.6",
-    "publint": "0.3.22",
-    "jiti": "2.6.1",
+    "@earendil-works/pi-coding-agent": "^0.82.1",
+    "@earendil-works/pi-tui": "^0.82.1",
+    "@types/node": "^22.0.0",
     "bun-types": "latest",
-    "typescript": "latest"
+    "eslint": "^10.8.0",
+    "eslint-import-resolver-typescript": "^4.4.5",
+    "eslint-plugin-import-x": "^4.17.1",
+    "jiti": "^2.7.0",
+    "publint": "0.3.22",
+    "typebox": "^1.3.6",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.65.0"
   }
 }

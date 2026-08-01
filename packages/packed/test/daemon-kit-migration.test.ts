@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { AuthenticatedRpcClient } from "@danypops/vehicle-client/rpc-client";
 import { readDaemonHandle } from "@danypops/vehicle-server/paths";
 import { connectPackageDaemon } from "../src/daemon/client.ts";
-import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/daemon/service.ts";
 import { startPackedDaemon } from "../src/daemon/daemon.ts";
+import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/daemon/service.ts";
 import { migrateLegacyPackedState, resolvePackedPaths } from "../src/shared/paths.ts";
 import type { Installer, Registry } from "../src/shared/ports.ts";
 
@@ -36,16 +36,30 @@ function testPaths(root: string) {
 }
 
 const registry: Registry = {
-	async search(_query, _limit) { return { total: 1, results: [{ name: "pi-test", version: "1.0.0" }] }; },
-	async searchPage(_query, _from, _size) { return { total: 1, results: [{ name: "pi-test", version: "1.0.0" }] }; },
-	async searchAll() { return [{ name: "pi-test", version: "1.0.0" }]; },
-	async info(name) { return { name, version: "1.0.0" }; },
+	async search(_query, _limit) {
+		return { total: 1, results: [{ name: "pi-test", version: "1.0.0" }] };
+	},
+	async searchPage(_query, _from, _size) {
+		return { total: 1, results: [{ name: "pi-test", version: "1.0.0" }] };
+	},
+	async searchAll() {
+		return [{ name: "pi-test", version: "1.0.0" }];
+	},
+	async info(name) {
+		return { name, version: "1.0.0" };
+	},
 };
 
 const installer: Installer = {
-	async install(source) { return `installed ${source}`; },
-	async remove(source) { return `removed ${source}`; },
-	async update(source) { return { output: `updated ${source}`, reloadRequired: true, alreadyUpToDate: false, pinned: false }; },
+	async install(source) {
+		return `installed ${source}`;
+	},
+	async remove(source) {
+		return `removed ${source}`;
+	},
+	async update(source) {
+		return { output: `updated ${source}`, reloadRequired: true, alreadyUpToDate: false, pinned: false };
+	},
 };
 
 describe("daemon-kit migration", () => {
@@ -108,16 +122,40 @@ describe("daemon-kit migration", () => {
 		});
 
 		expect(await client.operations()).toEqual([
-			"package.search", "package.info", "package.installed", "package.catalog", "package.catalog.sync", "package.index", "package.index.build", "package.updates", "package.check", "package.pack", "package.score",
-			"setup.export", "setup.update", "setup.plan", "setup.apply",
-			"package.security.get", "package.security.set", "package.install", "package.install_service", "package.remove", "package.update",
-			"resources.list", "resources.toggle",
-			"pi.status", "advisories.scan", "doctor.run", "package.updates.project",
+			"package.search",
+			"package.info",
+			"package.installed",
+			"package.catalog",
+			"package.catalog.sync",
+			"package.index",
+			"package.index.build",
+			"package.updates",
+			"package.check",
+			"package.pack",
+			"package.score",
+			"setup.export",
+			"setup.update",
+			"setup.plan",
+			"setup.apply",
+			"package.security.get",
+			"package.security.set",
+			"package.install",
+			"package.install_service",
+			"package.remove",
+			"package.update",
+			"resources.list",
+			"resources.toggle",
+			"pi.status",
+			"advisories.scan",
+			"doctor.run",
+			"package.updates.project",
 		]);
 		expect(await client.call("package.search", { query: "test", limit: 10, offline: false })).toMatchObject({ total: 1 });
 		expect(await client.call("package.info", { name: "pi-test" })).toEqual({ name: "pi-test", version: "1.0.0" });
 		expect(await client.call("package.catalog.sync", {})).toEqual({ synced: 1 });
-		expect((await client.call("package.catalog", {})).packages.map(({ name, version }) => ({ name, version }))).toEqual([{ name: "pi-test", version: "1.0.0" }]);
+		expect((await client.call("package.catalog", {})).packages.map(({ name, version }) => ({ name, version }))).toEqual([
+			{ name: "pi-test", version: "1.0.0" },
+		]);
 
 		const rest = await app.fetch(new Request("http://packed.test/info?name=pi-test", { headers: { authorization: "Bearer test-token" } }));
 		expect(rest.status).toBe(200);

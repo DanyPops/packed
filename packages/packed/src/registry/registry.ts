@@ -2,11 +2,17 @@
  * registry.ts — driven adapter: npm registry over HTTP (web-standard fetch).
  * Lean mapping = Facade over npm's verbose package documents.
  */
-import type { DownloadObservations, Pkg, PkgInfo, Registry, SearchPage } from "../shared/ports.ts";
+
 import {
-	NPM_REGISTRY_BASE, SEARCH_PAGE_SIZE, RETRY_MAX_ATTEMPTS, RETRY_BASE_DELAY_MS, PAGE_DELAY_MS, REGISTRY_FETCH_TIMEOUT_MS,
+	NPM_REGISTRY_BASE,
+	PAGE_DELAY_MS,
+	REGISTRY_FETCH_TIMEOUT_MS,
+	RETRY_BASE_DELAY_MS,
+	RETRY_MAX_ATTEMPTS,
+	SEARCH_PAGE_SIZE,
 } from "../shared/constants.ts";
 import { createLogger } from "../shared/log.ts";
+import type { DownloadObservations, Pkg, PkgInfo, Registry, SearchPage } from "../shared/ports.ts";
 
 const log = createLogger("registry");
 
@@ -68,10 +74,19 @@ export class HttpRegistry implements Registry {
 		const results: Pkg[] = (doc.objects ?? []).flatMap((o) => {
 			const p = o.package;
 			return p?.name
-				? [{
-					name: boundedString(p.name, 214)!, version: boundedString(p.version, 128) ?? "", description: boundedString(p.description, 512), date: boundedString(p.date, 64),
-					packageEvidence: { shape: "keyword-only" as const, verified: false, evidence: ["npm keyword search candidate; tarball not inspected"] },
-				}]
+				? [
+						{
+							name: boundedString(p.name, 214)!,
+							version: boundedString(p.version, 128) ?? "",
+							description: boundedString(p.description, 512),
+							date: boundedString(p.date, 64),
+							packageEvidence: {
+								shape: "keyword-only" as const,
+								verified: false,
+								evidence: ["npm keyword search candidate; tarball not inspected"],
+							},
+						},
+					]
 				: [];
 		});
 		return { results, total: doc.total ?? results.length };
@@ -98,9 +113,16 @@ export class HttpRegistry implements Registry {
 		const encoded = encodeURIComponent(name).replace("%2F", "/");
 		const res = await fetchWithRetry(`${this.base}/${encoded}/latest`, { headers: { accept: "application/json" } }, this.retryBaseDelayMs);
 		if (!res.ok) throw new Error(`npm info ${name}: HTTP ${res.status}`);
-		const v = await boundedJson(res, 1024 * 1024) as {
-			name?: string; version?: string; description?: string; homepage?: string; license?: unknown;
-			repository?: unknown; bugs?: unknown; keywords?: string[]; pi?: Record<string, unknown>;
+		const v = (await boundedJson(res, 1024 * 1024)) as {
+			name?: string;
+			version?: string;
+			description?: string;
+			homepage?: string;
+			license?: unknown;
+			repository?: unknown;
+			bugs?: unknown;
+			keywords?: string[];
+			pi?: Record<string, unknown>;
 			peerDependencies?: Record<string, string>;
 			dist?: { unpackedSize?: number; integrity?: string; attestations?: { url?: string; provenance?: unknown } };
 		};
@@ -108,16 +130,33 @@ export class HttpRegistry implements Registry {
 		return {
 			name: boundedString(v.name, 214) ?? boundedString(name, 214)!,
 			version: boundedString(v.version, 128) ?? "",
-			description: boundedString(v.description, 512), homepage: boundedString(v.homepage, 2_048),
-			repository: boundedString(rawToString(v.repository, "url"), 2_048), repositoryDirectory: boundedString(rawToString(v.repository, "directory"), 256), bugs: boundedString(rawToString(v.bugs, "url"), 2_048),
+			description: boundedString(v.description, 512),
+			homepage: boundedString(v.homepage, 2_048),
+			repository: boundedString(rawToString(v.repository, "url"), 2_048),
+			repositoryDirectory: boundedString(rawToString(v.repository, "directory"), 256),
+			bugs: boundedString(rawToString(v.bugs, "url"), 2_048),
 			license: boundedString(rawToString(v.license, "type"), 128),
-			keywords: v.keywords?.filter((value): value is string => typeof value === "string").slice(0, 50).map((value) => value.slice(0, 64)),
-			pi: boundedPiManifest(v.pi), peerDependencies: boundedDependencies(v.peerDependencies), readmeAvailable: false,
+			keywords: v.keywords
+				?.filter((value): value is string => typeof value === "string")
+				.slice(0, 50)
+				.map((value) => value.slice(0, 64)),
+			pi: boundedPiManifest(v.pi),
+			peerDependencies: boundedDependencies(v.peerDependencies),
+			readmeAvailable: false,
 			unpackedSize: v.dist?.unpackedSize,
-			packageEvidence: manifestFields.length > 0
-				? { shape: "manifest", verified: false, evidence: manifestFields.map((field) => `registry package.json pi.${field}; tarball not inspected`) }
-				: { shape: "keyword-only", verified: false, evidence: ["registry metadata has no Pi manifest resources; tarball not inspected"] },
-			publication: { integrity: v.dist?.integrity, provenanceUrl: v.dist?.attestations?.provenance ? v.dist.attestations.url : undefined, trustedPublisher: "unknown" },
+			packageEvidence:
+				manifestFields.length > 0
+					? {
+							shape: "manifest",
+							verified: false,
+							evidence: manifestFields.map((field) => `registry package.json pi.${field}; tarball not inspected`),
+						}
+					: { shape: "keyword-only", verified: false, evidence: ["registry metadata has no Pi manifest resources; tarball not inspected"] },
+			publication: {
+				integrity: v.dist?.integrity,
+				provenanceUrl: v.dist?.attestations?.provenance ? v.dist.attestations.url : undefined,
+				trustedPublisher: "unknown",
+			},
 		};
 	}
 
@@ -128,7 +167,11 @@ export class HttpRegistry implements Registry {
 	 * version. */
 	async modifiedAt(name: string): Promise<string | undefined> {
 		const encoded = encodeURIComponent(name).replace("%2F", "/");
-		const res = await fetchWithRetry(`${this.base}/${encoded}`, { headers: { accept: "application/vnd.npm.install-v1+json" } }, this.retryBaseDelayMs);
+		const res = await fetchWithRetry(
+			`${this.base}/${encoded}`,
+			{ headers: { accept: "application/vnd.npm.install-v1+json" } },
+			this.retryBaseDelayMs,
+		);
 		if (!res.ok) throw new Error(`npm modifiedAt ${name}: HTTP ${res.status}`);
 		const doc = (await boundedJson(res, 512 * 1024)) as { modified?: unknown };
 		return boundedString(doc.modified, 64);
@@ -141,7 +184,10 @@ export class HttpRegistry implements Registry {
 			fetchWithRetry(`${this.downloadsBase}/downloads/point/last-month/${encoded}`, undefined, this.retryBaseDelayMs),
 		]);
 		if (!weekly.ok || !monthly.ok) throw new Error(`npm downloads ${name}: HTTP ${weekly.ok ? monthly.status : weekly.status}`);
-		const [weekDoc, monthDoc] = await Promise.all([boundedJson(weekly, 64 * 1024), boundedJson(monthly, 64 * 1024)]) as [{ downloads?: number }, { downloads?: number }];
+		const [weekDoc, monthDoc] = (await Promise.all([boundedJson(weekly, 64 * 1024), boundedJson(monthly, 64 * 1024)])) as [
+			{ downloads?: number },
+			{ downloads?: number },
+		];
 		return { weekly: boundedCount(weekDoc.downloads), monthly: boundedCount(monthDoc.downloads), observedAt: new Date().toISOString() };
 	}
 }
@@ -163,7 +209,11 @@ function boundedPiManifest(value: unknown): Record<string, unknown> | undefined 
 	const source = value as Record<string, unknown>;
 	const result: Record<string, unknown> = {};
 	for (const field of ["extensions", "skills", "prompts", "themes"] as const) {
-		if (Array.isArray(source[field])) result[field] = source[field].filter((item): item is string => typeof item === "string").slice(0, 100).map((item) => item.slice(0, 256));
+		if (Array.isArray(source[field]))
+			result[field] = source[field]
+				.filter((item): item is string => typeof item === "string")
+				.slice(0, 100)
+				.map((item) => item.slice(0, 256));
 	}
 	return Object.keys(result).length > 0 ? result : undefined;
 }
@@ -178,7 +228,9 @@ function boundedDependencies(value: unknown): Record<string, string> | undefined
 }
 
 function boundedCount(value: unknown): number | undefined {
-	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.min(Math.floor(value), Number.MAX_SAFE_INTEGER) : undefined;
+	return typeof value === "number" && Number.isFinite(value) && value >= 0
+		? Math.min(Math.floor(value), Number.MAX_SAFE_INTEGER)
+		: undefined;
 }
 
 /** npm fields appear as plain string OR object: license: "MIT" | {type:"MIT"}. */

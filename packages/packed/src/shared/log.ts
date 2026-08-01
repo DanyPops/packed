@@ -1,17 +1,17 @@
-import {
-	createLogger as createDaemonLogger,
-	type LogFields,
-	type LogLevel,
-	type Logger,
-} from "@danypops/vehicle-server/logging";
+import { createLogger as createDaemonLogger, type LogFields, type Logger, type LogLevel } from "@danypops/vehicle-server/logging";
 
-export type { LogFields, LogLevel, Logger };
+export type { LogFields, Logger, LogLevel };
 export type LogSink = (line: string) => void;
 
 /** Keeps Packed's injectable test sink while delegating level handling and serialization to vehicle-server. */
 export function createLogger(component: string, sink?: LogSink, minLevel?: LogLevel): Logger {
 	const destination = sink
-		? { write(chunk: string) { sink(chunk.trimEnd()); return true; } }
+		? {
+				write(chunk: string) {
+					sink(chunk.trimEnd());
+					return true;
+				},
+			}
 		: undefined;
 	return createDaemonLogger(component, {
 		level: minLevel,

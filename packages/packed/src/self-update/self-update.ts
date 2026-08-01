@@ -14,9 +14,9 @@
  * without a manual `systemctl restart`.
  */
 import { fileURLToPath } from "node:url";
-import { runInherited, type InteractiveRunResult } from "../publish/publish.ts";
-import { VERSION } from "../shared/version.ts";
+import { type InteractiveRunResult, runInherited } from "../publish/publish.ts";
 import type { Registry } from "../shared/ports.ts";
+import { VERSION } from "../shared/version.ts";
 
 export const PACKED_PACKAGE_NAME = "@danypops/packed";
 
@@ -64,11 +64,22 @@ export async function runSelfUpdate(deps: SelfUpdateDeps): Promise<SelfUpdateRep
 	if (method.kind === "local-checkout") {
 		updateNote = `skipped update: running from a local checkout at ${method.path} (update it with your own git workflow, e.g. git pull)`;
 	} else {
-		try { latestVersion = (await deps.registry.info(PACKED_PACKAGE_NAME)).version; } catch { /* best-effort; npm install --global resolves latest itself either way */ }
+		try {
+			latestVersion = (await deps.registry.info(PACKED_PACKAGE_NAME)).version;
+		} catch {
+			/* best-effort; npm install --global resolves latest itself either way */
+		}
 		const runNpmInstall = deps.runNpmInstall ?? ((args) => runInherited(["npm", ...args]));
 		const install = await runNpmInstall(["install", "--global", `${PACKED_PACKAGE_NAME}@latest`]);
 		if (!install.ok) {
-			return { ok: false, previousVersion, latestVersion, updated: false, restarted: false, message: `npm install --global ${PACKED_PACKAGE_NAME}@latest failed (exit ${install.code})` };
+			return {
+				ok: false,
+				previousVersion,
+				latestVersion,
+				updated: false,
+				restarted: false,
+				message: `npm install --global ${PACKED_PACKAGE_NAME}@latest failed (exit ${install.code})`,
+			};
 		}
 		updated = true;
 		updateNote = "updated via npm";
@@ -76,14 +87,35 @@ export async function runSelfUpdate(deps: SelfUpdateDeps): Promise<SelfUpdateRep
 
 	const isServiceInstalled = deps.isServiceInstalled ?? (() => false);
 	if (!isServiceInstalled()) {
-		return { ok: true, previousVersion, latestVersion, updated, restarted: false, message: `${updateNote}; no supervised pi-packed service was found -- restart any running daemon manually` };
+		return {
+			ok: true,
+			previousVersion,
+			latestVersion,
+			updated,
+			restarted: false,
+			message: `${updateNote}; no supervised pi-packed service was found -- restart any running daemon manually`,
+		};
 	}
 	if (!deps.restartService) {
-		return { ok: true, previousVersion, latestVersion, updated, restarted: false, message: `${updateNote}; restarting the service isn't supported on this platform yet -- restart it manually: systemctl --user restart pi-packed.service` };
+		return {
+			ok: true,
+			previousVersion,
+			latestVersion,
+			updated,
+			restarted: false,
+			message: `${updateNote}; restarting the service isn't supported on this platform yet -- restart it manually: systemctl --user restart pi-packed.service`,
+		};
 	}
 	const restart = await deps.restartService();
 	if (!restart.ok) {
-		return { ok: updated, previousVersion, latestVersion, updated, restarted: false, message: `${updateNote}; restarting pi-packed.service failed (exit ${restart.code}) -- restart it manually: systemctl --user restart pi-packed.service` };
+		return {
+			ok: updated,
+			previousVersion,
+			latestVersion,
+			updated,
+			restarted: false,
+			message: `${updateNote}; restarting pi-packed.service failed (exit ${restart.code}) -- restart it manually: systemctl --user restart pi-packed.service`,
+		};
 	}
 	return { ok: true, previousVersion, latestVersion, updated, restarted: true, message: `${updateNote}; restarted the pi-packed service` };
 }

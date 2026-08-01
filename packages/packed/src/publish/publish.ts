@@ -16,7 +16,10 @@ const MAX_WORKSPACE_PACKAGES = 50;
  * name, so sibling packages in one workspace never collide on one file. */
 export function stageWorkflowSlug(packageName: string): string {
 	const bare = packageName.includes("/") ? packageName.slice(packageName.lastIndexOf("/") + 1) : packageName;
-	const slug = bare.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+	const slug = bare
+		.toLowerCase()
+		.replace(/[^a-z0-9-]+/g, "-")
+		.replace(/^-+|-+$/g, "");
 	return slug || "package";
 }
 
@@ -43,7 +46,11 @@ export interface WorkflowInput {
 	tagPrefix?: string;
 }
 
-export interface VersionCommandResult { code: number; stdout: string; stderr: string }
+export interface VersionCommandResult {
+	code: number;
+	stdout: string;
+	stderr: string;
+}
 export type VersionCommand = () => Promise<VersionCommandResult>;
 export type TrustStatusCommand = (packageName: string) => Promise<VersionCommandResult>;
 
@@ -113,12 +120,13 @@ const SETUP_NODE_SHA = "249970729cb0ef3589644e2896645e5dc5ba9c38";
 const SETUP_BUN_SHA = "0c5077e51419868618aeaa5fe8019c62421857d6";
 
 function installSteps(manager: PackageManagerSelection): string[] {
-	if (manager.name === "bun") return [
-		`      - uses: oven-sh/setup-bun@${SETUP_BUN_SHA} # v2`,
-		"        with:",
-		`          bun-version: "${manager.version ?? "1.3.14"}"`,
-		"      - run: bun install --frozen-lockfile --ignore-scripts",
-	];
+	if (manager.name === "bun")
+		return [
+			`      - uses: oven-sh/setup-bun@${SETUP_BUN_SHA} # v2`,
+			"        with:",
+			`          bun-version: "${manager.version ?? "1.3.14"}"`,
+			"      - run: bun install --frozen-lockfile --ignore-scripts",
+		];
 	if (manager.name === "npm") return ["      - run: npm ci --ignore-scripts"];
 	const version = manager.version ?? (manager.name === "pnpm" ? "10" : "1.22.22");
 	return [
@@ -170,6 +178,7 @@ export function renderStageWorkflow(input: WorkflowInput): string {
 		"  id-token: write",
 		"",
 		"concurrency:",
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression syntax in generated YAML, not JS interpolation
 		"  group: stage-npm-${{ github.ref }}",
 		"  cancel-in-progress: false",
 		"",
@@ -187,11 +196,9 @@ export function renderStageWorkflow(input: WorkflowInput): string {
 		...installSteps(input.packageManager),
 		...coreFirst,
 		...steps,
-		...(input.packageManager.name === "bun" ? [] : [
-			`      - uses: oven-sh/setup-bun@${SETUP_BUN_SHA} # v2`,
-			"        with:",
-			'          bun-version: "1.3.14"',
-		]),
+		...(input.packageManager.name === "bun"
+			? []
+			: [`      - uses: oven-sh/setup-bun@${SETUP_BUN_SHA} # v2`, "        with:", '          bun-version: "1.3.14"']),
 		// "latest", not VERSION: the version currently being staged cannot exist
 		// on npm yet, and one already-published packed release exists by the
 		// time this workflow can be generated at all (setup requires it).
@@ -245,9 +252,7 @@ export function satisfiesRange(version: string, range: string): boolean | undefi
 export async function runBounded(command: string[]): Promise<VersionCommandResult> {
 	const proc = Bun.spawn(command, { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
 	const timer = setTimeout(() => proc.kill(), VERSION_TIMEOUT_MS);
-	const [stdout, stderr, code] = await Promise.all([
-		new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
-	]);
+	const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
 	clearTimeout(timer);
 	return { code, stdout: stdout.slice(0, MAX_COMMAND_OUTPUT), stderr: stderr.slice(0, MAX_COMMAND_OUTPUT) };
 }
@@ -256,7 +261,10 @@ export const readNpmVersion: VersionCommand = () => runBounded(["npm", "--versio
 export const readTrustStatus: TrustStatusCommand = (packageName) => runBounded(["npm", "trust", "list", packageName, "--json"]);
 export const readNpmWhoami: VersionCommand = () => runBounded(["npm", "whoami"]);
 
-export interface InteractiveRunResult { ok: boolean; code: number }
+export interface InteractiveRunResult {
+	ok: boolean;
+	code: number;
+}
 
 export async function runInherited(command: string[]): Promise<InteractiveRunResult> {
 	try {
@@ -327,7 +335,9 @@ function resolveWorkspace(packageDir: string): WorkspaceContext {
 			if (isWorkspaceManifest(manifest)) {
 				return { workspaceRoot: current, packageRelative: relative(current, packageDir) || ".", isMonorepo: true, rootManifest: manifest };
 			}
-		} catch { /* not a manifest here; keep walking */ }
+		} catch {
+			/* not a manifest here; keep walking */
+		}
 	}
 	return { workspaceRoot: packageDir, packageRelative: ".", isMonorepo: false };
 }
@@ -338,12 +348,16 @@ function resolveWorkspace(packageDir: string): WorkspaceContext {
 function workspaceSiblings(workspaceRoot: string): WorkspaceSiblings {
 	const siblings: WorkspaceSiblings = new Map();
 	let entries: string[];
-	try { entries = readdirSync(join(workspaceRoot, "packages")); } catch { return siblings; }
+	try {
+		entries = readdirSync(join(workspaceRoot, "packages"));
+	} catch {
+		return siblings;
+	}
 	for (const entry of entries.slice(0, MAX_WORKSPACE_PACKAGES)) {
 		try {
 			const manifest = readManifest(join(workspaceRoot, "packages", entry));
 			if (typeof manifest.name === "string") siblings.set(manifest.name, join("packages", entry));
-		} catch { continue; }
+		} catch {}
 	}
 	return siblings;
 }
@@ -351,7 +365,8 @@ function workspaceSiblings(workspaceRoot: string): WorkspaceSiblings {
 function dependencyRanges(manifest: PackageManifest): Record<string, string> {
 	if (!manifest.dependencies || typeof manifest.dependencies !== "object" || Array.isArray(manifest.dependencies)) return {};
 	const ranges: Record<string, string> = {};
-	for (const [name, value] of Object.entries(manifest.dependencies as Record<string, unknown>)) if (typeof value === "string") ranges[name] = value;
+	for (const [name, value] of Object.entries(manifest.dependencies as Record<string, unknown>))
+		if (typeof value === "string") ranges[name] = value;
 	return ranges;
 }
 
@@ -363,7 +378,8 @@ function internalDependencyRanges(manifest: PackageManifest, siblings: Workspace
 }
 function repositoryString(value: unknown): string | undefined {
 	if (typeof value === "string") return value;
-	if (value && typeof value === "object" && typeof (value as Record<string, unknown>).url === "string") return (value as Record<string, unknown>).url as string;
+	if (value && typeof value === "object" && typeof (value as Record<string, unknown>).url === "string")
+		return (value as Record<string, unknown>).url as string;
 	return undefined;
 }
 
@@ -376,7 +392,11 @@ export function githubRepository(value: unknown): string | undefined {
 		.replace(/^ssh:\/\/git@github\.com\//, "https://github.com/")
 		.replace(/\.git$/, "");
 	let url: URL;
-	try { url = new URL(normalized); } catch { return undefined; }
+	try {
+		url = new URL(normalized);
+	} catch {
+		return undefined;
+	}
 	if (url.hostname.toLowerCase() !== "github.com" || url.username || url.password) return undefined;
 	const parts = url.pathname.split("/").filter(Boolean);
 	if (parts.length !== 2 || !parts.every((part) => /^[A-Za-z0-9_.-]+$/.test(part))) return undefined;
@@ -426,7 +446,11 @@ function diagnostic(code: string, severity: Diagnostic["severity"], path: string
 }
 
 async function packageExists(registry: Registry, name: string): Promise<boolean> {
-	try { return (await registry.info(name)).name === name; } catch { return false; }
+	try {
+		return (await registry.info(name)).name === name;
+	} catch {
+		return false;
+	}
 }
 
 function workflowInput(ws: WorkspaceContext, manifest: PackageManifest, siblings: WorkspaceSiblings): WorkflowInput {
@@ -446,7 +470,9 @@ function workflowIsExpected(path: string, expected: string): boolean {
 		const stat = lstatSync(path);
 		if (!stat.isFile() || stat.size > MAX_WORKFLOW_BYTES) return false;
 		return readFileSync(path, "utf8") === expected;
-	} catch { return false; }
+	} catch {
+		return false;
+	}
 }
 
 export class PublishManager {
@@ -462,41 +488,127 @@ export class PublishManager {
 		const ws = resolveWorkspace(root);
 		const diagnostics: Diagnostic[] = [];
 		let manifest: PackageManifest;
-		try { manifest = readManifest(root); }
-		catch (error) {
-			return { root, ok: false, wrote: false, workflowPath: join(ws.workspaceRoot, ".github/workflows/stage-publish.yml"), diagnostics: [diagnostic("PUBLISH_MANIFEST_INVALID", "error", "package.json", error instanceof Error ? error.message : String(error))] };
+		try {
+			manifest = readManifest(root);
+		} catch (error) {
+			return {
+				root,
+				ok: false,
+				wrote: false,
+				workflowPath: join(ws.workspaceRoot, ".github/workflows/stage-publish.yml"),
+				diagnostics: [
+					diagnostic("PUBLISH_MANIFEST_INVALID", "error", "package.json", error instanceof Error ? error.message : String(error)),
+				],
+			};
 		}
 		const packageName = typeof manifest.name === "string" && PACKAGE_NAME.test(manifest.name) ? manifest.name : undefined;
 		const workflowFile = stageWorkflowFile(packageName ?? basename(root));
 		const workflowRelativePath = `.github/workflows/${workflowFile}`;
 		const workflowPath = join(ws.workspaceRoot, workflowRelativePath);
-		if (!packageName) diagnostics.push(diagnostic("PUBLISH_PACKAGE_NAME_INVALID", "error", "package.json", "package name is missing or invalid"));
-		if (manifest.private === true || hasRestrictedAccess(manifest.publishConfig)) diagnostics.push(diagnostic("PUBLISH_PRIVATE_PACKAGE", "error", "package.json", "the generated public staged-publish workflow does not support private or restricted packages"));
+		if (!packageName)
+			diagnostics.push(diagnostic("PUBLISH_PACKAGE_NAME_INVALID", "error", "package.json", "package name is missing or invalid"));
+		if (manifest.private === true || hasRestrictedAccess(manifest.publishConfig))
+			diagnostics.push(
+				diagnostic(
+					"PUBLISH_PRIVATE_PACKAGE",
+					"error",
+					"package.json",
+					"the generated public staged-publish workflow does not support private or restricted packages",
+				),
+			);
 		const repository = githubRepository(manifest.repository);
-		if (!repository) diagnostics.push(diagnostic("PUBLISH_GITHUB_REPOSITORY_REQUIRED", "error", "package.json", "repository must identify one credential-free GitHub owner/repository"));
+		if (!repository)
+			diagnostics.push(
+				diagnostic(
+					"PUBLISH_GITHUB_REPOSITORY_REQUIRED",
+					"error",
+					"package.json",
+					"repository must identify one credential-free GitHub owner/repository",
+				),
+			);
 		const exists = packageName ? await packageExists(this.registry, packageName) : false;
-		if (packageName && !exists) diagnostics.push(diagnostic("PUBLISH_PACKAGE_NOT_FOUND", "error", "package.json", "trusted publishing can only be configured after the package exists on npm", `Complete the first authenticated publish in npm, then rerun packed publish setup. Open ${npmWebUrl(packageName)}`));
+		if (packageName && !exists)
+			diagnostics.push(
+				diagnostic(
+					"PUBLISH_PACKAGE_NOT_FOUND",
+					"error",
+					"package.json",
+					"trusted publishing can only be configured after the package exists on npm",
+					`Complete the first authenticated publish in npm, then rerun packed publish setup. Open ${npmWebUrl(packageName)}`,
+				),
+			);
 		const manager = selectPackageManager(ws.workspaceRoot, manifest.packageManager ?? ws.rootManifest?.packageManager);
-		if (!hasLockfile(ws.workspaceRoot, manager)) diagnostics.push(diagnostic("PUBLISH_LOCKFILE_REQUIRED", "error", "package.json", `a committed ${manager.name} lockfile is required for deterministic CI installation`));
-		const npm = await this.versionCommand().catch((error) => ({ code: 1, stdout: "", stderr: error instanceof Error ? error.message : String(error) }));
-		if (npm.code !== 0 || !versionAtLeast(npm.stdout, TRUST_NPM_VERSION)) diagnostics.push(diagnostic("PUBLISH_NPM_VERSION_LOW", "warning", "npm", `npm ${TRUST_NPM_VERSION} or newer is required for trust management`, `npm install --global npm@^${TRUST_NPM_VERSION}`));
-		if (existsSync(workflowPath) && !options.force) diagnostics.push(diagnostic("PUBLISH_WORKFLOW_EXISTS", "error", workflowRelativePath, "workflow already exists; Packed will not overwrite it without --force"));
-		if (existsSync(workflowPath) && lstatSync(workflowPath).isSymbolicLink()) diagnostics.push(diagnostic("PUBLISH_WORKFLOW_SYMLINK", "error", workflowRelativePath, "refusing to overwrite a workflow symlink"));
+		if (!hasLockfile(ws.workspaceRoot, manager))
+			diagnostics.push(
+				diagnostic(
+					"PUBLISH_LOCKFILE_REQUIRED",
+					"error",
+					"package.json",
+					`a committed ${manager.name} lockfile is required for deterministic CI installation`,
+				),
+			);
+		const npm = await this.versionCommand().catch((error) => ({
+			code: 1,
+			stdout: "",
+			stderr: error instanceof Error ? error.message : String(error),
+		}));
+		if (npm.code !== 0 || !versionAtLeast(npm.stdout, TRUST_NPM_VERSION))
+			diagnostics.push(
+				diagnostic(
+					"PUBLISH_NPM_VERSION_LOW",
+					"warning",
+					"npm",
+					`npm ${TRUST_NPM_VERSION} or newer is required for trust management`,
+					`npm install --global npm@^${TRUST_NPM_VERSION}`,
+				),
+			);
+		if (existsSync(workflowPath) && !options.force)
+			diagnostics.push(
+				diagnostic(
+					"PUBLISH_WORKFLOW_EXISTS",
+					"error",
+					workflowRelativePath,
+					"workflow already exists; Packed will not overwrite it without --force",
+				),
+			);
+		if (existsSync(workflowPath) && lstatSync(workflowPath).isSymbolicLink())
+			diagnostics.push(diagnostic("PUBLISH_WORKFLOW_SYMLINK", "error", workflowRelativePath, "refusing to overwrite a workflow symlink"));
 		if (diagnostics.some((item) => item.severity === "error")) {
-			return { root, ok: false, wrote: false, workflowPath, packageName, repository, trustCommand: packageName && repository ? trustCommand(packageName, workflowFile, repository) : undefined, webUrl: packageName ? npmWebUrl(packageName) : undefined, diagnostics };
+			return {
+				root,
+				ok: false,
+				wrote: false,
+				workflowPath,
+				packageName,
+				repository,
+				trustCommand: packageName && repository ? trustCommand(packageName, workflowFile, repository) : undefined,
+				webUrl: packageName ? npmWebUrl(packageName) : undefined,
+				diagnostics,
+			};
 		}
 		const siblings = ws.isMonorepo ? workspaceSiblings(ws.workspaceRoot) : new Map<string, string>();
 		const workflow = renderStageWorkflow(workflowInput(ws, manifest, siblings));
 		mkdirSync(dirname(workflowPath), { recursive: true });
 		if (options.force && existsSync(workflowPath)) {
 			const temporary = join(dirname(workflowPath), `.${basename(workflowPath)}.${process.pid}.tmp`);
-			try { writeFileSync(temporary, workflow, { flag: "wx", mode: 0o644 }); renameSync(temporary, workflowPath); }
-			finally { rmSync(temporary, { force: true }); }
+			try {
+				writeFileSync(temporary, workflow, { flag: "wx", mode: 0o644 });
+				renameSync(temporary, workflowPath);
+			} finally {
+				rmSync(temporary, { force: true });
+			}
 		} else writeFileSync(workflowPath, workflow, { flag: "wx", mode: 0o644 });
 		return {
-			root, ok: true, wrote: true, workflowPath, packageName, repository,
-			trustCommand: trustCommand(packageName!, workflowFile, repository!), statusCommand: `packed publish status ${root}`,
-			webUrl: npmWebUrl(packageName!), diagnostics,
+			root,
+			ok: true,
+			wrote: true,
+			workflowPath,
+			packageName,
+			repository,
+			trustCommand: trustCommand(packageName!, workflowFile, repository!),
+			statusCommand: `packed publish status ${root}`,
+			webUrl: npmWebUrl(packageName!),
+			diagnostics,
 		};
 	}
 
@@ -505,9 +617,29 @@ export class PublishManager {
 		const ws = resolveWorkspace(root);
 		const diagnostics: Diagnostic[] = [];
 		let manifest: PackageManifest;
-		try { manifest = readManifest(root); }
-		catch (error) {
-			return { root, ready: false, workflowPath: join(ws.workspaceRoot, ".github/workflows/stage-publish.yml"), checks: { packageExists: false, repository: false, workflow: false, lockfile: false, node: false, npm: false, trustedPublisher: "unknown", coreFirst: false, loggedIn: false }, diagnostics: [diagnostic("PUBLISH_MANIFEST_INVALID", "error", "package.json", error instanceof Error ? error.message : String(error))], nextSteps: [] };
+		try {
+			manifest = readManifest(root);
+		} catch (error) {
+			return {
+				root,
+				ready: false,
+				workflowPath: join(ws.workspaceRoot, ".github/workflows/stage-publish.yml"),
+				checks: {
+					packageExists: false,
+					repository: false,
+					workflow: false,
+					lockfile: false,
+					node: false,
+					npm: false,
+					trustedPublisher: "unknown",
+					coreFirst: false,
+					loggedIn: false,
+				},
+				diagnostics: [
+					diagnostic("PUBLISH_MANIFEST_INVALID", "error", "package.json", error instanceof Error ? error.message : String(error)),
+				],
+				nextSteps: [],
+			};
 		}
 		const packageName = typeof manifest.name === "string" && PACKAGE_NAME.test(manifest.name) ? manifest.name : undefined;
 		const workflowFile = stageWorkflowFile(packageName ?? basename(root));
@@ -524,20 +656,74 @@ export class PublishManager {
 		const npmResult = await this.versionCommand().catch(() => ({ code: 1, stdout: "", stderr: "" }));
 		const npm = npmResult.code === 0 && versionAtLeast(npmResult.stdout, TRUST_NPM_VERSION);
 		const node = workflow && expected.includes('node-version: "24"');
-		const trustedPublisher = packageName && repository && npm
-			? await this.trustedPublisherStatus(packageName, workflowFile, repository)
-			: "unknown";
+		const trustedPublisher =
+			packageName && repository && npm ? await this.trustedPublisherStatus(packageName, workflowFile, repository) : "unknown";
 		const coreFirst = await this.coreFirstStatus(internal, diagnostics);
 		const loggedIn = (await this.whoamiCommand().catch(() => ({ code: 1, stdout: "", stderr: "" }))).code === 0;
-		if (!loggedIn) diagnostics.push(diagnostic("PUBLISH_NPM_NOT_LOGGED_IN", "warning", "npm", "not logged in to npm on this machine; trust configuration requires an authenticated npm session", "npm login --auth-type=web"));
-		if (!packageName) diagnostics.push(diagnostic("PUBLISH_PACKAGE_NAME_INVALID", "error", "package.json", "package name is missing or invalid"));
+		if (!loggedIn)
+			diagnostics.push(
+				diagnostic(
+					"PUBLISH_NPM_NOT_LOGGED_IN",
+					"warning",
+					"npm",
+					"not logged in to npm on this machine; trust configuration requires an authenticated npm session",
+					"npm login --auth-type=web",
+				),
+			);
+		if (!packageName)
+			diagnostics.push(diagnostic("PUBLISH_PACKAGE_NAME_INVALID", "error", "package.json", "package name is missing or invalid"));
 		if (!exists) diagnostics.push(diagnostic("PUBLISH_PACKAGE_NOT_FOUND", "error", "package.json", "package does not exist on npm"));
-		if (!repository) diagnostics.push(diagnostic("PUBLISH_GITHUB_REPOSITORY_REQUIRED", "error", "package.json", "valid GitHub repository metadata is required"));
-		if (!lockfile) diagnostics.push(diagnostic("PUBLISH_LOCKFILE_REQUIRED", "error", "package.json", `a committed ${manager.name} lockfile is required for deterministic CI installation`));
-		if (!workflow) diagnostics.push(diagnostic("PUBLISH_WORKFLOW_MISSING_OR_STALE", "error", workflowRelativePath, "generated staged-publish workflow is missing or differs from current policy", "rerun packed publish setup --force after reviewing the diff"));
-		if (!npm) diagnostics.push(diagnostic("PUBLISH_NPM_VERSION_LOW", "warning", "npm", `local npm ${TRUST_NPM_VERSION} or newer is required to configure trust`, `npm install --global npm@^${TRUST_NPM_VERSION}`));
-		if (trustedPublisher === "not-verified") diagnostics.push(diagnostic("PUBLISH_TRUST_MISMATCH", "error", "npm", "npm trusted publisher does not match the GitHub repository, workflow file, and stage-only permission"));
-		if (trustedPublisher === "unknown") diagnostics.push(diagnostic("PUBLISH_TRUST_UNKNOWN", "warning", "npm", "trusted publisher status could not be read; authenticate npm or use the web handoff"));
+		if (!repository)
+			diagnostics.push(
+				diagnostic("PUBLISH_GITHUB_REPOSITORY_REQUIRED", "error", "package.json", "valid GitHub repository metadata is required"),
+			);
+		if (!lockfile)
+			diagnostics.push(
+				diagnostic(
+					"PUBLISH_LOCKFILE_REQUIRED",
+					"error",
+					"package.json",
+					`a committed ${manager.name} lockfile is required for deterministic CI installation`,
+				),
+			);
+		if (!workflow)
+			diagnostics.push(
+				diagnostic(
+					"PUBLISH_WORKFLOW_MISSING_OR_STALE",
+					"error",
+					workflowRelativePath,
+					"generated staged-publish workflow is missing or differs from current policy",
+					"rerun packed publish setup --force after reviewing the diff",
+				),
+			);
+		if (!npm)
+			diagnostics.push(
+				diagnostic(
+					"PUBLISH_NPM_VERSION_LOW",
+					"warning",
+					"npm",
+					`local npm ${TRUST_NPM_VERSION} or newer is required to configure trust`,
+					`npm install --global npm@^${TRUST_NPM_VERSION}`,
+				),
+			);
+		if (trustedPublisher === "not-verified")
+			diagnostics.push(
+				diagnostic(
+					"PUBLISH_TRUST_MISMATCH",
+					"error",
+					"npm",
+					"npm trusted publisher does not match the GitHub repository, workflow file, and stage-only permission",
+				),
+			);
+		if (trustedPublisher === "unknown")
+			diagnostics.push(
+				diagnostic(
+					"PUBLISH_TRUST_UNKNOWN",
+					"warning",
+					"npm",
+					"trusted publisher status could not be read; authenticate npm or use the web handoff",
+				),
+			);
 		const command = packageName && repository ? trustCommand(packageName, workflowFile, repository) : undefined;
 		const nextSteps = [
 			...(command ? [`Run: ${command}`] : []),
@@ -547,8 +733,26 @@ export class PublishManager {
 			"Review with npm stage list/view/download and approve the chosen stage with 2FA.",
 		];
 		return {
-			root, ready: Boolean(packageName && exists && repository && workflow && lockfile && node && npm && trustedPublisher === "verified" && coreFirst), packageName, repository, workflowPath,
-			checks: { packageExists: exists, repository: Boolean(repository), workflow, lockfile, node, npm, trustedPublisher, coreFirst, loggedIn }, diagnostics, nextSteps,
+			root,
+			ready: Boolean(
+				packageName && exists && repository && workflow && lockfile && node && npm && trustedPublisher === "verified" && coreFirst,
+			),
+			packageName,
+			repository,
+			workflowPath,
+			checks: {
+				packageExists: exists,
+				repository: Boolean(repository),
+				workflow,
+				lockfile,
+				node,
+				npm,
+				trustedPublisher,
+				coreFirst,
+				loggedIn,
+			},
+			diagnostics,
+			nextSteps,
 		};
 	}
 
@@ -559,47 +763,86 @@ export class PublishManager {
 		let ok = true;
 		for (const [name, range] of Object.entries(internal)) {
 			let latest: string | undefined;
-			try { latest = (await this.registry.info(name)).version; } catch { latest = undefined; }
+			try {
+				latest = (await this.registry.info(name)).version;
+			} catch {
+				latest = undefined;
+			}
 			if (!latest) {
-				diagnostics.push(diagnostic("PUBLISH_DEPENDENCY_NOT_PUBLISHED", "error", "package.json#dependencies", `${name} must be published on npm before staging this package (core-first ordering)`));
+				diagnostics.push(
+					diagnostic(
+						"PUBLISH_DEPENDENCY_NOT_PUBLISHED",
+						"error",
+						"package.json#dependencies",
+						`${name} must be published on npm before staging this package (core-first ordering)`,
+					),
+				);
 				ok = false;
 				continue;
 			}
 			const satisfies = satisfiesRange(latest, range);
 			if (satisfies === false) {
-				diagnostics.push(diagnostic("PUBLISH_DEPENDENCY_RANGE_MISMATCH", "error", "package.json#dependencies", `${name}@${range} does not accept npm's published ${latest}; align the range or publish a compatible core release first`));
+				diagnostics.push(
+					diagnostic(
+						"PUBLISH_DEPENDENCY_RANGE_MISMATCH",
+						"error",
+						"package.json#dependencies",
+						`${name}@${range} does not accept npm's published ${latest}; align the range or publish a compatible core release first`,
+					),
+				);
 				ok = false;
 			} else if (satisfies === undefined) {
-				diagnostics.push(diagnostic("PUBLISH_DEPENDENCY_RANGE_UNKNOWN", "warning", "package.json#dependencies", `could not evaluate whether ${name}@${range} accepts npm's published ${latest}`));
+				diagnostics.push(
+					diagnostic(
+						"PUBLISH_DEPENDENCY_RANGE_UNKNOWN",
+						"warning",
+						"package.json#dependencies",
+						`could not evaluate whether ${name}@${range} accepts npm's published ${latest}`,
+					),
+				);
 			}
 		}
 		return ok;
 	}
 
-	private async trustedPublisherStatus(packageName: string, workflowFile: string, repository: string): Promise<"verified" | "not-verified" | "unknown"> {
+	private async trustedPublisherStatus(
+		packageName: string,
+		workflowFile: string,
+		repository: string,
+	): Promise<"verified" | "not-verified" | "unknown"> {
 		let result: VersionCommandResult;
-		try { result = await this.trustStatusCommand(packageName); } catch { return "unknown"; }
+		try {
+			result = await this.trustStatusCommand(packageName);
+		} catch {
+			return "unknown";
+		}
 		if (result.code !== 0) return "unknown";
 		if (result.stdout.trim() === "") return "not-verified";
 		try {
 			const value = JSON.parse(result.stdout) as Record<string, unknown>;
-			const permissions = Array.isArray(value.permissions) ? value.permissions.filter((item): item is string => typeof item === "string") : [];
-			const matches = value.type === "github"
-				&& value.repository === repository
-				&& value.file === workflowFile
-				&& permissions.includes("createStagedPackage")
-				&& !permissions.includes("createPackage");
+			const permissions = Array.isArray(value.permissions)
+				? value.permissions.filter((item): item is string => typeof item === "string")
+				: [];
+			const matches =
+				value.type === "github" &&
+				value.repository === repository &&
+				value.file === workflowFile &&
+				permissions.includes("createStagedPackage") &&
+				!permissions.includes("createPackage");
 			return matches ? "verified" : "not-verified";
-		} catch { return "unknown"; }
+		} catch {
+			return "unknown";
+		}
 	}
 }
 
 export function formatPublishReport(report: PublishSetupReport | PublishStatusReport, json = false): string {
-	if (json) return JSON.stringify(report) + "\n";
+	if (json) return `${JSON.stringify(report)}\n`;
 	if ("wrote" in report) {
 		let out = `${report.ok ? "ready" : "not ready"}: ${report.packageName ?? report.root}\n`;
 		if (report.wrote) out += `wrote ${report.workflowPath}\n`;
-		for (const item of report.diagnostics) out += `${item.severity} ${item.code}: ${item.message}${item.fix ? `\n  fix: ${item.fix}` : ""}\n`;
+		for (const item of report.diagnostics)
+			out += `${item.severity} ${item.code}: ${item.message}${item.fix ? `\n  fix: ${item.fix}` : ""}\n`;
 		if (report.trustCommand) out += `next: ${report.trustCommand}\n`;
 		if (report.webUrl) out += `web: ${report.webUrl}\n`;
 		return out.slice(0, 16 * 1024);

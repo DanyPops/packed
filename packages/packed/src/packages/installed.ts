@@ -15,7 +15,7 @@ export function splitNpmSource(spec: string): [name: string, version: string] {
 function extractSource(entry: unknown): string {
 	if (typeof entry === "string") return entry;
 	if (entry && typeof entry === "object") {
-		const s = (entry as Record<string, unknown>)["source"];
+		const s = (entry as Record<string, unknown>).source;
 		if (typeof s === "string") return s;
 	}
 	return "";
@@ -64,17 +64,27 @@ export function readResolvedIntegrity(piHome: string, source: string): string | 
 	const name = npmPackageName(source);
 	if (!name) return undefined;
 	try {
-		const lock = JSON.parse(readFileSync(join(piHome, "npm", "package-lock.json"), "utf8")) as { packages?: Record<string, { integrity?: unknown }> };
+		const lock = JSON.parse(readFileSync(join(piHome, "npm", "package-lock.json"), "utf8")) as {
+			packages?: Record<string, { integrity?: unknown }>;
+		};
 		const integrity = lock.packages?.[`node_modules/${name}`]?.integrity;
 		return typeof integrity === "string" ? integrity : undefined;
-	} catch { return undefined; }
+	} catch {
+		return undefined;
+	}
 }
 
 export function readPackageDeclarations(piHome: string): string[] {
 	let settings: { packages?: unknown[] };
-	try { settings = JSON.parse(readFileSync(join(piHome, SETTINGS_FILE), "utf8")); }
-	catch { return []; }
-	return (settings.packages ?? []).map(extractSource).filter((source) => source.length > 0).slice(0, 500);
+	try {
+		settings = JSON.parse(readFileSync(join(piHome, SETTINGS_FILE), "utf8"));
+	} catch {
+		return [];
+	}
+	return (settings.packages ?? [])
+		.map(extractSource)
+		.filter((source) => source.length > 0)
+		.slice(0, 500);
 }
 
 export function readInstalledPackages(piHome: string): InstalledPkg[] {

@@ -1,12 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { buildSearchQuery, clampLimit } from "../src/shared/ports.ts";
-import { TTLCache } from "../src/shared/cache.ts";
-import { envMs } from "../src/shared/state.ts";
-import { HttpRegistry } from "../src/registry/registry.ts";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { Server } from "bun";
+import { HttpRegistry } from "../src/registry/registry.ts";
+import { TTLCache } from "../src/shared/cache.ts";
+import { buildSearchQuery, clampLimit } from "../src/shared/ports.ts";
+import { envMs } from "../src/shared/state.ts";
 
 describe("buildSearchQuery", () => {
 	it("scopes to pi packages", () => {
@@ -63,10 +60,19 @@ describe("HttpRegistry", () => {
 				if (url.pathname === "/downloads/point/last-month/pi-lsp") return Response.json({ downloads: 34 });
 				if (url.pathname === "/pi-lsp/latest") {
 					return Response.json({
-						name: "pi-lsp", version: "0.3.0", description: "LSP for pi", homepage: "https://example.com",
-						repository: { type: "git", url: "git+https://github.com/x/pi-lsp.git" }, license: "MIT",
-						keywords: ["pi-package", "lsp"], pi: { extensions: ["./src/index.ts"] },
-						dist: { unpackedSize: 12345, integrity: "sha512-test", attestations: { url: "https://registry.example/provenance", provenance: { predicateType: "slsa" } } },
+						name: "pi-lsp",
+						version: "0.3.0",
+						description: "LSP for pi",
+						homepage: "https://example.com",
+						repository: { type: "git", url: "git+https://github.com/x/pi-lsp.git" },
+						license: "MIT",
+						keywords: ["pi-package", "lsp"],
+						pi: { extensions: ["./src/index.ts"] },
+						dist: {
+							unpackedSize: 12345,
+							integrity: "sha512-test",
+							attestations: { url: "https://registry.example/provenance", provenance: { predicateType: "slsa" } },
+						},
 					});
 				}
 				return new Response("nf", { status: 404 });
@@ -100,7 +106,11 @@ describe("HttpRegistry", () => {
 		});
 		expect(info.pi?.extensions).toBeDefined();
 		expect(info.packageEvidence).toMatchObject({ shape: "manifest", verified: false });
-		expect(info.publication).toEqual({ integrity: "sha512-test", provenanceUrl: "https://registry.example/provenance", trustedPublisher: "unknown" });
+		expect(info.publication).toEqual({
+			integrity: "sha512-test",
+			provenanceUrl: "https://registry.example/provenance",
+			trustedPublisher: "unknown",
+		});
 		expect(await registry.downloads("pi-lsp")).toMatchObject({ weekly: 12, monthly: 34 });
 	});
 
@@ -111,17 +121,17 @@ describe("HttpRegistry", () => {
 
 describe("envMs (service lifecycle knob)", () => {
 	it("default when unset or garbage", () => {
-		delete process.env["PI_PACKED_TEST_MS"];
+		delete process.env.PI_PACKED_TEST_MS;
 		expect(envMs("PI_PACKED_TEST_MS", 5000)).toBe(5000);
-		process.env["PI_PACKED_TEST_MS"] = "banana";
+		process.env.PI_PACKED_TEST_MS = "banana";
 		expect(envMs("PI_PACKED_TEST_MS", 5000)).toBe(5000);
 	});
 	it("seconds → ms when set", () => {
-		process.env["PI_PACKED_TEST_MS"] = "30";
+		process.env.PI_PACKED_TEST_MS = "30";
 		expect(envMs("PI_PACKED_TEST_MS", 5000)).toBe(30_000);
 	});
 	it("zero disables (systemd owns the lifecycle)", () => {
-		process.env["PI_PACKED_TEST_MS"] = "0";
+		process.env.PI_PACKED_TEST_MS = "0";
 		expect(envMs("PI_PACKED_TEST_MS", 5000)).toBe(0);
 	});
 });

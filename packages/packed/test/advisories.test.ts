@@ -1,28 +1,45 @@
-import { describe, it, expect, afterEach } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Server } from "bun";
 import { AuthenticatedRpcClient } from "@danypops/vehicle-client/rpc-client";
-import { fetchBulkAdvisories, scanInstalledPackages, PATCHED_VERSION_FRESH_DAYS } from "../src/adoption/advisories.ts";
+import type { Server } from "bun";
+import { fetchBulkAdvisories, PATCHED_VERSION_FRESH_DAYS, scanInstalledPackages } from "../src/adoption/advisories.ts";
 import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/daemon/service.ts";
 import type { Installer, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/shared/ports.ts";
 
 class NoopRegistry implements Registry {
-	async search(): Promise<SearchPage> { return { results: [], total: 0 }; }
-	async searchPage(): Promise<SearchPage> { return { results: [], total: 0 }; }
-	async searchAll() { return []; }
-	async info(name: string): Promise<PkgInfo> { return { name, version: "1.0.0" }; }
+	async search(): Promise<SearchPage> {
+		return { results: [], total: 0 };
+	}
+	async searchPage(): Promise<SearchPage> {
+		return { results: [], total: 0 };
+	}
+	async searchAll() {
+		return [];
+	}
+	async info(name: string): Promise<PkgInfo> {
+		return { name, version: "1.0.0" };
+	}
 }
 
 class NoopInstaller implements Installer {
-	async install() { return "ok"; }
-	async remove() { return "ok"; }
-	async update(): Promise<UpdateOutcome> { return { output: "ok", reloadRequired: false, alreadyUpToDate: true, pinned: false }; }
+	async install() {
+		return "ok";
+	}
+	async remove() {
+		return "ok";
+	}
+	async update(): Promise<UpdateOutcome> {
+		return { output: "ok", reloadRequired: false, alreadyUpToDate: true, pinned: false };
+	}
 }
 
 let server: Server<undefined> | undefined;
-afterEach(() => { server?.stop(true); server = undefined; });
+afterEach(() => {
+	server?.stop(true);
+	server = undefined;
+});
 
 const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
 
@@ -34,7 +51,13 @@ describe("fetchBulkAdvisories", () => {
 				if (req.method === "POST" && new URL(req.url).pathname === "/-/npm/v1/security/advisories/bulk") {
 					return Response.json({
 						handlebars: [
-							{ id: 755, url: "https://npmjs.com/advisories/755", title: "Prototype Pollution", severity: "critical", vulnerable_versions: "<=4.0.13 || >=4.1.0 <4.1.2" },
+							{
+								id: 755,
+								url: "https://npmjs.com/advisories/755",
+								title: "Prototype Pollution",
+								severity: "critical",
+								vulnerable_versions: "<=4.0.13 || >=4.1.0 <4.1.2",
+							},
 						],
 					});
 				}
@@ -43,12 +66,25 @@ describe("fetchBulkAdvisories", () => {
 		});
 		const result = await fetchBulkAdvisories({ handlebars: ["4.0.5"] }, { registryBase: `http://127.0.0.1:${server.port}` });
 		expect(result).toEqual({
-			handlebars: [{ id: 755, url: "https://npmjs.com/advisories/755", title: "Prototype Pollution", severity: "critical", vulnerableVersions: "<=4.0.13 || >=4.1.0 <4.1.2" }],
+			handlebars: [
+				{
+					id: 755,
+					url: "https://npmjs.com/advisories/755",
+					title: "Prototype Pollution",
+					severity: "critical",
+					vulnerableVersions: "<=4.0.13 || >=4.1.0 <4.1.2",
+				},
+			],
 		});
 	});
 
 	it("never makes a network call for an empty package set", async () => {
-		server = Bun.serve({ port: 0, fetch: () => { throw new Error("must never be called"); } });
+		server = Bun.serve({
+			port: 0,
+			fetch: () => {
+				throw new Error("must never be called");
+			},
+		});
 		expect(await fetchBulkAdvisories({}, { registryBase: `http://127.0.0.1:${server.port}` })).toEqual({});
 	});
 
@@ -89,8 +125,15 @@ describe("scanInstalledPackages", () => {
 
 	it("computes patched-version-age as a fresh signal for a very recently published fix", async () => {
 		server = fixtureServer({
-			bulk: { "pi-demo": [{ id: 1, url: "https://example.test/1", title: "Prototype Pollution", severity: "high", vulnerable_versions: "<2.0.0" }] },
-			packument: () => ({ versions: { "1.0.0": {}, "2.0.0": {}, "2.0.1": {} }, time: { "1.0.0": daysAgo(400), "2.0.0": daysAgo(2), "2.0.1": daysAgo(1) } }),
+			bulk: {
+				"pi-demo": [
+					{ id: 1, url: "https://example.test/1", title: "Prototype Pollution", severity: "high", vulnerable_versions: "<2.0.0" },
+				],
+			},
+			packument: () => ({
+				versions: { "1.0.0": {}, "2.0.0": {}, "2.0.1": {} },
+				time: { "1.0.0": daysAgo(400), "2.0.0": daysAgo(2), "2.0.1": daysAgo(1) },
+			}),
 		});
 		const report = await scanInstalledPackages({ "pi-demo": "1.0.0" }, { registryBase: `http://127.0.0.1:${server.port}` });
 		expect(report.findings).toHaveLength(1);
@@ -130,11 +173,15 @@ describe("scanInstalledPackages", () => {
 				"fresh-critical": [{ id: 1, url: "u", title: "t", severity: "critical", vulnerable_versions: "<2.0.0" }],
 				"old-critical": [{ id: 2, url: "u", title: "t", severity: "critical", vulnerable_versions: "<2.0.0" }],
 			},
-			packument: (name) => name === "fresh-critical"
-				? { versions: { "1.0.0": {}, "2.0.0": {} }, time: { "1.0.0": daysAgo(400), "2.0.0": daysAgo(1) } }
-				: { versions: { "1.0.0": {}, "2.0.0": {} }, time: { "1.0.0": daysAgo(400), "2.0.0": daysAgo(900) } },
+			packument: (name) =>
+				name === "fresh-critical"
+					? { versions: { "1.0.0": {}, "2.0.0": {} }, time: { "1.0.0": daysAgo(400), "2.0.0": daysAgo(1) } }
+					: { versions: { "1.0.0": {}, "2.0.0": {} }, time: { "1.0.0": daysAgo(400), "2.0.0": daysAgo(900) } },
 		});
-		const report = await scanInstalledPackages({ "fresh-critical": "1.0.0", "old-critical": "1.0.0" }, { registryBase: `http://127.0.0.1:${server.port}` });
+		const report = await scanInstalledPackages(
+			{ "fresh-critical": "1.0.0", "old-critical": "1.0.0" },
+			{ registryBase: `http://127.0.0.1:${server.port}` },
+		);
 		const fresh = report.diagnostics.find((d) => d.path === "fresh-critical")!;
 		const old = report.diagnostics.find((d) => d.path === "old-critical")!;
 		expect(fresh.severity).toBe("error");
@@ -181,13 +228,25 @@ describe("advisories.scan operation (real daemon route)", () => {
 
 		let receivedInstalled: Record<string, string> | undefined;
 		const app = createApp({
-			reg: new NoopRegistry(), inst: new NoopInstaller(), token: "test-token",
-			stateDir: mkdtempSync(join(tmpdir(), "packed-advisories-state-")), dataDir: mkdtempSync(join(tmpdir(), "packed-advisories-data-")), piHome,
+			reg: new NoopRegistry(),
+			inst: new NoopInstaller(),
+			token: "test-token",
+			stateDir: mkdtempSync(join(tmpdir(), "packed-advisories-state-")),
+			dataDir: mkdtempSync(join(tmpdir(), "packed-advisories-data-")),
+			piHome,
 			// injected exactly like pi.status's piVersion seam -- never a real
 			// network call to the live npm registry from an automated test.
-			advisories: { async scan(installed) { receivedInstalled = installed; return { scanned: Object.keys(installed).length, findings: [], diagnostics: [], truncated: false }; } },
+			advisories: {
+				async scan(installed) {
+					receivedInstalled = installed;
+					return { scanned: Object.keys(installed).length, findings: [], diagnostics: [], truncated: false };
+				},
+			},
 		});
-		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", { label: "Packed", transport: (request) => app.fetch(request) });
+		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", {
+			label: "Packed",
+			transport: (request) => app.fetch(request),
+		});
 		expect(await client.operations()).toContain("advisories.scan");
 		const report = await client.call("advisories.scan", {});
 		expect(report.scanned).toBe(1);
@@ -195,14 +254,34 @@ describe("advisories.scan operation (real daemon route)", () => {
 	});
 
 	it("is unguarded read access -- never requires approval", async () => {
-		const app = createApp({ reg: new NoopRegistry(), inst: new NoopInstaller(), token: "test-token", stateDir: mkdtempSync(join(tmpdir(), "packed-advisories-state-")), dataDir: mkdtempSync(join(tmpdir(), "packed-advisories-data-")), piHome: mkdtempSync(join(tmpdir(), "packed-advisories-pihome-")) });
-		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", { label: "Packed", transport: (request) => app.fetch(request) });
+		const app = createApp({
+			reg: new NoopRegistry(),
+			inst: new NoopInstaller(),
+			token: "test-token",
+			stateDir: mkdtempSync(join(tmpdir(), "packed-advisories-state-")),
+			dataDir: mkdtempSync(join(tmpdir(), "packed-advisories-data-")),
+			piHome: mkdtempSync(join(tmpdir(), "packed-advisories-pihome-")),
+		});
+		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", {
+			label: "Packed",
+			transport: (request) => app.fetch(request),
+		});
 		expect(await client.call("advisories.scan", {})).toEqual({ scanned: 0, findings: [], diagnostics: [], truncated: false });
 	});
 
 	it("rejects an oversized name argument rather than passing it through", async () => {
-		const app = createApp({ reg: new NoopRegistry(), inst: new NoopInstaller(), token: "test-token", stateDir: mkdtempSync(join(tmpdir(), "packed-advisories-state-")), dataDir: mkdtempSync(join(tmpdir(), "packed-advisories-data-")), piHome: mkdtempSync(join(tmpdir(), "packed-advisories-pihome-")) });
-		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", { label: "Packed", transport: (request) => app.fetch(request) });
+		const app = createApp({
+			reg: new NoopRegistry(),
+			inst: new NoopInstaller(),
+			token: "test-token",
+			stateDir: mkdtempSync(join(tmpdir(), "packed-advisories-state-")),
+			dataDir: mkdtempSync(join(tmpdir(), "packed-advisories-data-")),
+			piHome: mkdtempSync(join(tmpdir(), "packed-advisories-pihome-")),
+		});
+		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", {
+			label: "Packed",
+			transport: (request) => app.fetch(request),
+		});
 		await expect(client.call("advisories.scan", { name: "x".repeat(300) })).rejects.toThrow();
 	});
 });

@@ -16,8 +16,8 @@ import type { Component } from "malevich-tui-components";
 import { shouldSearch } from "./discover-model.js";
 import type { Natives, PackageSummary } from "./packed.js";
 import { InstallServiceError } from "./packed.js";
-import { approvePackageOperation } from "./tools.js";
 import type { TabHost } from "./tab-host.js";
+import { approvePackageOperation } from "./tools.js";
 
 const SEARCH_LIMIT = 20;
 
@@ -52,7 +52,10 @@ export async function applyInstall(result: PackageSummary, natives: Natives, ctx
 	}
 }
 
-interface Theme { fg(color: string, s: string): string; bold(s: string): string; }
+interface Theme {
+	fg(color: string, s: string): string;
+	bold(s: string): string;
+}
 
 /** /packed's Find tab -- a real Component. Its query box always captures
  * free text (isCapturingInput() is unconditionally true), unlike
@@ -71,6 +74,7 @@ export class FindTab implements Component {
 	constructor(
 		private readonly natives: Natives,
 		private readonly host: TabHost,
+		// biome-ignore lint/correctness/noUnusedPrivateClassMembers: read via `const { theme } = this` in render(), which Biome's usage check doesn't trace
 		private readonly theme: Theme,
 	) {}
 
@@ -169,7 +173,10 @@ export class FindTab implements Component {
 		this.busy = true;
 		this.host.requestRender();
 		try {
-			const confirmed = await this.host.inlineCtx.ui.confirm(`Install ${result.name}@${result.version}`, "Search itself never mutates -- this is the first of two confirmations before anything installs.");
+			const confirmed = await this.host.inlineCtx.ui.confirm(
+				`Install ${result.name}@${result.version}`,
+				"Search itself never mutates -- this is the first of two confirmations before anything installs.",
+			);
 			if (!confirmed) return;
 			const outcome = await applyInstall(result, this.natives, this.host.inlineCtx);
 			if (outcome === "installed") this.host.onSessionReplaced();

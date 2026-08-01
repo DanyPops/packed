@@ -1,4 +1,3 @@
-import { ENV } from "./constants.ts";
 import { resolvePackedPaths } from "./paths.ts";
 
 /** Compatibility accessor for code that stores non-database daemon state. */

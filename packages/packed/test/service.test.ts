@@ -1,12 +1,12 @@
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createApp, type Deps } from "../src/daemon/service.ts";
-import type { DaemonServiceInstaller } from "../src/daemon/daemon-service.ts";
 import type { ServiceSpec } from "@danypops/vehicle-server/service";
+import type { DaemonServiceInstaller } from "../src/daemon/daemon-service.ts";
+import { createApp, type Deps } from "../src/daemon/service.ts";
 import { saveUpdates } from "../src/daemon/watcher.ts";
-import { openDb, replaceAll, dbPath } from "../src/packages/db.ts";
+import { dbPath, openDb, replaceAll } from "../src/packages/db.ts";
 import type { Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/shared/ports.ts";
 
 class FakeRegistry implements Registry {
@@ -64,7 +64,10 @@ class FakeDaemonServiceInstaller implements DaemonServiceInstaller {
 	resolveFailure: string | undefined;
 	installFailure: string | undefined;
 	spec: ServiceSpec = { name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/tmp/probe.service" };
-	install(piHome: string, source: string): { ok: true; result: { installed: true } | { installed: false; reason: string }; spec: ServiceSpec } | { ok: false; reason: string } {
+	install(
+		piHome: string,
+		source: string,
+	): { ok: true; result: { installed: true } | { installed: false; reason: string }; spec: ServiceSpec } | { ok: false; reason: string } {
 		this.gotPiHome = piHome;
 		this.gotSource = source;
 		if (this.resolveFailure) return { ok: false, reason: this.resolveFailure };
@@ -90,7 +93,7 @@ describe("service app", () => {
 		const app = createApp(deps());
 		const res = await app.fetch(new Request("http://x/health", { headers: auth }));
 		expect(res.status).toBe(200);
-		expect((await res.json() as any).ok).toBe(true);
+		expect(((await res.json()) as any).ok).toBe(true);
 	});
 
 	it("requires bearer token", async () => {
@@ -105,24 +108,30 @@ describe("service app", () => {
 		const app = createApp(deps());
 		const initial = await app.fetch(new Request("http://x/security", { headers: auth }));
 		expect(await initial.json()).toEqual({ mutationApproval: "always" });
-		const denied = await app.fetch(new Request("http://x/security", {
-			method: "POST",
-			headers: { ...auth, "content-type": "application/json" },
-			body: JSON.stringify({ mutationApproval: "never" }),
-		}));
+		const denied = await app.fetch(
+			new Request("http://x/security", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ mutationApproval: "never" }),
+			}),
+		);
 		expect(denied.status).toBe(403);
 		expect(await denied.json()).toMatchObject({ code: "approval_required", operation: "security.write" });
-		const updated = await app.fetch(new Request("http://x/security", {
-			method: "POST",
-			headers: { ...auth, "content-type": "application/json" },
-			body: JSON.stringify({ mutationApproval: "never", approved: true }),
-		}));
+		const updated = await app.fetch(
+			new Request("http://x/security", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ mutationApproval: "never", approved: true }),
+			}),
+		);
 		expect(await updated.json()).toEqual({ mutationApproval: "never" });
-		const invalid = await app.fetch(new Request("http://x/security", {
-			method: "POST",
-			headers: { ...auth, "content-type": "application/json" },
-			body: JSON.stringify({ mutationApproval: "sometimes", approved: true }),
-		}));
+		const invalid = await app.fetch(
+			new Request("http://x/security", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ mutationApproval: "sometimes", approved: true }),
+			}),
+		);
 		expect(invalid.status).toBe(400);
 	});
 
@@ -133,7 +142,7 @@ describe("service app", () => {
 		expect(res.status).toBe(200);
 		expect(reg.lastQuery).toBe("keywords:pi-package lsp");
 		expect(reg.lastLimit).toBe(50);
-		const body = await res.json() as any;
+		const body = (await res.json()) as any;
 		expect(body.total).toBe(42);
 		expect(body.results[0].name).toBe("pi-lsp");
 	});
@@ -159,7 +168,7 @@ describe("service app", () => {
 		const app = createApp(deps());
 		const res = await app.fetch(new Request("http://x/info?name=pi-lsp", { headers: auth }));
 		expect(res.status).toBe(200);
-		expect((await res.json() as any).name).toBe("pi-lsp");
+		expect(((await res.json()) as any).name).toBe("pi-lsp");
 	});
 
 	it("POST /install rejects invalid sources", async () => {
@@ -181,12 +190,17 @@ describe("service app", () => {
 	it("guards install and remove at the authenticated daemon boundary", async () => {
 		const inst = new FakeInstaller();
 		const app = createApp(deps({ inst }));
-		for (const [path, body] of [["/install", { source: "npm:foo" }], ["/remove", { name: "foo" }]] as const) {
-			const response = await app.fetch(new Request(`http://x${path}`, {
-				method: "POST",
-				headers: { ...auth, "content-type": "application/json" },
-				body: JSON.stringify(body),
-			}));
+		for (const [path, body] of [
+			["/install", { source: "npm:foo" }],
+			["/remove", { name: "foo" }],
+		] as const) {
+			const response = await app.fetch(
+				new Request(`http://x${path}`, {
+					method: "POST",
+					headers: { ...auth, "content-type": "application/json" },
+					body: JSON.stringify(body),
+				}),
+			);
 			expect(response.status).toBe(403);
 			expect(await response.json()).toMatchObject({ code: "approval_required" });
 		}
@@ -206,7 +220,7 @@ describe("service app", () => {
 				}),
 			);
 			expect(res.status).toBe(200);
-			expect((await res.json() as any).ok).toBe(true);
+			expect(((await res.json()) as any).ok).toBe(true);
 		}
 		expect(inst.gotSource).toBe("https://github.com/u/r");
 
@@ -219,7 +233,7 @@ describe("service app", () => {
 			}),
 		);
 		expect(res.status).toBe(200);
-		const body = await res.json() as any;
+		const body = (await res.json()) as any;
 		expect(body.ok).toBe(false);
 		expect(body.output).toContain("npm ERR! 404");
 	});
@@ -228,19 +242,23 @@ describe("service app", () => {
 		const svc = new FakeDaemonServiceInstaller();
 		const app = createApp(deps({ daemonServiceInstaller: svc }));
 
-		const invalid = await app.fetch(new Request("http://x/install-service", {
-			method: "POST",
-			headers: { ...auth, "content-type": "application/json" },
-			body: JSON.stringify({ source: "npm:foo && curl x|sh" }),
-		}));
+		const invalid = await app.fetch(
+			new Request("http://x/install-service", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ source: "npm:foo && curl x|sh" }),
+			}),
+		);
 		expect(invalid.status).toBe(400);
 		expect(svc.gotSource).toBe("");
 
-		const unapproved = await app.fetch(new Request("http://x/install-service", {
-			method: "POST",
-			headers: { ...auth, "content-type": "application/json" },
-			body: JSON.stringify({ source: "npm:web-spider-daemon" }),
-		}));
+		const unapproved = await app.fetch(
+			new Request("http://x/install-service", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ source: "npm:web-spider-daemon" }),
+			}),
+		);
 		expect(unapproved.status).toBe(403);
 		expect(await unapproved.json()).toMatchObject({ code: "approval_required" });
 		expect(svc.gotSource).toBe("");
@@ -248,13 +266,15 @@ describe("service app", () => {
 		// A structurally valid but non-npm source is approval-gated the same as
 		// any other source -- it fails closed only once the resolver itself runs
 		// (a resolveDaemonServiceSpec responsibility, not this route's own regex).
-		const gitApproved = await app.fetch(new Request("http://x/install-service", {
-			method: "POST",
-			headers: { ...auth, "content-type": "application/json" },
-			body: JSON.stringify({ source: "git:github.com/u/r@v1", approved: true }),
-		}));
+		const gitApproved = await app.fetch(
+			new Request("http://x/install-service", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ source: "git:github.com/u/r@v1", approved: true }),
+			}),
+		);
 		expect(gitApproved.status).toBe(200);
-		expect((await gitApproved.json() as any).ok).toBe(true); // FakeDaemonServiceInstaller doesn't itself enforce the npm-only rule; resolveDaemonServiceSpec's own unit tests cover that.
+		expect(((await gitApproved.json()) as any).ok).toBe(true); // FakeDaemonServiceInstaller doesn't itself enforce the npm-only rule; resolveDaemonServiceSpec's own unit tests cover that.
 	});
 
 	it("POST /install-service installs a real service once approved, reporting the resolved spec", async () => {
@@ -262,11 +282,13 @@ describe("service app", () => {
 		const piHome = mkdtempSync(join(tmpdir(), "packed-pi-"));
 		const app = createApp(deps({ daemonServiceInstaller: svc, piHome }));
 
-		const res = await app.fetch(new Request("http://x/install-service", {
-			method: "POST",
-			headers: { ...auth, "content-type": "application/json" },
-			body: JSON.stringify({ source: "npm:web-spider-daemon", approved: true }),
-		}));
+		const res = await app.fetch(
+			new Request("http://x/install-service", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ source: "npm:web-spider-daemon", approved: true }),
+			}),
+		);
 		expect(res.status).toBe(200);
 		const body = (await res.json()) as any;
 		expect(body.ok).toBe(true);
@@ -281,21 +303,25 @@ describe("service app", () => {
 		svc.resolveFailure = "web-spider-daemon does not declare a packed.daemonService manifest";
 		const app = createApp(deps({ daemonServiceInstaller: svc }));
 
-		const resolutionFailure = await app.fetch(new Request("http://x/install-service", {
-			method: "POST",
-			headers: { ...auth, "content-type": "application/json" },
-			body: JSON.stringify({ source: "npm:web-spider-daemon", approved: true }),
-		}));
+		const resolutionFailure = await app.fetch(
+			new Request("http://x/install-service", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ source: "npm:web-spider-daemon", approved: true }),
+			}),
+		);
 		expect(resolutionFailure.status).toBe(200);
-		expect((await resolutionFailure.json() as any).ok).toBe(false);
+		expect(((await resolutionFailure.json()) as any).ok).toBe(false);
 
 		svc.resolveFailure = undefined;
 		svc.installFailure = "no supported Linux init system was detected";
-		const installFailure = await app.fetch(new Request("http://x/install-service", {
-			method: "POST",
-			headers: { ...auth, "content-type": "application/json" },
-			body: JSON.stringify({ source: "npm:web-spider-daemon", approved: true }),
-		}));
+		const installFailure = await app.fetch(
+			new Request("http://x/install-service", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ source: "npm:web-spider-daemon", approved: true }),
+			}),
+		);
 		expect(installFailure.status).toBe(200);
 		const body = (await installFailure.json()) as any;
 		expect(body.ok).toBe(false);
@@ -306,15 +332,21 @@ describe("service app", () => {
 	it("POST /update validates, authorizes, and delegates one Pi package source", async () => {
 		const inst = new FakeInstaller();
 		const app = createApp(deps({ inst }));
-		const denied = await app.fetch(new Request("http://x/update", {
-			method: "POST", headers: { ...auth, "content-type": "application/json" },
-			body: JSON.stringify({ source: "npm:pi-lsp" }),
-		}));
+		const denied = await app.fetch(
+			new Request("http://x/update", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ source: "npm:pi-lsp" }),
+			}),
+		);
 		expect(denied.status).toBe(403);
-		const allowed = await app.fetch(new Request("http://x/update", {
-			method: "POST", headers: { ...auth, "content-type": "application/json" },
-			body: JSON.stringify({ source: "npm:pi-lsp", approved: true }),
-		}));
+		const allowed = await app.fetch(
+			new Request("http://x/update", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ source: "npm:pi-lsp", approved: true }),
+			}),
+		);
 		expect(allowed.status).toBe(200);
 		expect(await allowed.json()).toEqual({
 			ok: true,
@@ -331,10 +363,13 @@ describe("service app", () => {
 		const inst = new FakeInstaller();
 		inst.updateOutcome = { reloadRequired: false, alreadyUpToDate: true, pinned: true, previousVersion: "1.0.0", currentVersion: "1.0.0" };
 		const app = createApp(deps({ inst }));
-		const res = await app.fetch(new Request("http://x/update", {
-			method: "POST", headers: { ...auth, "content-type": "application/json" },
-			body: JSON.stringify({ source: "npm:pi-lsp@1.0.0", approved: true }),
-		}));
+		const res = await app.fetch(
+			new Request("http://x/update", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ source: "npm:pi-lsp@1.0.0", approved: true }),
+			}),
+		);
 		expect(await res.json()).toEqual({
 			ok: true,
 			source: "npm:pi-lsp@1.0.0",
@@ -356,7 +391,7 @@ describe("service app", () => {
 		const app = createApp(d);
 		const res = await app.fetch(new Request("http://x/updates", { headers: auth }));
 		expect(res.status).toBe(200);
-		expect((await res.json() as any).updates[0].latest).toBe("2");
+		expect(((await res.json()) as any).updates[0].latest).toBe("2");
 	});
 
 	it("GET /installed lists packages from pi settings", async () => {
@@ -407,7 +442,7 @@ describe("service app", () => {
 		const app = createApp(d);
 		const res = await app.fetch(new Request("http://x/catalog", { headers: auth }));
 		expect(res.status).toBe(200);
-		const body = await res.json() as any;
+		const body = (await res.json()) as any;
 		expect(body.packages[0].name).toBe("a");
 		expect(body.sha256).toMatch(/^[0-9a-f]{64}$/);
 	});
@@ -420,7 +455,7 @@ describe("service app", () => {
 		const app = createApp(d);
 		const res = await app.fetch(new Request("http://x/search?q=lsp&offline=1", { headers: auth }));
 		expect(res.status).toBe(200);
-		const body = await res.json() as any;
+		const body = (await res.json()) as any;
 		expect(body.offline).toBe(true);
 		expect(body.results[0].name).toBe("pi-lsp");
 	});

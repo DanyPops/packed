@@ -10,9 +10,9 @@
 import { describe, expect, it } from "bun:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { HeadlessInstallValidator, bareNpmSpec, validateExtensionLoadsHeadless } from "../src/adoption/install-validation.ts";
-import { ExecInstaller } from "../src/packages/install.ts";
 import type { InstallValidationResult, InstallValidator } from "../src/adoption/install-validation.ts";
+import { bareNpmSpec, HeadlessInstallValidator, validateExtensionLoadsHeadless } from "../src/adoption/install-validation.ts";
+import { ExecInstaller } from "../src/packages/install.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(__dirname, "fixtures/install-validation");
@@ -81,11 +81,15 @@ describe("ExecInstaller.install() -- refuses before ever spawning the real pi bi
 	}
 
 	it("never spawns pi when the validator reports a failed extension", async () => {
-		const installer = new ExecInstaller("/bin/false", "/tmp/unused-pihome", fakeValidator({
-			ok: false,
-			source: "npm:broken-pkg",
-			extensions: [{ path: "extension/index.ts", ok: false, message: "boom" }],
-		}));
+		const installer = new ExecInstaller(
+			"/bin/false",
+			"/tmp/unused-pihome",
+			fakeValidator({
+				ok: false,
+				source: "npm:broken-pkg",
+				extensions: [{ path: "extension/index.ts", ok: false, message: "boom" }],
+			}),
+		);
 
 		await expect(installer.install("npm:broken-pkg")).rejects.toThrow(/install refused.*extension\/index\.ts: boom/);
 	});
@@ -93,7 +97,11 @@ describe("ExecInstaller.install() -- refuses before ever spawning the real pi bi
 	it("proceeds to the real install when the validator approves", async () => {
 		// /bin/true always exits 0 -- proves the real spawn path was reached
 		// (a refused install never gets this far to find out).
-		const installer = new ExecInstaller("/bin/true", "/tmp/unused-pihome", fakeValidator({ ok: true, source: "npm:good-pkg", extensions: [] }));
+		const installer = new ExecInstaller(
+			"/bin/true",
+			"/tmp/unused-pihome",
+			fakeValidator({ ok: true, source: "npm:good-pkg", extensions: [] }),
+		);
 
 		await expect(installer.install("npm:good-pkg")).resolves.toBeDefined();
 	});

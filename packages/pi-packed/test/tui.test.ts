@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { initTheme } from "@earendil-works/pi-coding-agent";
-import { applyDisableExtensions, applyPackageChoice, applyUpdateAll, showPackedPanel } from "../extension/src/tui.ts";
-import type { Natives, PackageResources } from "../extension/src/packed.ts";
 import type { Row } from "../extension/src/model.ts";
+import type { Natives, PackageResources } from "../extension/src/packed.ts";
+import { applyDisableExtensions, applyPackageChoice, applyUpdateAll, showPackedPanel } from "../extension/src/tui.ts";
 
 // rawKeyHint (used by the panel's own header) reads pi-coding-agent's global
 // theme singleton directly, the same as DynamicBorder -- a real Pi session
@@ -39,10 +39,18 @@ function stripAnsi(s: string): string {
 // panel throws reaching for a method that was never mocked.
 function baseNatives(overrides: Partial<Natives> = {}): Natives {
 	return {
-		async installed() { return []; },
-		async updates() { return []; },
-		async security() { return { mutationApproval: "always" as const }; },
-		async listResources() { return { global: [], project: [] }; },
+		async installed() {
+			return [];
+		},
+		async updates() {
+			return [];
+		},
+		async security() {
+			return { mutationApproval: "always" as const };
+		},
+		async listResources() {
+			return { global: [], project: [] };
+		},
 		...overrides,
 	} as unknown as Natives;
 }
@@ -55,9 +63,13 @@ function fakeCtx(confirm: boolean, notices: string[], reloads: { count: number }
 				notices.push(`confirm:${message}`);
 				return confirm;
 			},
-			notify(message: string) { notices.push(message); },
+			notify(message: string) {
+				notices.push(message);
+			},
 		},
-		async reload() { reloads.count += 1; },
+		async reload() {
+			reloads.count += 1;
+		},
 	} as unknown as ExtensionCommandContext;
 }
 
@@ -74,9 +86,13 @@ function fakeCtxDeferReload(notices: string[], reloads: { count: number }): Exte
 				notices.push(`confirm:${message}`);
 				return calls === 1;
 			},
-			notify(message: string) { notices.push(message); },
+			notify(message: string) {
+				notices.push(message);
+			},
 		},
-		async reload() { reloads.count += 1; },
+		async reload() {
+			reloads.count += 1;
+		},
 	} as unknown as ExtensionCommandContext;
 }
 
@@ -87,7 +103,12 @@ function fakeCtxDeferReload(notices: string[], reloads: { count: number }): Exte
 function autoResolvingCustom() {
 	return <T>(factory: (tui: unknown, theme: unknown, kb: unknown, done: (result: T) => void) => unknown): Promise<T> =>
 		new Promise<T>((resolve) => {
-			factory({ requestRender() {} }, { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s }, {}, resolve);
+			factory(
+				{ requestRender() {} },
+				{ fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s },
+				{},
+				resolve,
+			);
 		});
 }
 
@@ -101,7 +122,14 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
+				async custom(
+					factory: (
+						tui: unknown,
+						theme: unknown,
+						kb: unknown,
+						done: (r: unknown) => void,
+					) => { render(width: number): string[]; handleInput(data: string): void },
+				) {
 					customCallCount += 1;
 					return new Promise((resolve) => {
 						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
@@ -116,7 +144,9 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 						}, 0);
 					});
 				},
-				async select() { throw new Error("must not be called -- settings is a real inline tab now, not ctx.ui.select"); },
+				async select() {
+					throw new Error("must not be called -- settings is a real inline tab now, not ctx.ui.select");
+				},
 				notify() {},
 			},
 		} as unknown as ExtensionCommandContext;
@@ -131,15 +161,24 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom() { return undefined; }, // esc
+				async custom() {
+					return undefined;
+				}, // esc
 				notify() {},
 			},
 		} as unknown as ExtensionCommandContext;
 		let securityCalled = false;
 		const natives = {
-			async installed() { return []; },
-			async updates() { return []; },
-			async security() { securityCalled = true; return { mutationApproval: "always" as const }; },
+			async installed() {
+				return [];
+			},
+			async updates() {
+				return [];
+			},
+			async security() {
+				securityCalled = true;
+				return { mutationApproval: "always" as const };
+			},
 		} as unknown as Natives;
 
 		await showPackedPanel(ctx, natives);
@@ -164,7 +203,14 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 				notify() {},
 			},
 		} as unknown as ExtensionCommandContext;
-		const natives = { async installed() { return []; }, async updates() { return []; } } as unknown as Natives;
+		const natives = {
+			async installed() {
+				return [];
+			},
+			async updates() {
+				return [];
+			},
+		} as unknown as Natives;
 
 		await showPackedPanel(ctx, natives);
 
@@ -176,7 +222,9 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[] }) {
+				async custom(
+					factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[] },
+				) {
 					return new Promise((resolve) => {
 						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
 						const component = factory({ requestRender() {} }, theme, {}, resolve);
@@ -187,7 +235,14 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 				notify() {},
 			},
 		} as unknown as ExtensionCommandContext;
-		const natives = { async installed() { return [{ name: "pi-a", installed: "1.0.0" }]; }, async updates() { return []; } } as unknown as Natives;
+		const natives = {
+			async installed() {
+				return [{ name: "pi-a", installed: "1.0.0" }];
+			},
+			async updates() {
+				return [];
+			},
+		} as unknown as Natives;
 
 		await showPackedPanel(ctx, natives);
 
@@ -203,7 +258,9 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[] }) {
+				async custom(
+					factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[] },
+				) {
 					return new Promise((resolve) => {
 						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
 						const component = factory({ requestRender() {} }, theme, {}, resolve);
@@ -221,7 +278,9 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 					{ name: "@scope/pi-longer-package-name", installed: "0.3.12" },
 				];
 			},
-			async updates() { return [{ name: "pi-lsp", installed: "1.0.0", latest: "1.1.0" }]; },
+			async updates() {
+				return [{ name: "pi-lsp", installed: "1.0.0", latest: "1.1.0" }];
+			},
 		} as unknown as Natives;
 
 		await showPackedPanel(ctx, natives);
@@ -251,7 +310,9 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[] }) {
+				async custom(
+					factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[] },
+				) {
 					return new Promise((resolve) => {
 						const component = factory({ requestRender() {} }, realishTheme, {}, resolve);
 						rendered = component.render(90);
@@ -269,7 +330,9 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 					{ name: "pi-x", installed: "10.20.30-beta.1" },
 				];
 			},
-			async updates() { return [{ name: "pi-lsp", installed: "1.0.0", latest: "1.1.0" }]; },
+			async updates() {
+				return [{ name: "pi-lsp", installed: "1.0.0", latest: "1.1.0" }];
+			},
 		} as unknown as Natives;
 
 		await showPackedPanel(ctx, natives);
@@ -283,10 +346,21 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
+				async custom(
+					factory: (
+						tui: unknown,
+						theme: unknown,
+						kb: unknown,
+						done: (r: unknown) => void,
+					) => { render(width: number): string[]; handleInput(data: string): void },
+				) {
 					return new Promise((resolve) => {
 						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
-						const tui = { requestRender() { renderedFrames.push(component.render(60).join("\n")); } };
+						const tui = {
+							requestRender() {
+								renderedFrames.push(component.render(60).join("\n"));
+							},
+						};
 						const component = factory(tui, theme, {}, resolve);
 						component.handleInput("U");
 						// approval dialog, then (once the batch genuinely changed something) the separate reload dialog -- both inline now.
@@ -296,16 +370,29 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 						}, 0);
 					});
 				},
-				async confirm() { throw new Error("must not be called -- confirms route through the inline Dialog"); },
+				async confirm() {
+					throw new Error("must not be called -- confirms route through the inline Dialog");
+				},
 				notify() {},
 			},
 			async reload() {},
 		} as unknown as ExtensionCommandContext;
 		const natives = {
-			async installed() { return [{ name: "pi-a", installed: "1.0.0" }, { name: "pi-b", installed: "2.0.0" }]; },
-			async updates() { return [{ name: "pi-a", installed: "1.0.0", latest: "1.1.0" }]; },
-			async security() { return { mutationApproval: "always" as const }; },
-			async update() { return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false }; },
+			async installed() {
+				return [
+					{ name: "pi-a", installed: "1.0.0" },
+					{ name: "pi-b", installed: "2.0.0" },
+				];
+			},
+			async updates() {
+				return [{ name: "pi-a", installed: "1.0.0", latest: "1.1.0" }];
+			},
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async update() {
+				return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false };
+			},
 		} as unknown as Natives;
 
 		await showPackedPanel(ctx, natives);
@@ -331,10 +418,21 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
+				async custom(
+					factory: (
+						tui: unknown,
+						theme: unknown,
+						kb: unknown,
+						done: (r: unknown) => void,
+					) => { render(width: number): string[]; handleInput(data: string): void },
+				) {
 					return new Promise((resolve) => {
 						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
-						const tui = { requestRender() { renderedFrames.push(component.render(60).join("\n")); } };
+						const tui = {
+							requestRender() {
+								renderedFrames.push(component.render(60).join("\n"));
+							},
+						};
 						const component = factory(tui, theme, {}, resolve);
 						component.handleInput("U");
 						// approval only -- a fully-failed batch (changed === 0) never reaches
@@ -345,16 +443,26 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 						}, 0);
 					});
 				},
-				async confirm() { throw new Error("must not be called -- confirms route through the inline Dialog"); },
+				async confirm() {
+					throw new Error("must not be called -- confirms route through the inline Dialog");
+				},
 				notify() {},
 			},
 			async reload() {},
 		} as unknown as ExtensionCommandContext;
 		const natives = {
-			async installed() { return [{ name: "pi-a", installed: "1.0.0" }]; },
-			async updates() { return [{ name: "pi-a", installed: "1.0.0", latest: "1.1.0" }]; },
-			async security() { return { mutationApproval: "always" as const }; },
-			async update() { throw new Error("npm error 404 Not Found"); },
+			async installed() {
+				return [{ name: "pi-a", installed: "1.0.0" }];
+			},
+			async updates() {
+				return [{ name: "pi-a", installed: "1.0.0", latest: "1.1.0" }];
+			},
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async update() {
+				throw new Error("npm error 404 Not Found");
+			},
 		} as unknown as Natives;
 
 		await showPackedPanel(ctx, natives);
@@ -374,10 +482,17 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { handleInput(data: string): void }) {
+				async custom(
+					factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { handleInput(data: string): void },
+				) {
 					customCallCount += 1;
 					return new Promise((resolve) => {
-						const component = factory({ requestRender() {} }, { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s }, {}, resolve);
+						const component = factory(
+							{ requestRender() {} },
+							{ fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s },
+							{},
+							resolve,
+						);
 						component.handleInput("U");
 						setTimeout(() => {
 							component.handleInput("y"); // approval
@@ -385,17 +500,28 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 						}, 0);
 					});
 				},
-				async confirm() { throw new Error("must not be called -- confirms route through the inline Dialog"); },
+				async confirm() {
+					throw new Error("must not be called -- confirms route through the inline Dialog");
+				},
 				notify() {},
 			},
 			async reload() {},
 		} as unknown as ExtensionCommandContext;
 		const updated: string[] = [];
 		const natives = {
-			async installed() { return [{ name: "pi-a", installed: "1.0.0" }]; },
-			async updates() { return [{ name: "pi-a", installed: "1.0.0", latest: "1.1.0" }]; },
-			async security() { return { mutationApproval: "always" as const }; },
-			async update(source: string) { updated.push(source); return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false }; },
+			async installed() {
+				return [{ name: "pi-a", installed: "1.0.0" }];
+			},
+			async updates() {
+				return [{ name: "pi-a", installed: "1.0.0", latest: "1.1.0" }];
+			},
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async update(source: string) {
+				updated.push(source);
+				return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false };
+			},
 		} as unknown as Natives;
 
 		await showPackedPanel(ctx, natives);
@@ -411,10 +537,21 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { handleInput(data: string): void }) {
+				async custom(
+					factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { handleInput(data: string): void },
+				) {
 					customCallCount += 1;
 					return new Promise((resolve) => {
-						const component = factory({ requestRender() { renderRequests += 1; } }, { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s }, {}, resolve);
+						const component = factory(
+							{
+								requestRender() {
+									renderRequests += 1;
+								},
+							},
+							{ fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s },
+							{},
+							resolve,
+						);
 						component.handleInput("U");
 						// approval only -- nothing changed (changed === 0) never reaches the
 						// separate reload confirm. Then, back in list mode, press esc to close.
@@ -424,16 +561,27 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 						}, 0);
 					});
 				},
-				async confirm() { throw new Error("must not be called -- confirms route through the inline Dialog"); },
+				async confirm() {
+					throw new Error("must not be called -- confirms route through the inline Dialog");
+				},
 				notify() {},
 			},
 			async reload() {},
 		} as unknown as ExtensionCommandContext;
 		const natives = {
-			async installed() { return [{ name: "pi-a", installed: "1.0.0" }]; },
-			async updates() { return [{ name: "pi-a", installed: "1.0.0", latest: "1.1.0" }]; },
-			async security() { return { mutationApproval: "always" as const }; },
-			async update(source: string) { updateCalls.push(source); return { output: "", reloadRequired: false, alreadyUpToDate: true, pinned: false }; },
+			async installed() {
+				return [{ name: "pi-a", installed: "1.0.0" }];
+			},
+			async updates() {
+				return [{ name: "pi-a", installed: "1.0.0", latest: "1.1.0" }];
+			},
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async update(source: string) {
+				updateCalls.push(source);
+				return { output: "", reloadRequired: false, alreadyUpToDate: true, pinned: false };
+			},
 		} as unknown as Natives;
 
 		await showPackedPanel(ctx, natives);
@@ -455,10 +603,21 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
+				async custom(
+					factory: (
+						tui: unknown,
+						theme: unknown,
+						kb: unknown,
+						done: (r: unknown) => void,
+					) => { render(width: number): string[]; handleInput(data: string): void },
+				) {
 					return new Promise((resolve) => {
 						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
-						const tui = { requestRender() { renderedFrames.push(component.render(70).join("\n")); } };
+						const tui = {
+							requestRender() {
+								renderedFrames.push(component.render(70).join("\n"));
+							},
+						};
 						const component = factory(tui, theme, {}, resolve);
 						component.handleInput("u");
 						// "unchanged" never closes the panel (matches the batch path's own
@@ -466,16 +625,30 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 						setTimeout(() => component.handleInput("\x1b"), 0);
 					});
 				},
-				async confirm() { throw new Error("must not be called -- mutationApproval is never"); },
-				notify(m: string) { notices.push(m); },
+				async confirm() {
+					throw new Error("must not be called -- mutationApproval is never");
+				},
+				notify(m: string) {
+					notices.push(m);
+				},
 			},
-			async reload() { throw new Error("must not reload -- nothing changed"); },
+			async reload() {
+				throw new Error("must not reload -- nothing changed");
+			},
 		} as unknown as ExtensionCommandContext;
 		const natives = {
-			async installed() { return [{ name: "pi-tickets", installed: "0.14.0" }]; },
-			async updates() { return [{ name: "pi-tickets", installed: "0.14.0", latest: "0.9.4" }]; }, // stale mirror, but that's a separate bug
-			async security() { return { mutationApproval: "never" as const }; },
-			async update() { return { output: "", reloadRequired: false, alreadyUpToDate: true, pinned: false, currentVersion: "0.14.0" }; },
+			async installed() {
+				return [{ name: "pi-tickets", installed: "0.14.0" }];
+			},
+			async updates() {
+				return [{ name: "pi-tickets", installed: "0.14.0", latest: "0.9.4" }];
+			}, // stale mirror, but that's a separate bug
+			async security() {
+				return { mutationApproval: "never" as const };
+			},
+			async update() {
+				return { output: "", reloadRequired: false, alreadyUpToDate: true, pinned: false, currentVersion: "0.14.0" };
+			},
 		} as unknown as Natives;
 
 		await showPackedPanel(ctx, natives);
@@ -494,7 +667,14 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 			hasUI: true,
 			cwd: "/project",
 			ui: {
-				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
+				async custom(
+					factory: (
+						tui: unknown,
+						theme: unknown,
+						kb: unknown,
+						done: (r: unknown) => void,
+					) => { render(width: number): string[]; handleInput(data: string): void },
+				) {
 					customCallCount += 1;
 					return new Promise((resolve) => {
 						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
@@ -511,8 +691,13 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 			},
 		} as unknown as ExtensionCommandContext;
 		const natives = baseNatives({
-			async installed() { return [{ name: "pi-lsp", installed: "1.0.0" }]; },
-			async listResources(projectRoot?: string) { listResourcesCwd = projectRoot; return { global: [], project: [] }; },
+			async installed() {
+				return [{ name: "pi-lsp", installed: "1.0.0" }];
+			},
+			async listResources(projectRoot?: string) {
+				listResourcesCwd = projectRoot;
+				return { global: [], project: [] };
+			},
 		});
 
 		await showPackedPanel(ctx, natives);
@@ -526,7 +711,14 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
+				async custom(
+					factory: (
+						tui: unknown,
+						theme: unknown,
+						kb: unknown,
+						done: (r: unknown) => void,
+					) => { render(width: number): string[]; handleInput(data: string): void },
+				) {
 					customCallCount += 1;
 					return new Promise((resolve) => {
 						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
@@ -552,7 +744,14 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
+				async custom(
+					factory: (
+						tui: unknown,
+						theme: unknown,
+						kb: unknown,
+						done: (r: unknown) => void,
+					) => { render(width: number): string[]; handleInput(data: string): void },
+				) {
 					return new Promise((resolve) => {
 						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
 						const component = factory({ requestRender() {} }, theme, {}, resolve);
@@ -588,7 +787,14 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
+				async custom(
+					factory: (
+						tui: unknown,
+						theme: unknown,
+						kb: unknown,
+						done: (r: unknown) => void,
+					) => { render(width: number): string[]; handleInput(data: string): void },
+				) {
 					return new Promise((resolve) => {
 						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
 						const component = factory({ requestRender() {} }, theme, {}, resolve);
@@ -614,7 +820,14 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
+				async custom(
+					factory: (
+						tui: unknown,
+						theme: unknown,
+						kb: unknown,
+						done: (r: unknown) => void,
+					) => { render(width: number): string[]; handleInput(data: string): void },
+				) {
 					return new Promise((resolve) => {
 						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
 						const component = factory({ requestRender() {} }, theme, {}, resolve);
@@ -630,7 +843,11 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 				notify() {},
 			},
 		} as unknown as ExtensionCommandContext;
-		const natives = baseNatives({ async installed() { return [{ name: "pi-lsp", installed: "1.0.0" }]; } });
+		const natives = baseNatives({
+			async installed() {
+				return [{ name: "pi-lsp", installed: "1.0.0" }];
+			},
+		});
 
 		await showPackedPanel(ctx, natives);
 	});
@@ -639,7 +856,14 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
+				async custom(
+					factory: (
+						tui: unknown,
+						theme: unknown,
+						kb: unknown,
+						done: (r: unknown) => void,
+					) => { render(width: number): string[]; handleInput(data: string): void },
+				) {
 					return new Promise((resolve) => {
 						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
 						const component = factory({ requestRender() {} }, theme, {}, resolve);
@@ -664,7 +888,11 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 				notify() {},
 			},
 		} as unknown as ExtensionCommandContext;
-		const natives = baseNatives({ async installed() { return [{ name: "pi-lsp", installed: "1.0.0" }]; } });
+		const natives = baseNatives({
+			async installed() {
+				return [{ name: "pi-lsp", installed: "1.0.0" }];
+			},
+		});
 
 		await showPackedPanel(ctx, natives);
 	});
@@ -680,7 +908,14 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
+				async custom(
+					factory: (
+						tui: unknown,
+						theme: unknown,
+						kb: unknown,
+						done: (r: unknown) => void,
+					) => { render(width: number): string[]; handleInput(data: string): void },
+				) {
 					customCallCount += 1;
 					return new Promise((resolve) => {
 						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
@@ -693,16 +928,29 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 						}, 0);
 					});
 				},
-				async confirm() { nativeConfirmCalled = true; return true; }, // must never be reached
+				async confirm() {
+					nativeConfirmCalled = true;
+					return true;
+				}, // must never be reached
 				notify() {},
 			},
 			async reload() {},
 		} as unknown as ExtensionCommandContext;
 		const natives = {
-			async installed() { return [{ name: "pi-lsp", installed: "1.0.0" }]; },
-			async updates() { return []; },
-			async security() { return { mutationApproval: "never" as const }; },
-			async remove(name: string) { expect(name).toBe("pi-lsp"); removed += 1; return ""; },
+			async installed() {
+				return [{ name: "pi-lsp", installed: "1.0.0" }];
+			},
+			async updates() {
+				return [];
+			},
+			async security() {
+				return { mutationApproval: "never" as const };
+			},
+			async remove(name: string) {
+				expect(name).toBe("pi-lsp");
+				removed += 1;
+				return "";
+			},
 		} as unknown as Natives;
 
 		await showPackedPanel(ctx, natives);
@@ -718,10 +966,17 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { handleInput(data: string): void }) {
+				async custom(
+					factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { handleInput(data: string): void },
+				) {
 					customCallCount += 1;
 					return new Promise((resolve) => {
-						const component = factory({ requestRender() {} }, { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s }, {}, resolve);
+						const component = factory(
+							{ requestRender() {} },
+							{ fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s },
+							{},
+							resolve,
+						);
 						component.handleInput("d");
 						setTimeout(() => {
 							component.handleInput("y"); // per-item toggle approval
@@ -734,11 +989,35 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 			async reload() {},
 		} as unknown as ExtensionCommandContext;
 		const natives = {
-			async installed() { return [{ name: "pi-lsp", installed: "1.0.0" }]; },
-			async updates() { return []; },
-			async security() { return { mutationApproval: "always" as const }; },
-			async listResources() { return { global: [{ source: "npm:pi-lsp", name: "pi-lsp", scope: "global" as const, extensions: [{ path: "extension/index.ts", enabled: true }], skills: [], prompts: [], themes: [] }], project: [] }; },
-			async toggleResource(_s: string, _f: string, path: string) { toggled.push(path); return "ok"; },
+			async installed() {
+				return [{ name: "pi-lsp", installed: "1.0.0" }];
+			},
+			async updates() {
+				return [];
+			},
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async listResources() {
+				return {
+					global: [
+						{
+							source: "npm:pi-lsp",
+							name: "pi-lsp",
+							scope: "global" as const,
+							extensions: [{ path: "extension/index.ts", enabled: true }],
+							skills: [],
+							prompts: [],
+							themes: [],
+						},
+					],
+					project: [],
+				};
+			},
+			async toggleResource(_s: string, _f: string, path: string) {
+				toggled.push(path);
+				return "ok";
+			},
 		} as unknown as Natives;
 
 		await showPackedPanel(ctx, natives);
@@ -753,10 +1032,17 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { handleInput(data: string): void }) {
+				async custom(
+					factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { handleInput(data: string): void },
+				) {
 					customCallCount += 1;
 					return new Promise((resolve) => {
-						const component = factory({ requestRender() {} }, { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s }, {}, resolve);
+						const component = factory(
+							{ requestRender() {} },
+							{ fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s },
+							{},
+							resolve,
+						);
 						component.handleInput("d");
 						setTimeout(() => {
 							component.handleInput("y"); // per-item toggle approval
@@ -769,14 +1055,40 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 				},
 				notify() {},
 			},
-			async reload() { throw new Error("must not reload -- this test defers"); },
+			async reload() {
+				throw new Error("must not reload -- this test defers");
+			},
 		} as unknown as ExtensionCommandContext;
 		const natives = {
-			async installed() { installedCalls += 1; return [{ name: "pi-lsp", installed: "1.0.0" }]; },
-			async updates() { return []; },
-			async security() { return { mutationApproval: "always" as const }; },
-			async listResources() { return { global: [{ source: "npm:pi-lsp", name: "pi-lsp", scope: "global" as const, extensions: [{ path: "extension/index.ts", enabled: true }], skills: [], prompts: [], themes: [] }], project: [] }; },
-			async toggleResource() { return "ok"; },
+			async installed() {
+				installedCalls += 1;
+				return [{ name: "pi-lsp", installed: "1.0.0" }];
+			},
+			async updates() {
+				return [];
+			},
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async listResources() {
+				return {
+					global: [
+						{
+							source: "npm:pi-lsp",
+							name: "pi-lsp",
+							scope: "global" as const,
+							extensions: [{ path: "extension/index.ts", enabled: true }],
+							skills: [],
+							prompts: [],
+							themes: [],
+						},
+					],
+					project: [],
+				};
+			},
+			async toggleResource() {
+				return "ok";
+			},
 		} as unknown as Natives;
 
 		await showPackedPanel(ctx, natives);
@@ -791,8 +1103,12 @@ describe("applyPackageChoice (/packed panel mutation + reload honesty)", () => {
 		const notices: string[] = [];
 		const reloads = { count: 0 };
 		const natives = {
-			async security() { return { mutationApproval: "always" as const }; },
-			async update() { return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false }; },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async update() {
+				return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false };
+			},
 		} as unknown as Natives;
 
 		await applyPackageChoice("Update to 1.1.0", row, natives, fakeCtx(true, notices, reloads));
@@ -804,8 +1120,12 @@ describe("applyPackageChoice (/packed panel mutation + reload honesty)", () => {
 		const notices: string[] = [];
 		const reloads = { count: 0 };
 		const natives = {
-			async security() { return { mutationApproval: "always" as const }; },
-			async update() { return { output: "", reloadRequired: false, alreadyUpToDate: true, pinned: false, currentVersion: "1.0.0" }; },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async update() {
+				return { output: "", reloadRequired: false, alreadyUpToDate: true, pinned: false, currentVersion: "1.0.0" };
+			},
 		} as unknown as Natives;
 
 		const outcome = await applyPackageChoice("Update to 1.1.0", row, natives, fakeCtx(true, notices, reloads));
@@ -819,8 +1139,19 @@ describe("applyPackageChoice (/packed panel mutation + reload honesty)", () => {
 		const notices: string[] = [];
 		const reloads = { count: 0 };
 		const natives = {
-			async security() { return { mutationApproval: "always" as const }; },
-			async update() { return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false, previousVersion: "1.0.0", currentVersion: "1.1.0" }; },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async update() {
+				return {
+					output: "",
+					reloadRequired: true,
+					alreadyUpToDate: false,
+					pinned: false,
+					previousVersion: "1.0.0",
+					currentVersion: "1.1.0",
+				};
+			},
 		} as unknown as Natives;
 
 		const outcome = await applyPackageChoice("Update to 1.1.0", row, natives, fakeCtx(true, notices, reloads));
@@ -835,8 +1166,14 @@ describe("applyPackageChoice (/packed panel mutation + reload honesty)", () => {
 		const reloads = { count: 0 };
 		let removed = 0;
 		const natives = {
-			async security() { return { mutationApproval: "always" as const }; },
-			async remove(name: string) { expect(name).toBe("pi-lsp"); removed += 1; return ""; },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async remove(name: string) {
+				expect(name).toBe("pi-lsp");
+				removed += 1;
+				return "";
+			},
 		} as unknown as Natives;
 
 		const outcome = await applyPackageChoice("Remove", row, natives, fakeCtx(true, notices, reloads));
@@ -852,8 +1189,20 @@ describe("applyPackageChoice (/packed panel mutation + reload honesty)", () => {
 		const reloads = { count: 0 };
 		let updateCalled = false;
 		const natives = {
-			async security() { return { mutationApproval: "always" as const }; },
-			async update() { updateCalled = true; return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false, previousVersion: "1.0.0", currentVersion: "1.1.0" }; },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async update() {
+				updateCalled = true;
+				return {
+					output: "",
+					reloadRequired: true,
+					alreadyUpToDate: false,
+					pinned: false,
+					previousVersion: "1.0.0",
+					currentVersion: "1.1.0",
+				};
+			},
 		} as unknown as Natives;
 
 		const outcome = await applyPackageChoice("Update to 1.1.0", row, natives, fakeCtxDeferReload(notices, reloads));
@@ -869,8 +1218,13 @@ describe("applyPackageChoice (/packed panel mutation + reload honesty)", () => {
 		const reloads = { count: 0 };
 		let removed = 0;
 		const natives = {
-			async security() { return { mutationApproval: "always" as const }; },
-			async remove() { removed += 1; return ""; },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async remove() {
+				removed += 1;
+				return "";
+			},
 		} as unknown as Natives;
 
 		const outcome = await applyPackageChoice("Remove", row, natives, fakeCtxDeferReload(notices, reloads));
@@ -886,9 +1240,17 @@ describe("applyPackageChoice (/packed panel mutation + reload honesty)", () => {
 		const reloads = { count: 0 };
 		let called = 0;
 		const natives = {
-			async security() { return { mutationApproval: "always" as const }; },
-			async update() { called += 1; return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false }; },
-			async remove() { called += 1; return ""; },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async update() {
+				called += 1;
+				return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false };
+			},
+			async remove() {
+				called += 1;
+				return "";
+			},
 		} as unknown as Natives;
 
 		const updateOutcome = await applyPackageChoice("Update to 1.1.0", row, natives, fakeCtx(false, notices, reloads));
@@ -923,8 +1285,26 @@ describe("applyUpdateAll (U -- one combined approval and one reload, not N)", ()
 		const notices: string[] = [];
 		const reloads = { count: 0 };
 		let confirmCalled = false;
-		const natives = { async security() { return { mutationApproval: "always" as const }; } } as unknown as Natives;
-		const ctx = { hasUI: true, ui: { async confirm() { confirmCalled = true; return true; }, notify(m: string) { notices.push(m); } }, async reload() { reloads.count += 1; } } as unknown as ExtensionCommandContext;
+		const natives = {
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+		} as unknown as Natives;
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async confirm() {
+					confirmCalled = true;
+					return true;
+				},
+				notify(m: string) {
+					notices.push(m);
+				},
+			},
+			async reload() {
+				reloads.count += 1;
+			},
+		} as unknown as ExtensionCommandContext;
 
 		const outcome = await applyUpdateAll([{ name: "pi-c", version: "1.0.0", hasUpdate: false }], natives, ctx);
 
@@ -939,13 +1319,29 @@ describe("applyUpdateAll (U -- one combined approval and one reload, not N)", ()
 		const confirmMessages: string[] = [];
 		const updated: string[] = [];
 		const natives = {
-			async security() { return { mutationApproval: "always" as const }; },
-			async update(source: string) { updated.push(source); return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false }; },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async update(source: string) {
+				updated.push(source);
+				return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false };
+			},
 		} as unknown as Natives;
 		const ctx = {
 			hasUI: true,
-			ui: { async confirm(_t: string, message: string) { confirmMessages.push(message); return true; }, notify(m: string) { notices.push(m); }, custom: autoResolvingCustom() },
-			async reload() { reloads.count += 1; },
+			ui: {
+				async confirm(_t: string, message: string) {
+					confirmMessages.push(message);
+					return true;
+				},
+				notify(m: string) {
+					notices.push(m);
+				},
+				custom: autoResolvingCustom(),
+			},
+			async reload() {
+				reloads.count += 1;
+			},
 		} as unknown as ExtensionCommandContext;
 
 		const outcome = await applyUpdateAll(outdated, natives, ctx);
@@ -969,18 +1365,30 @@ describe("applyUpdateAll (U -- one combined approval and one reload, not N)", ()
 		const updated: string[] = [];
 		let confirmCalls = 0;
 		const natives = {
-			async security() { return { mutationApproval: "always" as const }; },
-			async update(source: string) { updated.push(source); return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false }; },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async update(source: string) {
+				updated.push(source);
+				return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false };
+			},
 		} as unknown as Natives;
 		const ctx = {
 			hasUI: true,
 			ui: {
 				// 1st call: mutation approval (yes). 2nd call: reload gate (no, defer).
-				async confirm() { confirmCalls += 1; return confirmCalls === 1; },
-				notify(m: string) { notices.push(m); },
+				async confirm() {
+					confirmCalls += 1;
+					return confirmCalls === 1;
+				},
+				notify(m: string) {
+					notices.push(m);
+				},
 				custom: autoResolvingCustom(),
 			},
-			async reload() { reloads.count += 1; },
+			async reload() {
+				reloads.count += 1;
+			},
 		} as unknown as ExtensionCommandContext;
 
 		const outcome = await applyUpdateAll(outdated, natives, ctx);
@@ -995,13 +1403,29 @@ describe("applyUpdateAll (U -- one combined approval and one reload, not N)", ()
 		const notices: string[] = [];
 		const reloads = { count: 0 };
 		const natives = {
-			async security() { return { mutationApproval: "always" as const }; },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
 			async update(source: string) {
 				if (source === "npm:pi-a") throw new Error("registry unavailable");
 				return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false };
 			},
 		} as unknown as Natives;
-		const ctx = { hasUI: true, ui: { async confirm() { return true; }, notify(m: string) { notices.push(m); }, custom: autoResolvingCustom() }, async reload() { reloads.count += 1; } } as unknown as ExtensionCommandContext;
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async confirm() {
+					return true;
+				},
+				notify(m: string) {
+					notices.push(m);
+				},
+				custom: autoResolvingCustom(),
+			},
+			async reload() {
+				reloads.count += 1;
+			},
+		} as unknown as ExtensionCommandContext;
 
 		const outcome = await applyUpdateAll(outdated, natives, ctx);
 
@@ -1015,10 +1439,28 @@ describe("applyUpdateAll (U -- one combined approval and one reload, not N)", ()
 		const reloads = { count: 0 };
 		const notices: string[] = [];
 		const natives = {
-			async security() { return { mutationApproval: "always" as const }; },
-			async update() { throw new Error("boom"); },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async update() {
+				throw new Error("boom");
+			},
 		} as unknown as Natives;
-		const ctx = { hasUI: true, ui: { async confirm() { return true; }, notify(m: string) { notices.push(m); }, custom: autoResolvingCustom() }, async reload() { reloads.count += 1; } } as unknown as ExtensionCommandContext;
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async confirm() {
+					return true;
+				},
+				notify(m: string) {
+					notices.push(m);
+				},
+				custom: autoResolvingCustom(),
+			},
+			async reload() {
+				reloads.count += 1;
+			},
+		} as unknown as ExtensionCommandContext;
 
 		const outcome = await applyUpdateAll(outdated, natives, ctx);
 
@@ -1030,10 +1472,26 @@ describe("applyUpdateAll (U -- one combined approval and one reload, not N)", ()
 		const reloads = { count: 0 };
 		let updateCalled = false;
 		const natives = {
-			async security() { return { mutationApproval: "always" as const }; },
-			async update() { updateCalled = true; return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false }; },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async update() {
+				updateCalled = true;
+				return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false };
+			},
 		} as unknown as Natives;
-		const ctx = { hasUI: true, ui: { async confirm() { return false; }, notify() {} }, async reload() { reloads.count += 1; } } as unknown as ExtensionCommandContext;
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async confirm() {
+					return false;
+				},
+				notify() {},
+			},
+			async reload() {
+				reloads.count += 1;
+			},
+		} as unknown as ExtensionCommandContext;
 
 		const outcome = await applyUpdateAll(outdated, natives, ctx);
 
@@ -1049,20 +1507,38 @@ describe("applyUpdateAll (U -- one combined approval and one reload, not N)", ()
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async confirm() { return true; },
+				async confirm() {
+					return true;
+				},
 				notify() {},
-				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[] }) {
+				async custom(
+					factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[] },
+				) {
 					return new Promise((resolve) => {
-						const tui = { requestRender() { renderCount += 1; if (component) renders.push(component.render(60)); } };
-						component = factory(tui, { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s }, {}, resolve);
+						const tui = {
+							requestRender() {
+								renderCount += 1;
+								if (component) renders.push(component.render(60));
+							},
+						};
+						component = factory(
+							tui,
+							{ fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s },
+							{},
+							resolve,
+						);
 					});
 				},
 			},
 			async reload() {},
 		} as unknown as ExtensionCommandContext;
 		const natives = {
-			async security() { return { mutationApproval: "always" as const }; },
-			async update() { return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false }; },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async update() {
+				return { output: "", reloadRequired: true, alreadyUpToDate: false, pinned: false };
+			},
 		} as unknown as Natives;
 
 		await applyUpdateAll(outdated, natives, ctx);
@@ -1084,9 +1560,20 @@ describe("applyDisableExtensions (d -- toggles this package's own extensions on 
 	}
 
 	it("reports nothing to disable when the package declares no extensions", async () => {
-		const natives = { async listResources() { return { global: [resourceGroup()], project: [] }; } } as unknown as Natives;
+		const natives = {
+			async listResources() {
+				return { global: [resourceGroup()], project: [] };
+			},
+		} as unknown as Natives;
 		const notices: string[] = [];
-		const ctx = { hasUI: true, ui: { notify(m: string) { notices.push(m); } } } as unknown as ExtensionCommandContext;
+		const ctx = {
+			hasUI: true,
+			ui: {
+				notify(m: string) {
+					notices.push(m);
+				},
+			},
+		} as unknown as ExtensionCommandContext;
 
 		const outcome = await applyDisableExtensions(row, natives, ctx);
 
@@ -1100,12 +1587,30 @@ describe("applyDisableExtensions (d -- toggles this package's own extensions on 
 			async listResources() {
 				return { global: [resourceGroup({ extensions: [{ path: "extension/index.ts", enabled: true }] })], project: [] };
 			},
-			async security() { return { mutationApproval: "always" as const }; },
-			async toggleResource(_source: string, _field: string, path: string, enabled: boolean) { toggled.push({ path, enabled }); return "ok"; },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async toggleResource(_source: string, _field: string, path: string, enabled: boolean) {
+				toggled.push({ path, enabled });
+				return "ok";
+			},
 		} as unknown as Natives;
 		const notices: string[] = [];
 		const reloads = { count: 0 };
-		const ctx = { hasUI: true, ui: { async confirm() { return true; }, notify(m: string) { notices.push(m); } }, async reload() { reloads.count += 1; } } as unknown as ExtensionCommandContext;
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async confirm() {
+					return true;
+				},
+				notify(m: string) {
+					notices.push(m);
+				},
+			},
+			async reload() {
+				reloads.count += 1;
+			},
+		} as unknown as ExtensionCommandContext;
 
 		const outcome = await applyDisableExtensions(row, natives, ctx);
 
@@ -1124,14 +1629,29 @@ describe("applyDisableExtensions (d -- toggles this package's own extensions on 
 			async listResources() {
 				return { global: [resourceGroup({ extensions: [{ path: "extension/index.ts", enabled: true }] })], project: [] };
 			},
-			async security() { return { mutationApproval: "always" as const }; },
-			async toggleResource(_source: string, _field: string, path: string, enabled: boolean) { toggled.push({ path, enabled }); return "ok"; },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async toggleResource(_source: string, _field: string, path: string, enabled: boolean) {
+				toggled.push({ path, enabled });
+				return "ok";
+			},
 		} as unknown as Natives;
 		const ctx = {
 			hasUI: true,
 			// 1st call: per-item toggle approval (yes). 2nd call: reload gate (no, defer).
-			ui: { async confirm() { confirmCalls += 1; return confirmCalls === 1; }, notify(m: string) { notices.push(m); } },
-			async reload() { reloads.count += 1; },
+			ui: {
+				async confirm() {
+					confirmCalls += 1;
+					return confirmCalls === 1;
+				},
+				notify(m: string) {
+					notices.push(m);
+				},
+			},
+			async reload() {
+				reloads.count += 1;
+			},
 		} as unknown as ExtensionCommandContext;
 
 		const outcome = await applyDisableExtensions(row, natives, ctx);
@@ -1148,11 +1668,27 @@ describe("applyDisableExtensions (d -- toggles this package's own extensions on 
 			async listResources() {
 				return { global: [resourceGroup({ extensions: [{ path: "extension/index.ts", enabled: false }] })], project: [] };
 			},
-			async security() { return { mutationApproval: "always" as const }; },
-			async toggleResource(_source: string, _field: string, path: string, enabled: boolean) { toggled.push({ path, enabled }); return "ok"; },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async toggleResource(_source: string, _field: string, path: string, enabled: boolean) {
+				toggled.push({ path, enabled });
+				return "ok";
+			},
 		} as unknown as Natives;
 		const reloads = { count: 0 };
-		const ctx = { hasUI: true, ui: { async confirm() { return true; }, notify() {} }, async reload() { reloads.count += 1; } } as unknown as ExtensionCommandContext;
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async confirm() {
+					return true;
+				},
+				notify() {},
+			},
+			async reload() {
+				reloads.count += 1;
+			},
+		} as unknown as ExtensionCommandContext;
 
 		const outcome = await applyDisableExtensions(row, natives, ctx);
 
@@ -1165,10 +1701,23 @@ describe("applyDisableExtensions (d -- toggles this package's own extensions on 
 			async listResources() {
 				return { global: [resourceGroup({ extensions: [{ path: "extension/index.ts", enabled: true }] })], project: [] };
 			},
-			async security() { return { mutationApproval: "always" as const }; },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
 		} as unknown as Natives;
 		const reloads = { count: 0 };
-		const ctx = { hasUI: true, ui: { async confirm() { return false; }, notify() {} }, async reload() { reloads.count += 1; } } as unknown as ExtensionCommandContext;
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async confirm() {
+					return false;
+				},
+				notify() {},
+			},
+			async reload() {
+				reloads.count += 1;
+			},
+		} as unknown as ExtensionCommandContext;
 
 		const outcome = await applyDisableExtensions(row, natives, ctx);
 
@@ -1177,9 +1726,20 @@ describe("applyDisableExtensions (d -- toggles this package's own extensions on 
 	});
 
 	it("is unaffected by an unrelated package with no matching resource group", async () => {
-		const natives = { async listResources() { return { global: [], project: [] }; } } as unknown as Natives;
+		const natives = {
+			async listResources() {
+				return { global: [], project: [] };
+			},
+		} as unknown as Natives;
 		const notices: string[] = [];
-		const ctx = { hasUI: true, ui: { notify(m: string) { notices.push(m); } } } as unknown as ExtensionCommandContext;
+		const ctx = {
+			hasUI: true,
+			ui: {
+				notify(m: string) {
+					notices.push(m);
+				},
+			},
+		} as unknown as ExtensionCommandContext;
 
 		const outcome = await applyDisableExtensions(row, natives, ctx);
 

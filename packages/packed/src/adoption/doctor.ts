@@ -7,7 +7,7 @@
  * answers the same question proactively, before pi ever runs.
  */
 import { join } from "node:path";
-import { listPackageResources, resolveInstalledDir, type PackageResources } from "../packages/resources.ts";
+import { listPackageResources, type PackageResources, resolveInstalledDir } from "../packages/resources.ts";
 import { runExtensionSmoke, type SmokeOptions, type SmokeRegistrations } from "./smoke.ts";
 
 const REGISTRATION_KINDS = ["tools", "commands", "shortcuts", "flags"] as const;

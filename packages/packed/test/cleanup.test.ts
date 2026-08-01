@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +8,9 @@ import { createApp, type OperationInputs, type OperationName, type OperationOutp
 import type { Installer, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/shared/ports.ts";
 
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(() => {
+	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 
 function pkg(manifest: Record<string, unknown>): string {
 	const root = mkdtempSync(join(tmpdir(), "packed-cleanup-"));
@@ -76,7 +78,7 @@ describe("runCleanup", () => {
 		expect(existsSync("/etc/passwd")).toBe(true);
 	});
 
-	it("fails closed on a \"..\"-escaping path, never deletes outside the package", () => {
+	it('fails closed on a ".."-escaping path, never deletes outside the package', () => {
 		const root = pkg({ name: "pi-demo", pi: { cleanup: ["../../etc/passwd"] } });
 		const outside = join(root, "..", "..", "etc-passwd-marker");
 		const result = runCleanup(root);
@@ -114,24 +116,42 @@ describe("formatCleanupSummary", () => {
 	});
 
 	it("lists every target's outcome", () => {
-		const summary = formatCleanupSummary([{ declared: "cache.json", status: "removed" }, { declared: "../x", status: "escaped" }]);
+		const summary = formatCleanupSummary([
+			{ declared: "cache.json", status: "removed" },
+			{ declared: "../x", status: "escaped" },
+		]);
 		expect(summary).toContain("removed: cache.json");
 		expect(summary).toContain("escaped: ../x");
 	});
 });
 
 class NoopRegistry implements Registry {
-	async search(): Promise<SearchPage> { return { results: [], total: 0 }; }
-	async searchPage(): Promise<SearchPage> { return { results: [], total: 0 }; }
-	async searchAll() { return []; }
-	async info(name: string): Promise<PkgInfo> { return { name, version: "1.0.0" }; }
+	async search(): Promise<SearchPage> {
+		return { results: [], total: 0 };
+	}
+	async searchPage(): Promise<SearchPage> {
+		return { results: [], total: 0 };
+	}
+	async searchAll() {
+		return [];
+	}
+	async info(name: string): Promise<PkgInfo> {
+		return { name, version: "1.0.0" };
+	}
 }
 
 class RecordingInstaller implements Installer {
 	removed?: string;
-	async install() { return "ok"; }
-	async remove(source: string) { this.removed = source; return `Removed ${source}`; }
-	async update(): Promise<UpdateOutcome> { return { output: "ok", reloadRequired: false, alreadyUpToDate: true, pinned: false }; }
+	async install() {
+		return "ok";
+	}
+	async remove(source: string) {
+		this.removed = source;
+		return `Removed ${source}`;
+	}
+	async update(): Promise<UpdateOutcome> {
+		return { output: "ok", reloadRequired: false, alreadyUpToDate: true, pinned: false };
+	}
 }
 
 describe("packed remove applies pi.cleanup before delegating to pi remove (real daemon route)", () => {
@@ -145,8 +165,18 @@ describe("packed remove applies pi.cleanup before delegating to pi remove (real 
 	}
 
 	function rpcClient(inst: Installer, piHome: string) {
-		const app = createApp({ reg: new NoopRegistry(), inst, token: "test-token", stateDir: mkdtempSync(join(tmpdir(), "packed-cleanup-state-")), dataDir: mkdtempSync(join(tmpdir(), "packed-cleanup-data-")), piHome });
-		return new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", { label: "Packed", transport: (request) => app.fetch(request) });
+		const app = createApp({
+			reg: new NoopRegistry(),
+			inst,
+			token: "test-token",
+			stateDir: mkdtempSync(join(tmpdir(), "packed-cleanup-state-")),
+			dataDir: mkdtempSync(join(tmpdir(), "packed-cleanup-data-")),
+			piHome,
+		});
+		return new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", {
+			label: "Packed",
+			transport: (request) => app.fetch(request),
+		});
 	}
 
 	it("removes a declared cleanup path before pi remove runs, and reports it in the same output the CLI already prints", async () => {

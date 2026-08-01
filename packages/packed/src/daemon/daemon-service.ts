@@ -28,7 +28,12 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveDaemonPaths } from "@danypops/vehicle-server/paths";
-import { createNodeServiceInstallDeps, installUserService, type ServiceInstallResult, type ServiceSpec } from "@danypops/vehicle-server/service";
+import {
+	createNodeServiceInstallDeps,
+	installUserService,
+	type ServiceInstallResult,
+	type ServiceSpec,
+} from "@danypops/vehicle-server/service";
 import { npmPackageName } from "../packages/installed.ts";
 
 export interface DaemonServiceManifest {
@@ -106,7 +111,11 @@ function dependsOnVehicle(pkg: InstalledPackageJson): boolean {
  * web-spider, packed, enigma all expose a `serve` subcommand on the same
  * bin their `service install` command already points at).
  */
-export function detectVehicleDaemonService(packageDir: string, fallbackName: string, hoistedNodeModulesDir?: string): ResolvedDaemonEntrypoint | undefined {
+export function detectVehicleDaemonService(
+	packageDir: string,
+	fallbackName: string,
+	hoistedNodeModulesDir?: string,
+): ResolvedDaemonEntrypoint | undefined {
 	const own = readPackageJson(packageDir);
 	if (!own) return undefined;
 
@@ -116,7 +125,10 @@ export function detectVehicleDaemonService(packageDir: string, fallbackName: str
 	}
 
 	for (const depName of Object.keys(own.dependencies ?? {})) {
-		const candidateDirs = [join(packageDir, "node_modules", depName), ...(hoistedNodeModulesDir ? [join(hoistedNodeModulesDir, depName)] : [])];
+		const candidateDirs = [
+			join(packageDir, "node_modules", depName),
+			...(hoistedNodeModulesDir ? [join(hoistedNodeModulesDir, depName)] : []),
+		];
 		for (const depDir of candidateDirs) {
 			const dep = readPackageJson(depDir);
 			if (!dep) continue;
@@ -180,15 +192,25 @@ export function resolveDaemonServiceSpec(piHome: string, source: string): Resolv
 	const detected = detectVehicleDaemonService(packageDir, packageName, join(piHome, "npm", "node_modules"));
 	if (detected) return { ok: true, spec: buildSpec(detected) };
 
-	return { ok: false, notADaemon: true, reason: `${packageName} does not declare a packed.daemonService manifest and no Vehicle-shaped daemon dependency was detected` };
+	return {
+		ok: false,
+		notADaemon: true,
+		reason: `${packageName} does not declare a packed.daemonService manifest and no Vehicle-shaped daemon dependency was detected`,
+	};
 }
 
 export interface DaemonServiceInstaller {
-	install(piHome: string, source: string): { ok: true; result: ServiceInstallResult; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean };
+	install(
+		piHome: string,
+		source: string,
+	): { ok: true; result: ServiceInstallResult; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean };
 }
 
 export class RealDaemonServiceInstaller implements DaemonServiceInstaller {
-	install(piHome: string, source: string): { ok: true; result: ServiceInstallResult; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean } {
+	install(
+		piHome: string,
+		source: string,
+	): { ok: true; result: ServiceInstallResult; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean } {
 		const resolved = resolveDaemonServiceSpec(piHome, source);
 		if (!resolved.ok) return resolved;
 		const result = installUserService(resolved.spec, createNodeServiceInstallDeps());

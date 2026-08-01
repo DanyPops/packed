@@ -60,13 +60,13 @@ async function runCommand(command: string[], cwd: string, timeoutMs: number): Pr
 	let timedOut = false;
 	const timer = setTimeout(() => {
 		timedOut = true;
-		try { proc.kill(); } catch { /* already exited */ }
+		try {
+			proc.kill();
+		} catch {
+			/* already exited */
+		}
 	}, timeoutMs);
-	const [stdout, stderr, code] = await Promise.all([
-		new Response(proc.stdout).text(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
+	const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
 	clearTimeout(timer);
 	return { code, stdout, stderr, timedOut };
 }
@@ -109,19 +109,31 @@ export async function validateExtensionLoadsHeadless(entryPath: string, timeoutM
 	}
 	const result = await runCommand(["node", cliPath, "--extension", entryPath], tmpdir(), bound);
 	if (result.timedOut) return { path: entryPath, ok: false, message: `extension load exceeded ${bound}ms` };
-	const lastEvent = result.stdout.trim().split("\n").filter((line) => line.startsWith("{")).at(-1);
+	const lastEvent = result.stdout
+		.trim()
+		.split("\n")
+		.filter((line) => line.startsWith("{"))
+		.at(-1);
 	if (lastEvent) {
 		try {
 			const event = JSON.parse(lastEvent) as { type?: string; error?: string };
 			if (event.type === "load_ok") return { path: entryPath, ok: true };
 			if (event.type === "load_error") {
-				return { path: entryPath, ok: false, message: (typeof event.error === "string" ? event.error : "extension failed to load").slice(0, 1_000) };
+				return {
+					path: entryPath,
+					ok: false,
+					message: (typeof event.error === "string" ? event.error : "extension failed to load").slice(0, 1_000),
+				};
 			}
 		} catch {
 			// Falls through to the generic failure below.
 		}
 	}
-	return { path: entryPath, ok: false, message: (result.stderr.trim() || `mock-pi-cli exited ${result.code} with no recognizable event`).slice(0, 1_000) };
+	return {
+		path: entryPath,
+		ok: false,
+		message: (result.stderr.trim() || `mock-pi-cli exited ${result.code} with no recognizable event`).slice(0, 1_000),
+	};
 }
 
 /** Stages the real npm tarball in isolation and headlessly load-checks
@@ -147,9 +159,9 @@ export class HeadlessInstallValidator implements InstallValidator {
 				return { ok: false, source, extensions: [], message: `package.json unreadable: ${e instanceof Error ? e.message : e}` };
 			}
 
-			const pi = typeof manifest["pi"] === "object" && manifest["pi"] !== null ? manifest["pi"] as Record<string, unknown> : undefined;
-			const declared = Array.isArray(pi?.["extensions"])
-				? pi["extensions"].filter((entry): entry is string => typeof entry === "string").slice(0, MAX_EXTENSIONS)
+			const pi = typeof manifest.pi === "object" && manifest.pi !== null ? (manifest.pi as Record<string, unknown>) : undefined;
+			const declared = Array.isArray(pi?.extensions)
+				? pi.extensions.filter((entry): entry is string => typeof entry === "string").slice(0, MAX_EXTENSIONS)
 				: [];
 			if (declared.length === 0) return { ok: true, source, extensions: [] };
 

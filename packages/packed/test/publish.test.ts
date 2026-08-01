@@ -1,15 +1,31 @@
 import { describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { browserOpenCommand, npmWebUrl, PublishManager, renderStageWorkflow, runNpmLoginWeb, satisfiesRange, stageWorkflowFile, type TrustStatusCommand, type VersionCommand } from "../src/publish/publish.ts";
+import {
+	browserOpenCommand,
+	npmWebUrl,
+	PublishManager,
+	renderStageWorkflow,
+	runNpmLoginWeb,
+	satisfiesRange,
+	stageWorkflowFile,
+	type TrustStatusCommand,
+	type VersionCommand,
+} from "../src/publish/publish.ts";
 import type { PkgInfo, Registry, SearchPage } from "../src/shared/ports.ts";
 
 class RegistryFixture implements Registry {
 	constructor(private readonly existing = true) {}
-	async search(): Promise<SearchPage> { return { results: [], total: 0 }; }
-	async searchPage(): Promise<SearchPage> { return { results: [], total: 0 }; }
-	async searchAll() { return []; }
+	async search(): Promise<SearchPage> {
+		return { results: [], total: 0 };
+	}
+	async searchPage(): Promise<SearchPage> {
+		return { results: [], total: 0 };
+	}
+	async searchAll() {
+		return [];
+	}
 	async info(name: string): Promise<PkgInfo> {
 		if (!this.existing) throw new Error("npm info: HTTP 404");
 		return { name, version: "1.0.0" };
@@ -18,28 +34,46 @@ class RegistryFixture implements Registry {
 
 function project(overrides: Record<string, unknown> = {}): string {
 	const root = mkdtempSync(join(tmpdir(), "packed-publish-"));
-	writeFileSync(join(root, "package.json"), JSON.stringify({
-		name: "@example/pi-demo",
-		version: "1.1.0",
-		description: "Pi demo package",
-		repository: { type: "git", url: "git+https://github.com/example/pi-demo.git" },
-		keywords: ["pi-package"],
-		scripts: { check: "tsc --noEmit", test: "bun test", build: "bun build src.ts --outdir dist" },
-		...overrides,
-	}));
+	writeFileSync(
+		join(root, "package.json"),
+		JSON.stringify({
+			name: "@example/pi-demo",
+			version: "1.1.0",
+			description: "Pi demo package",
+			repository: { type: "git", url: "git+https://github.com/example/pi-demo.git" },
+			keywords: ["pi-package"],
+			scripts: { check: "tsc --noEmit", test: "bun test", build: "bun build src.ts --outdir dist" },
+			...overrides,
+		}),
+	);
 	writeFileSync(join(root, "bun.lock"), "{}");
 	return root;
 }
 
 const npmVersion: VersionCommand = async () => ({ code: 0, stdout: "11.15.0\n", stderr: "" });
 const loggedIn: VersionCommand = async () => ({ code: 0, stdout: "example-user\n", stderr: "" });
-const trusted: TrustStatusCommand = async () => ({ code: 0, stderr: "", stdout: JSON.stringify({ type: "github", repository: "example/pi-demo", file: "pi-demo-stage-publish.yml", permissions: ["createStagedPackage"] }) });
+const trusted: TrustStatusCommand = async () => ({
+	code: 0,
+	stderr: "",
+	stdout: JSON.stringify({
+		type: "github",
+		repository: "example/pi-demo",
+		file: "pi-demo-stage-publish.yml",
+		permissions: ["createStagedPackage"],
+	}),
+});
 
 class MultiRegistryFixture implements Registry {
 	constructor(private readonly versions: Record<string, string> = {}) {}
-	async search(): Promise<SearchPage> { return { results: [], total: 0 }; }
-	async searchPage(): Promise<SearchPage> { return { results: [], total: 0 }; }
-	async searchAll() { return []; }
+	async search(): Promise<SearchPage> {
+		return { results: [], total: 0 };
+	}
+	async searchPage(): Promise<SearchPage> {
+		return { results: [], total: 0 };
+	}
+	async searchAll() {
+		return [];
+	}
 	async info(name: string): Promise<PkgInfo> {
 		const version = this.versions[name];
 		if (!version) throw new Error("npm info: HTTP 404");
@@ -57,8 +91,25 @@ function workspace(extDependencyRange = "^1.0.0"): { root: string; corePath: str
 	const extPath = join(root, "packages", "ext");
 	mkdirSync(corePath, { recursive: true });
 	mkdirSync(extPath, { recursive: true });
-	writeFileSync(join(corePath, "package.json"), JSON.stringify({ name: "@example/core", version: "1.0.0", repository: { type: "git", url: "git+https://github.com/example/pi-demo.git", directory: "packages/core" }, scripts: { build: "bun build", test: "bun test" } }));
-	writeFileSync(join(extPath, "package.json"), JSON.stringify({ name: "@example/ext", version: "1.0.0", repository: { type: "git", url: "git+https://github.com/example/pi-demo.git", directory: "packages/ext" }, dependencies: { "@example/core": extDependencyRange }, scripts: { test: "bun test" } }));
+	writeFileSync(
+		join(corePath, "package.json"),
+		JSON.stringify({
+			name: "@example/core",
+			version: "1.0.0",
+			repository: { type: "git", url: "git+https://github.com/example/pi-demo.git", directory: "packages/core" },
+			scripts: { build: "bun build", test: "bun test" },
+		}),
+	);
+	writeFileSync(
+		join(extPath, "package.json"),
+		JSON.stringify({
+			name: "@example/ext",
+			version: "1.0.0",
+			repository: { type: "git", url: "git+https://github.com/example/pi-demo.git", directory: "packages/ext" },
+			dependencies: { "@example/core": extDependencyRange },
+			scripts: { test: "bun test" },
+		}),
+	);
 	return { root, corePath, extPath };
 }
 
@@ -86,7 +137,9 @@ describe("standalone staged publishing", () => {
 		expect(report.ok).toBe(true);
 		expect(report.wrote).toBe(true);
 		expect(report.repository).toBe("example/pi-demo");
-		expect(report.trustCommand).toBe("npm trust github @example/pi-demo --repo example/pi-demo --file pi-demo-stage-publish.yml --allow-stage-publish");
+		expect(report.trustCommand).toBe(
+			"npm trust github @example/pi-demo --repo example/pi-demo --file pi-demo-stage-publish.yml --allow-stage-publish",
+		);
 		expect(report.webUrl).toBe("https://www.npmjs.com/package/@example/pi-demo/access");
 		const workflow = readFileSync(report.workflowPath, "utf8");
 		expect(workflow).toContain("bun install --frozen-lockfile --ignore-scripts");
@@ -101,12 +154,16 @@ describe("standalone staged publishing", () => {
 		expect(missing.ok).toBe(false);
 		expect(missing.diagnostics.map((item) => item.code)).toContain("PUBLISH_PACKAGE_NOT_FOUND");
 		expect(existsSync(missing.workflowPath)).toBe(false);
-		const badRepo = await new PublishManager(new RegistryFixture(), npmVersion).setup(project({ repository: "https://gitlab.com/example/pi-demo" }));
+		const badRepo = await new PublishManager(new RegistryFixture(), npmVersion).setup(
+			project({ repository: "https://gitlab.com/example/pi-demo" }),
+		);
 		expect(badRepo.diagnostics.map((item) => item.code)).toContain("PUBLISH_GITHUB_REPOSITORY_REQUIRED");
 	});
 
 	it("rejects private packages and non-deterministic installs", async () => {
-		const restricted = await new PublishManager(new RegistryFixture(), npmVersion).setup(project({ publishConfig: { access: "restricted" } }));
+		const restricted = await new PublishManager(new RegistryFixture(), npmVersion).setup(
+			project({ publishConfig: { access: "restricted" } }),
+		);
 		expect(restricted.diagnostics.map((item) => item.code)).toContain("PUBLISH_PRIVATE_PACKAGE");
 		const noLock = project();
 		rmSync(join(noLock, "bun.lock"));
@@ -120,15 +177,34 @@ describe("standalone staged publishing", () => {
 		await manager.setup(root);
 		const status = await manager.status(root);
 		expect(status.ready).toBe(true);
-		expect(status.checks).toMatchObject({ packageExists: true, repository: true, workflow: true, lockfile: true, node: true, npm: true, trustedPublisher: "verified" });
-		expect(status.nextSteps).toContain("Run: npm trust github @example/pi-demo --repo example/pi-demo --file pi-demo-stage-publish.yml --allow-stage-publish");
+		expect(status.checks).toMatchObject({
+			packageExists: true,
+			repository: true,
+			workflow: true,
+			lockfile: true,
+			node: true,
+			npm: true,
+			trustedPublisher: "verified",
+		});
+		expect(status.nextSteps).toContain(
+			"Run: npm trust github @example/pi-demo --repo example/pi-demo --file pi-demo-stage-publish.yml --allow-stage-publish",
+		);
 		expect(status.nextSteps.join(" ")).toContain("2FA");
 	});
 
 	it("rejects broader or mismatched trusted-publisher grants", async () => {
 		const root = project();
 		await new PublishManager(new RegistryFixture(), npmVersion).setup(root);
-		const broad: TrustStatusCommand = async () => ({ code: 0, stderr: "", stdout: JSON.stringify({ type: "github", repository: "other/repo", file: "publish.yml", permissions: ["createPackage", "createStagedPackage"] }) });
+		const broad: TrustStatusCommand = async () => ({
+			code: 0,
+			stderr: "",
+			stdout: JSON.stringify({
+				type: "github",
+				repository: "other/repo",
+				file: "publish.yml",
+				permissions: ["createPackage", "createStagedPackage"],
+			}),
+		});
 		const status = await new PublishManager(new RegistryFixture(), npmVersion, broad, loggedIn).status(root);
 		expect(status.ready).toBe(false);
 		expect(status.checks.trustedPublisher).toBe("not-verified");
@@ -139,7 +215,12 @@ describe("standalone staged publishing", () => {
 		const root = project();
 		mkdirSync(join(root, ".github/workflows"), { recursive: true });
 		writeFileSync(join(root, ".github/workflows/pi-demo-stage-publish.yml"), "name: unsafe\n");
-		const manager = new PublishManager(new RegistryFixture(), async () => ({ code: 0, stdout: "11.14.1", stderr: "" }), undefined, loggedIn);
+		const manager = new PublishManager(
+			new RegistryFixture(),
+			async () => ({ code: 0, stdout: "11.14.1", stderr: "" }),
+			undefined,
+			loggedIn,
+		);
 		const before = readFileSync(join(root, ".github/workflows/pi-demo-stage-publish.yml"), "utf8");
 		const status = await manager.status(root);
 		expect(status.ready).toBe(false);
@@ -167,7 +248,7 @@ describe("standalone staged publishing", () => {
 		const report = await manager.setup(extPath);
 		const workflow = readFileSync(report.workflowPath, "utf8");
 		expect(workflow).toContain("Verify @example/core@^1.0.0 is already published (core-first ordering)");
-		expect(workflow).toContain("npm view \"@example/core@$version\" version");
+		expect(workflow).toContain('npm view "@example/core@$version" version');
 		// core's own workflow declares no internal dependency, so it carries no ordering guard
 		const { corePath } = workspace();
 		const coreReport = await new PublishManager(new MultiRegistryFixture({ "@example/core": "1.0.0" }), npmVersion).setup(corePath);
@@ -183,11 +264,21 @@ describe("standalone staged publishing", () => {
 		expect(missing.diagnostics.map((item) => item.code)).toContain("PUBLISH_DEPENDENCY_NOT_PUBLISHED");
 		expect(missing.ready).toBe(false);
 
-		const mismatched = await new PublishManager(new MultiRegistryFixture({ "@example/core": "2.0.0", "@example/ext": "1.0.0" }), npmVersion, trusted, loggedIn).status(extPath);
+		const mismatched = await new PublishManager(
+			new MultiRegistryFixture({ "@example/core": "2.0.0", "@example/ext": "1.0.0" }),
+			npmVersion,
+			trusted,
+			loggedIn,
+		).status(extPath);
 		expect(mismatched.checks.coreFirst).toBe(false);
 		expect(mismatched.diagnostics.map((item) => item.code)).toContain("PUBLISH_DEPENDENCY_RANGE_MISMATCH");
 
-		const satisfied = await new PublishManager(new MultiRegistryFixture({ "@example/core": "1.0.4", "@example/ext": "1.0.0" }), npmVersion, trusted, loggedIn).status(extPath);
+		const satisfied = await new PublishManager(
+			new MultiRegistryFixture({ "@example/core": "1.0.4", "@example/ext": "1.0.0" }),
+			npmVersion,
+			trusted,
+			loggedIn,
+		).status(extPath);
 		expect(satisfied.checks.coreFirst).toBe(true);
 		expect(satisfied.diagnostics.map((item) => item.code)).not.toContain("PUBLISH_DEPENDENCY_NOT_PUBLISHED");
 		expect(satisfied.diagnostics.map((item) => item.code)).not.toContain("PUBLISH_DEPENDENCY_RANGE_MISMATCH");
@@ -221,8 +312,10 @@ describe("standalone staged publishing", () => {
 
 	it("browserOpenCommand is pure argv construction -- never spawns a real browser, tests never risk a live side effect", () => {
 		expect(browserOpenCommand("https://example.com")).toEqual(
-			process.platform === "darwin" ? ["open", "https://example.com"]
-				: process.platform === "win32" ? ["cmd", "/c", "start", "", "https://example.com"]
+			process.platform === "darwin"
+				? ["open", "https://example.com"]
+				: process.platform === "win32"
+					? ["cmd", "/c", "start", "", "https://example.com"]
 					: ["xdg-open", "https://example.com"],
 		);
 	});

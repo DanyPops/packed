@@ -2,7 +2,11 @@ import { resolve } from "node:path";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { Natives } from "./packed.js";
 
-interface SetupCommandArgs { action: "plan" | "apply"; path: string; prune: boolean; }
+interface SetupCommandArgs {
+	action: "plan" | "apply";
+	path: string;
+	prune: boolean;
+}
 
 function parseSetupCommand(args: string, cwd: string): SetupCommandArgs | undefined {
 	const parts = args.trim().split(/\s+/).filter(Boolean);
@@ -12,7 +16,11 @@ function parseSetupCommand(args: string, cwd: string): SetupCommandArgs | undefi
 	return { action: parts[1], path: resolve(cwd, path), prune };
 }
 
-export async function handleSetupCommand(args: string, ctx: ExtensionCommandContext, natives: Pick<Natives, "setupPlan" | "setupApply">): Promise<boolean> {
+export async function handleSetupCommand(
+	args: string,
+	ctx: ExtensionCommandContext,
+	natives: Pick<Natives, "setupPlan" | "setupApply">,
+): Promise<boolean> {
 	const parsed = parseSetupCommand(args, ctx.cwd);
 	if (!parsed) return false;
 	if (!ctx.hasUI) return true;

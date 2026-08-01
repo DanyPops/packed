@@ -47,17 +47,27 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder, rawKeyHint } from "@earendil-works/pi-coding-agent";
 import { Container, Input, matchesKey, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { Dialog, Envelope, Menu, Spinner, Table, TabbedContainer, type Component, type MenuItem, type TextMeasure } from "malevich-tui-components";
-import { filterRows, mergeRows, nextMode, visibleRows } from "./model.js";
-import type { Row, ViewMode } from "./model.js";
-import type { Natives, PackageResources } from "./packed.js";
-import { approvePackageOperation } from "./tools.js";
-import { createSettingsTab, SettingsTab } from "./security-tui.js";
-import { createConfigTab, ConfigTab, applyResourceToggle } from "./resource-config.js";
-import { createFindTab, FindTab } from "./discover.js";
+import {
+	type Component,
+	Dialog,
+	Envelope,
+	Menu,
+	type MenuItem,
+	Spinner,
+	TabbedContainer,
+	Table,
+	type TextMeasure,
+} from "malevich-tui-components";
+import { createFindTab } from "./discover.js";
 import { dialogTheme, menuTheme, tabBarTheme } from "./menu-theme.js";
+import type { Row, ViewMode } from "./model.js";
+import { filterRows, mergeRows, nextMode, visibleRows } from "./model.js";
+import type { Natives, PackageResources } from "./packed.js";
 import { confirmReload } from "./reload.js";
+import { applyResourceToggle, ConfigTab } from "./resource-config.js";
+import { SettingsTab } from "./security-tui.js";
 import type { TabHost } from "./tab-host.js";
+import { approvePackageOperation } from "./tools.js";
 
 export type PackedTabKey = "packages" | "find" | "config" | "settings";
 
@@ -75,7 +85,10 @@ export type PackageChoiceOutcome = "changed" | "unchanged" | "cancelled" | "defe
  * it inline (a row's own status cell) isn't limited to the scrollback
  * toast every outcome already gets via ctx.ui.notify. "changed" never
  * calls this: ctx.reload() already replaces the session by then. */
-export interface PackageChoiceSettled { ok: boolean; message: string; }
+export interface PackageChoiceSettled {
+	ok: boolean;
+	message: string;
+}
 
 export async function applyPackageChoice(
 	choice: string | undefined,
@@ -102,7 +115,8 @@ export async function applyPackageChoice(
 				onSettled?.({ ok: true, message: reason });
 				return "unchanged";
 			}
-			const transition = outcome.previousVersion && outcome.currentVersion ? ` (${outcome.previousVersion} → ${outcome.currentVersion})` : "";
+			const transition =
+				outcome.previousVersion && outcome.currentVersion ? ` (${outcome.previousVersion} → ${outcome.currentVersion})` : "";
 			if (!(await confirmReload(ctx))) {
 				ctx.ui.notify(`Updated ${row.name}${transition}; reload pending -- run /reload when ready.`, "warning");
 				onSettled?.({ ok: true, message: `updated${transition}; reload pending` });
@@ -144,15 +158,27 @@ export async function applyPackageChoice(
 	return "cancelled";
 }
 
-interface UpdateAllResult { changed: number; failedNames: string[]; }
+interface UpdateAllResult {
+	changed: number;
+	failedNames: string[];
+}
 
 /** Present only on phase "done" -- the real captured stdout+stderr from
  * ExecInstaller (ok: true) or the thrown error's message (ok: false). This
  * is the actual execution output, not a synthetic status string, so a host
  * can show a genuine success/failure sign instead of guessing from
  * reloadRequired alone. */
-interface UpdateProgressResult { ok: boolean; output: string; }
-interface UpdateProgressEvent { row: Row; index: number; total: number; phase: "start" | "done"; result?: UpdateProgressResult; }
+interface UpdateProgressResult {
+	ok: boolean;
+	output: string;
+}
+interface UpdateProgressEvent {
+	row: Row;
+	index: number;
+	total: number;
+	phase: "start" | "done";
+	result?: UpdateProgressResult;
+}
 
 /** The core sequential-update loop, with no UI of its own -- reports each
  * step via onProgress so any host surface (a floating overlay, or the
@@ -220,7 +246,10 @@ async function approveAndRunUpdateAll(
 	const { changed, failedNames } = await runBatch(outdated, approval.approved);
 	for (const failure of failedNames) ctx.ui.notify(`update failed: ${failure}`, "error");
 	if (changed === 0) {
-		ctx.ui.notify(failedNames.length > 0 ? `No packages updated; ${failedNames.length} failed.` : "All packages already up to date.", failedNames.length > 0 ? "warning" : "info");
+		ctx.ui.notify(
+			failedNames.length > 0 ? `No packages updated; ${failedNames.length} failed.` : "All packages already up to date.",
+			failedNames.length > 0 ? "warning" : "info",
+		);
 		return failedNames.length > 0 ? "cancelled" : "unchanged";
 	}
 	const failedSuffix = failedNames.length > 0 ? `, ${failedNames.length} failed` : "";
@@ -261,7 +290,10 @@ async function runUpdatesWithProgress(
 			container.addChild(border());
 			container.addChild({ invalidate() {}, render: (_width: number) => [theme.bold("Updating packages")] });
 			container.addChild(new Spacer(1));
-			container.addChild({ invalidate() {}, render: (width: number) => [truncateToWidth(`${theme.fg("accent", spinner.glyph())} ${currentLabel}`, width, "")] });
+			container.addChild({
+				invalidate() {},
+				render: (width: number) => [truncateToWidth(`${theme.fg("accent", spinner.glyph())} ${currentLabel}`, width, "")],
+			});
 			container.addChild(new Spacer(1));
 			container.addChild({
 				invalidate() {},
@@ -280,7 +312,14 @@ async function runUpdatesWithProgress(
 					settledLines.push(`${glyph} ${event.row.name}${tail ? theme.fg("dim", ` -- ${tail}`) : ""}`);
 				}
 				tui.requestRender();
-			}).finally(() => spinner.stop()).then(done);
+			})
+				.finally(() => spinner.stop())
+				.then(done)
+				// performUpdateAll itself never rejects (every per-row failure is caught and
+				// reported via onProgress); this only guards against a genuinely unexpected
+				// throw (e.g. a bug in the onProgress callback above) leaving the overlay
+				// open forever with done() never called.
+				.catch((error: unknown) => done({ changed: 0, failedNames: [error instanceof Error ? error.message : String(error)] }));
 
 			return { render: (width: number) => container.render(width), invalidate: () => container.invalidate(), handleInput() {} };
 		},
@@ -342,10 +381,7 @@ export async function applyDisableExtensions(row: Row, natives: Natives, ctx: Ex
 
 async function loadRows(natives: Natives): Promise<{ rows: Row[]; error?: string }> {
 	try {
-		const [installed, updates] = await Promise.all([
-			natives.installed(),
-			natives.updates().catch(() => []),
-		]);
+		const [installed, updates] = await Promise.all([natives.installed(), natives.updates().catch(() => [])]);
 		return { rows: mergeRows(installed, updates) };
 	} catch (e) {
 		return { rows: [], error: e instanceof Error ? e.message : String(e) };
@@ -371,7 +407,10 @@ async function showActionMenu(ctx: ExtensionCommandContext, row: Row): Promise<"
 	);
 }
 
-interface PackagesTabTheme { fg(color: string, s: string): string; bold(s: string): string; }
+interface PackagesTabTheme {
+	fg(color: string, s: string): string;
+	bold(s: string): string;
+}
 
 /** Packages -- the panel's default/"home" tab. A real Component (not the
  * panel's own top-level ctx.ui.custom owner anymore); the shared TabHost
@@ -399,7 +438,7 @@ export class PackagesTab implements Component {
 	constructor(
 		private readonly natives: Natives,
 		private readonly host: TabHost,
-		private readonly theme: PackagesTabTheme,
+		readonly theme: PackagesTabTheme,
 		measure: TextMeasure,
 		initialRows: Row[],
 		/** c on a row, or the Enter action menu's "Configure resources" --
@@ -472,7 +511,10 @@ export class PackagesTab implements Component {
 		const line1 = truncateToWidth(hint, width, "");
 		const dot = "·";
 		const line2 = truncateToWidth(
-			theme.fg("muted", `${this.statusLine()} ${dot} view: ${this.mode} ${dot} / filter ${dot} v view ${dot} ${this.rows.length} installed`),
+			theme.fg(
+				"muted",
+				`${this.statusLine()} ${dot} view: ${this.mode} ${dot} / filter ${dot} v view ${dot} ${this.rows.length} installed`,
+			),
 			width,
 			"",
 		);
@@ -503,7 +545,9 @@ export class PackagesTab implements Component {
 					? theme.fg("accent", `${this.spinner.glyph()} updating…`)
 					: rowSettled
 						? theme.fg(rowSettled.ok ? "success" : "error", `${rowSettled.ok ? "✓" : "✗"}${rowSettled.tail ? ` ${rowSettled.tail}` : ""}`)
-						: row.hasUpdate ? theme.fg("warning", `↑${row.latest}`) : "";
+						: row.hasUpdate
+							? theme.fg("warning", `↑${row.latest}`)
+							: "";
 				return { name: `${cursor}${name}`, version: theme.fg("dim", row.version), status };
 			}),
 		);
@@ -612,9 +656,16 @@ export class PackagesTab implements Component {
 		// settled map U's batch path already renders -- not just a scrollback
 		// toast.
 		const onSettled = (result: PackageChoiceSettled) => this.settled.set(action.row.name, { ok: result.ok, tail: result.message });
-		const outcome = action.type === "disable"
-			? await applyDisableExtensions(action.row, this.natives, this.host.inlineCtx)
-			: await applyPackageChoice(action.type === "update" ? `Update to ${action.row.latest}` : "Remove", action.row, this.natives, this.host.inlineCtx, onSettled);
+		const outcome =
+			action.type === "disable"
+				? await applyDisableExtensions(action.row, this.natives, this.host.inlineCtx)
+				: await applyPackageChoice(
+						action.type === "update" ? `Update to ${action.row.latest}` : "Remove",
+						action.row,
+						this.natives,
+						this.host.inlineCtx,
+						onSettled,
+					);
 		this.updatingRowName = undefined;
 		if (outcome === "changed") {
 			this.host.onSessionReplaced(); // ctx.reload() already replaced the session
@@ -706,172 +757,178 @@ function renderUnifiedPanel(
 	initialTab: PackedTabKey,
 	initialConfigFilter: string | undefined,
 ): Promise<void> {
-	return ctx.ui.custom<void>((tui, theme, _kb, done) => {
-		// A y/n decision rendered as this SAME overlay's own content (via a real
-		// Malevich Dialog, dispatched by literal key press) instead of
-		// ctx.ui.confirm's separate native dialog -- shared by every tab via
-		// host.inlineCtx below, exactly like the panel's own approval/reload
-		// dialogs always have been.
-		let pendingDialog: Dialog | undefined;
+	return ctx.ui.custom<void>(
+		(tui, theme, _kb, done) => {
+			// A y/n decision rendered as this SAME overlay's own content (via a real
+			// Malevich Dialog, dispatched by literal key press) instead of
+			// ctx.ui.confirm's separate native dialog -- shared by every tab via
+			// host.inlineCtx below, exactly like the panel's own approval/reload
+			// dialogs always have been.
+			let pendingDialog: Dialog | undefined;
 
-		function confirmInline(title: string, message: string): Promise<boolean> {
-			return new Promise((resolve) => {
-				const settle = (value: boolean) => {
-					pendingDialog = undefined;
+			function confirmInline(title: string, message: string): Promise<boolean> {
+				return new Promise((resolve) => {
+					const settle = (value: boolean) => {
+						pendingDialog = undefined;
+						tui.requestRender();
+						resolve(value);
+					};
+					pendingDialog = new Dialog({
+						title,
+						body: message,
+						actions: [
+							{ label: "Yes", key: "y", action: () => settle(true) },
+							{ label: "No", key: "n", action: () => settle(false) },
+						],
+						theme: dialogTheme(theme),
+						framed: false, // this overlay's own Envelope already draws a border; a second rule would double up on it
+					});
 					tui.requestRender();
-					resolve(value);
-				};
-				pendingDialog = new Dialog({
-					title,
-					body: message,
-					actions: [
-						{ label: "Yes", key: "y", action: () => settle(true) },
-						{ label: "No", key: "n", action: () => settle(false) },
-					],
-					theme: dialogTheme(theme),
-					framed: false, // this overlay's own Envelope already draws a border; a second rule would double up on it
 				});
-				tui.requestRender();
+			}
+
+			const inlineCtx: ExtensionCommandContext = { ...ctx, hasUI: true, ui: { ...ctx.ui, confirm: confirmInline } };
+			const host: TabHost = {
+				ctx,
+				inlineCtx,
+				requestRender: () => tui.requestRender(),
+				onSessionReplaced: () => done(undefined),
+			};
+
+			const measure: TextMeasure = { visibleWidth, truncateToWidth };
+
+			const packagesTab = new PackagesTab(natives, host, theme, measure, initialRows, (target, configFilter) => {
+				if (target === "config" && configFilter !== undefined) configTab.setFilter(configFilter);
+				tabbedContainer.setActive(target);
 			});
-		}
 
-		const inlineCtx: ExtensionCommandContext = { ...ctx, hasUI: true, ui: { ...ctx.ui, confirm: confirmInline } };
-		const host: TabHost = {
-			ctx,
-			inlineCtx,
-			requestRender: () => tui.requestRender(),
-			onSessionReplaced: () => done(undefined),
-		};
+			const findTab = createFindTab(natives, host, theme);
 
-		const measure: TextMeasure = { visibleWidth, truncateToWidth };
+			// Config/Settings both need theme (only available once this factory
+			// runs) so they're constructed here rather than before the overlay
+			// opens; both load their own data asynchronously in the background and
+			// render their own "Loading…" state until it resolves -- no
+			// placeholder-swap machinery needed.
+			const configTab = new ConfigTab(natives, host, theme, initialTab === "config" ? initialConfigFilter : undefined);
+			void configTab.load().then(() => tui.requestRender());
 
-		const packagesTab = new PackagesTab(natives, host, theme, measure, initialRows, (target, configFilter) => {
-			if (target === "config" && configFilter !== undefined) configTab.setFilter(configFilter);
-			tabbedContainer.setActive(target);
-		});
+			const settingsTab = new SettingsTab(natives, host, theme);
+			void settingsTab.load().then(() => tui.requestRender());
 
-		const findTab = createFindTab(natives, host, theme);
+			const tabByKey: Record<PackedTabKey, Component & TabScope> = {
+				packages: packagesTab,
+				find: findTab,
+				config: configTab,
+				settings: settingsTab,
+			};
 
-		// Config/Settings both need theme (only available once this factory
-		// runs) so they're constructed here rather than before the overlay
-		// opens; both load their own data asynchronously in the background and
-		// render their own "Loading…" state until it resolves -- no
-		// placeholder-swap machinery needed.
-		const configTab = new ConfigTab(natives, host, theme, initialTab === "config" ? initialConfigFilter : undefined);
-		void configTab.load().then(() => tui.requestRender());
+			const tabbedContainer = new TabbedContainer({
+				tabs: [
+					{ key: "packages", label: "Packages", content: tabByKey.packages },
+					{ key: "find", label: "Find", content: tabByKey.find },
+					{ key: "config", label: "Config", content: tabByKey.config },
+					{ key: "settings", label: "Settings", content: tabByKey.settings },
+				],
+				theme: tabBarTheme(theme),
+				initialKey: initialTab,
+				// Malevich's own default matcher only recognizes legacy CSI sequences;
+				// pi-tui's real matchesKey also covers the Kitty keyboard protocol and
+				// xterm's modifyOtherKeys encodings for the same keys. Malevich's
+				// KeyMatcher type takes a bare string (it doesn't share pi-tui's KeyId
+				// union), so this only ever forwards the small fixed set of key names
+				// TabbedContainer itself actually calls with (left/right/tab/shift+tab).
+				matchesKey: (data, keyId) => matchesKey(data, keyId as Parameters<typeof matchesKey>[1]),
+			});
 
-		const settingsTab = new SettingsTab(natives, host, theme);
-		void settingsTab.load().then(() => tui.requestRender());
+			// measure must be explicit: Envelope's own default is ASCII-only (raw
+			// .length, blind to ANSI escape codes) and every tab's own content is
+			// styled through theme.fg/theme.bold -- without this, Envelope pads
+			// each line against its own escape-code-inflated "length" instead of
+			// its real visible width, so the right border lands at a different
+			// column on every line depending on how much styling it carries.
+			const envelope = new Envelope({
+				title: "packed",
+				borderStyle: "rounded",
+				style: (s) => theme.fg("border", s),
+				titleStyle: (s) => theme.bold(theme.fg("accent", s)),
+				measure,
+			});
 
-		const tabByKey: Record<PackedTabKey, Component & TabScope> = {
-			packages: packagesTab,
-			find: findTab,
-			config: configTab,
-			settings: settingsTab,
-		};
-
-		const tabbedContainer = new TabbedContainer({
-			tabs: [
-				{ key: "packages", label: "Packages", content: tabByKey.packages },
-				{ key: "find", label: "Find", content: tabByKey.find },
-				{ key: "config", label: "Config", content: tabByKey.config },
-				{ key: "settings", label: "Settings", content: tabByKey.settings },
-			],
-			theme: tabBarTheme(theme),
-			initialKey: initialTab,
-			// Malevich's own default matcher only recognizes legacy CSI sequences;
-			// pi-tui's real matchesKey also covers the Kitty keyboard protocol and
-			// xterm's modifyOtherKeys encodings for the same keys. Malevich's
-			// KeyMatcher type takes a bare string (it doesn't share pi-tui's KeyId
-			// union), so this only ever forwards the small fixed set of key names
-			// TabbedContainer itself actually calls with (left/right/tab/shift+tab).
-			matchesKey: (data, keyId) => matchesKey(data, keyId as Parameters<typeof matchesKey>[1]),
-		});
-
-		// measure must be explicit: Envelope's own default is ASCII-only (raw
-		// .length, blind to ANSI escape codes) and every tab's own content is
-		// styled through theme.fg/theme.bold -- without this, Envelope pads
-		// each line against its own escape-code-inflated "length" instead of
-		// its real visible width, so the right border lands at a different
-		// column on every line depending on how much styling it carries.
-		const envelope = new Envelope({
-			title: "packed",
-			borderStyle: "rounded",
-			style: (s) => theme.fg("border", s),
-			titleStyle: (s) => theme.bold(theme.fg("accent", s)),
-			measure,
-		});
-
-		return {
-			render(width: number): string[] {
-				envelope.setContent(pendingDialog ?? tabbedContainer);
-				return envelope.render(width);
-			},
-			invalidate: () => envelope.invalidate(),
-			handleInput(data: string) {
-				if (pendingDialog) {
-					pendingDialog.handleInput(data);
-					tui.requestRender();
-					return;
-				}
-				const activeKey = tabbedContainer.getActiveKey() as PackedTabKey;
-				const activeTab = tabByKey[activeKey];
-				// Each host-level key is checked against that tab's own capture flag
-				// independently -- conflating them would, e.g., let Find's always-on
-				// capturesHorizontalArrows() also swallow Escape into the query box
-				// instead of navigating back.
-				if (data === "\x1b" && !(activeTab.capturesEscape?.() ?? false)) {
-					if (activeKey !== "packages") tabbedContainer.setActive("packages");
-					else { done(undefined); return; }
-					tui.requestRender();
-					return;
-				}
-				// Tab/Shift-Tab always sweep between menus -- nothing needs a literal
-				// Tab character for itself (Packages'/Config's own former Tab bindings
-				// moved to v once Tab was claimed globally; see the mnemonics.test.ts
-				// conflict check for why that reassignment was necessary). Real
-				// matchesKey(), not a hardcoded "\x1b[Z" literal, because Shift-Tab has
-				// no single universal encoding: legacy terminals send CSI Z, but the
-				// Kitty keyboard protocol and xterm's modifyOtherKeys mode both send a
-				// different sequence for the same keypress -- a literal check silently
-				// misses whichever ones it doesn't happen to be pinned to.
-				if (matchesKey(data, "tab") || matchesKey(data, "shift+tab")) {
-					tabbedContainer.handleInput(data);
-					tui.requestRender();
-					return;
-				}
-				if ((matchesKey(data, "right") || matchesKey(data, "left")) && !(activeTab.capturesHorizontalArrows?.() ?? false)) {
-					tabbedContainer.handleInput(data); // owns Left/Right cycling itself
-					tui.requestRender();
-					return;
-				}
-				// The first letter of each tab's label is a jump mnemonic
-				// (Packages/Find/Config/Settings -> p/f/c/s), highlighted in the tab
-				// bar itself -- but only reachable FROM one of the other three tabs.
-				// Packages' own f/c/s bindings already do the same jump (c
-				// additionally scopes Config to the selected row); letting the
-				// generic version fire there too would just be redundant, not wrong,
-				// but skipping it keeps this one dispatcher the single source of
-				// truth for "which code path actually owns key X" per active tab.
-				if (activeKey !== "packages" && data.length === 1) {
-					const target = tabbedContainer.resolveMnemonic(data);
-					if (target && target !== activeKey && !(activeTab.capturesMnemonics?.() ?? false)) {
-						tabbedContainer.setActive(target as PackedTabKey);
+			return {
+				render(width: number): string[] {
+					envelope.setContent(pendingDialog ?? tabbedContainer);
+					return envelope.render(width);
+				},
+				invalidate: () => envelope.invalidate(),
+				handleInput(data: string) {
+					if (pendingDialog) {
+						pendingDialog.handleInput(data);
 						tui.requestRender();
 						return;
 					}
-				}
-				activeTab.handleInput?.(data);
-				tui.requestRender();
-			},
-		};
-		// Pinned to the very top (anchor:"top-center"+offsetY:1 -- a fixed row
-		// count regardless of terminal size), not row:"40%". The percentage
-		// positioning was tried instead but reverted: pi-tui's row-percentage
-		// formula interpolates over the range of positions that still fit the
-		// CURRENT content height, so the panel visibly jittered up and down
-		// every time a tab with a different content height (Packages' table vs.
-		// Config's shorter list) became active. A fixed top offset keeps the
-		// header pinned in place and only the footer moves as content grows.
-	}, { overlay: true, overlayOptions: { width: "70%", maxHeight: "70%", anchor: "top-center", offsetY: 1 } });
+					const activeKey = tabbedContainer.getActiveKey() as PackedTabKey;
+					const activeTab = tabByKey[activeKey];
+					// Each host-level key is checked against that tab's own capture flag
+					// independently -- conflating them would, e.g., let Find's always-on
+					// capturesHorizontalArrows() also swallow Escape into the query box
+					// instead of navigating back.
+					if (data === "\x1b" && !(activeTab.capturesEscape?.() ?? false)) {
+						if (activeKey !== "packages") tabbedContainer.setActive("packages");
+						else {
+							done(undefined);
+							return;
+						}
+						tui.requestRender();
+						return;
+					}
+					// Tab/Shift-Tab always sweep between menus -- nothing needs a literal
+					// Tab character for itself (Packages'/Config's own former Tab bindings
+					// moved to v once Tab was claimed globally; see the mnemonics.test.ts
+					// conflict check for why that reassignment was necessary). Real
+					// matchesKey(), not a hardcoded "\x1b[Z" literal, because Shift-Tab has
+					// no single universal encoding: legacy terminals send CSI Z, but the
+					// Kitty keyboard protocol and xterm's modifyOtherKeys mode both send a
+					// different sequence for the same keypress -- a literal check silently
+					// misses whichever ones it doesn't happen to be pinned to.
+					if (matchesKey(data, "tab") || matchesKey(data, "shift+tab")) {
+						tabbedContainer.handleInput(data);
+						tui.requestRender();
+						return;
+					}
+					if ((matchesKey(data, "right") || matchesKey(data, "left")) && !(activeTab.capturesHorizontalArrows?.() ?? false)) {
+						tabbedContainer.handleInput(data); // owns Left/Right cycling itself
+						tui.requestRender();
+						return;
+					}
+					// The first letter of each tab's label is a jump mnemonic
+					// (Packages/Find/Config/Settings -> p/f/c/s), highlighted in the tab
+					// bar itself -- but only reachable FROM one of the other three tabs.
+					// Packages' own f/c/s bindings already do the same jump (c
+					// additionally scopes Config to the selected row); letting the
+					// generic version fire there too would just be redundant, not wrong,
+					// but skipping it keeps this one dispatcher the single source of
+					// truth for "which code path actually owns key X" per active tab.
+					if (activeKey !== "packages" && data.length === 1) {
+						const target = tabbedContainer.resolveMnemonic(data);
+						if (target && target !== activeKey && !(activeTab.capturesMnemonics?.() ?? false)) {
+							tabbedContainer.setActive(target as PackedTabKey);
+							tui.requestRender();
+							return;
+						}
+					}
+					activeTab.handleInput?.(data);
+					tui.requestRender();
+				},
+			};
+			// Pinned to the very top (anchor:"top-center"+offsetY:1 -- a fixed row
+			// count regardless of terminal size), not row:"40%". The percentage
+			// positioning was tried instead but reverted: pi-tui's row-percentage
+			// formula interpolates over the range of positions that still fit the
+			// CURRENT content height, so the panel visibly jittered up and down
+			// every time a tab with a different content height (Packages' table vs.
+			// Config's shorter list) became active. A fixed top offset keeps the
+			// header pinned in place and only the footer moves as content grows.
+		},
+		{ overlay: true, overlayOptions: { width: "70%", maxHeight: "70%", anchor: "top-center", offsetY: 1 } },
+	);
 }

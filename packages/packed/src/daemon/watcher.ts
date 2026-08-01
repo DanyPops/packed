@@ -3,13 +3,14 @@
  * Diffs installed packages against registry dist-tags.latest and persists
  * an event snapshot (event-carried state) for cheap consumer reads.
  */
-import { writeFile, readFile, mkdir } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { gt, valid } from "semver";
 import { UPDATES_FILE } from "../shared/constants.ts";
 import { createLogger } from "../shared/log.ts";
 
 const log = createLogger("watcher");
+
 import type { InstalledPkg, UpdateEntry, UpdatesSnapshot } from "../shared/ports.ts";
 
 function updatesPath(dir: string): string {

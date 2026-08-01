@@ -1,4 +1,4 @@
-import { connectPackedClient, resolvePackedClientPaths, type PackedExtensionClient } from "@danypops/packed/client";
+import { connectPackedClient, type PackedExtensionClient, resolvePackedClientPaths } from "@danypops/packed/client";
 import type { ExtensionOperationName, SetupPlan } from "@danypops/packed/protocol";
 
 const paths = resolvePackedClientPaths({ env: {} });

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { applyInstall } from "../extension/src/discover.ts";
-import { InstallServiceError } from "../extension/src/packed.ts";
 import type { Natives, PackageSummary } from "../extension/src/packed.ts";
+import { InstallServiceError } from "../extension/src/packed.ts";
 
 const result: PackageSummary = { name: "pi-lsp", version: "1.0.0", description: "LSP support" };
 
@@ -10,10 +10,17 @@ function fakeCtx(confirm: boolean, notices: string[], reloads: { count: number }
 	return {
 		hasUI: true,
 		ui: {
-			async confirm(_title: string, message: string) { notices.push(`confirm:${message}`); return confirm; },
-			notify(message: string) { notices.push(message); },
+			async confirm(_title: string, message: string) {
+				notices.push(`confirm:${message}`);
+				return confirm;
+			},
+			notify(message: string) {
+				notices.push(message);
+			},
 		},
-		async reload() { reloads.count += 1; },
+		async reload() {
+			reloads.count += 1;
+		},
 	} as unknown as ExtensionCommandContext;
 }
 
@@ -22,9 +29,15 @@ describe("applyInstall (/packed find's install action)", () => {
 		const notices: string[] = [];
 		const reloads = { count: 0 };
 		const natives = {
-			async security() { return { mutationApproval: "always" as const }; },
-			async install() { return "Installed npm:pi-lsp"; },
-			async installService() { throw new InstallServiceError("not a daemon", true); },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async install() {
+				return "Installed npm:pi-lsp";
+			},
+			async installService() {
+				throw new InstallServiceError("not a daemon", true);
+			},
 		} as unknown as Natives;
 
 		const outcome = await applyInstall(result, natives, fakeCtx(true, notices, reloads));
@@ -38,8 +51,13 @@ describe("applyInstall (/packed find's install action)", () => {
 		const reloads = { count: 0 };
 		let installCalled = false;
 		const natives = {
-			async security() { return { mutationApproval: "always" as const }; },
-			async install() { installCalled = true; return ""; },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async install() {
+				installCalled = true;
+				return "";
+			},
 		} as unknown as Natives;
 
 		const outcome = await applyInstall(result, natives, fakeCtx(false, [], reloads));
@@ -53,8 +71,12 @@ describe("applyInstall (/packed find's install action)", () => {
 		const reloads = { count: 0 };
 		const notices: string[] = [];
 		const natives = {
-			async security() { return { mutationApproval: "always" as const }; },
-			async install() { throw new Error("registry unreachable"); },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async install() {
+				throw new Error("registry unreachable");
+			},
 		} as unknown as Natives;
 
 		const outcome = await applyInstall(result, natives, fakeCtx(true, notices, reloads));
@@ -68,9 +90,15 @@ describe("applyInstall (/packed find's install action)", () => {
 		const reloads = { count: 0 };
 		const notices: string[] = [];
 		const natives = {
-			async security() { return { mutationApproval: "always" as const }; },
-			async install() { return "Installed npm:pi-lsp"; },
-			async installService() { throw new Error("systemctl unavailable"); },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async install() {
+				return "Installed npm:pi-lsp";
+			},
+			async installService() {
+				throw new Error("systemctl unavailable");
+			},
 		} as unknown as Natives;
 
 		const outcome = await applyInstall(result, natives, fakeCtx(true, notices, reloads));
@@ -84,9 +112,15 @@ describe("applyInstall (/packed find's install action)", () => {
 		const reloads = { count: 0 };
 		const notices: string[] = [];
 		const natives = {
-			async security() { return { mutationApproval: "always" as const }; },
-			async install() { return "Installed npm:pi-lsp"; },
-			async installService() { throw new InstallServiceError("not a daemon", true); },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async install() {
+				return "Installed npm:pi-lsp";
+			},
+			async installService() {
+				throw new InstallServiceError("not a daemon", true);
+			},
 		} as unknown as Natives;
 
 		const outcome = await applyInstall(result, natives, fakeCtx(true, notices, reloads));

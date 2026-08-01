@@ -10,7 +10,7 @@
  * always-"Updated"-regardless-of-outcome text, and assert the real on-disk
  * version diff is what actually drives reloadRequired/alreadyUpToDate.
  */
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,6 +31,7 @@ function writeFakePi(dir: string, rewrite?: { piHome: string; name: string; newV
 		: "true";
 	writeFileSync(
 		script,
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: literal bash positional-parameter syntax in a generated fixture script, not JS interpolation
 		["#!/usr/bin/env bash", "set -euo pipefail", 'source="${3:-}"', rewriteLine, 'echo "Updated $source"', "exit 0"].join("\n"),
 	);
 	chmodSync(script, 0o755);

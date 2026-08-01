@@ -1,11 +1,11 @@
-import { describe, it, expect } from "bun:test";
-import { mkdtempSync, existsSync } from "node:fs";
+import { describe, expect, it } from "bun:test";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openDb, replaceAll, searchLocal, catalogList, getSyncMeta, dbPath } from "../src/packages/db.ts";
-import { HttpRegistry } from "../src/registry/registry.ts";
 import { syncCatalog } from "../src/packages/catalog.ts";
-import type { Registry, SearchPage, PkgInfo, Pkg } from "../src/shared/ports.ts";
+import { catalogList, dbPath, getSyncMeta, openDb, replaceAll, searchLocal } from "../src/packages/db.ts";
+import { HttpRegistry } from "../src/registry/registry.ts";
+import type { Pkg, PkgInfo, Registry, SearchPage } from "../src/shared/ports.ts";
 
 const PKGS = [
 	{ name: "pi-lsp", version: "0.18.0", description: "LSP tools for pi" },
@@ -27,8 +27,22 @@ describe("db (local registry index)", () => {
 
 	it("roundtrips verified Pi shape and publication evidence", () => {
 		const db = openDb(":memory:");
-		replaceAll(db, [{ name: "pi-verified", version: "1", packageEvidence: { shape: "conventional", verified: true, evidence: ["extensions"] }, publication: { provenanceUrl: "https://registry.example/attestation", trustedPublisher: "verified" } }], "snapshot");
-		expect(catalogList(db)[0]).toMatchObject({ packageEvidence: { shape: "conventional", verified: true, evidence: ["extensions"] }, publication: { provenanceUrl: "https://registry.example/attestation", trustedPublisher: "verified" } });
+		replaceAll(
+			db,
+			[
+				{
+					name: "pi-verified",
+					version: "1",
+					packageEvidence: { shape: "conventional", verified: true, evidence: ["extensions"] },
+					publication: { provenanceUrl: "https://registry.example/attestation", trustedPublisher: "verified" },
+				},
+			],
+			"snapshot",
+		);
+		expect(catalogList(db)[0]).toMatchObject({
+			packageEvidence: { shape: "conventional", verified: true, evidence: ["extensions"] },
+			publication: { provenanceUrl: "https://registry.example/attestation", trustedPublisher: "verified" },
+		});
 		db.close();
 	});
 
@@ -45,10 +59,19 @@ describe("db (local registry index)", () => {
 
 	it("ranks verified Pi-shaped packages ahead of keyword-only candidates", () => {
 		const db = openDb(":memory:");
-		replaceAll(db, [
-			{ name: "candidate", version: "1", description: "shared package" },
-			{ name: "verified", version: "1", description: "shared package", packageEvidence: { shape: "manifest", verified: true, evidence: ["pi.extensions"] } },
-		], "snapshot");
+		replaceAll(
+			db,
+			[
+				{ name: "candidate", version: "1", description: "shared package" },
+				{
+					name: "verified",
+					version: "1",
+					description: "shared package",
+					packageEvidence: { shape: "manifest", verified: true, evidence: ["pi.extensions"] },
+				},
+			],
+			"snapshot",
+		);
 		expect(searchLocal(db, "shared").map((item) => item.name)).toEqual(["verified", "candidate"]);
 		db.close();
 	});
@@ -79,7 +102,10 @@ describe("db (local registry index)", () => {
 
 // The sync pipeline: paginated upstream → SQLite mirror (apt update analog).
 class PagedRegistry implements Registry {
-	constructor(private pages: Record<number, Pkg[]>, private total: number) {}
+	constructor(
+		private pages: Record<number, Pkg[]>,
+		private total: number,
+	) {}
 	async search(): Promise<SearchPage> {
 		return { results: [], total: 0 };
 	}
@@ -132,8 +158,20 @@ describe("unstable upstream pagination", () => {
 		const reg = new HttpRegistry("http://unused", 250, 0, 1);
 		reg.searchPage = async (_q: string, from: number) =>
 			from === 0
-				? { results: [{ name: "a", version: "1" }, { name: "b", version: "1" }], total: 3 }
-				: { results: [{ name: "b", version: "1" }, { name: "c", version: "1" }], total: 3 };
+				? {
+						results: [
+							{ name: "a", version: "1" },
+							{ name: "b", version: "1" },
+						],
+						total: 3,
+					}
+				: {
+						results: [
+							{ name: "b", version: "1" },
+							{ name: "c", version: "1" },
+						],
+						total: 3,
+					};
 		const all = await reg.searchAll("keywords:pi-package");
 		expect(all.map((p: Pkg) => p.name)).toEqual(["a", "b", "c"]);
 	});

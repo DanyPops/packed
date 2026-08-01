@@ -1,44 +1,21 @@
-import { describe, it, expect } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { describe, expect, it } from "bun:test";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isPinnedNpmSource, npmPackageName, readInstalledPackages, readInstalledPackagesAcrossScopes, readResolvedVersion, splitNpmSource } from "../src/packages/installed.ts";
-import { checkUpdates, saveUpdates, loadUpdates, startWatcher } from "../src/daemon/watcher.ts";
-import { catalogStatus } from "../src/packages/catalog.ts";
-import { openDb, replaceAll, dbPath } from "../src/packages/db.ts";
 import { AuthenticatedRpcClient } from "@danypops/vehicle-client/rpc-client";
 import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/daemon/service.ts";
-import type { Installer, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/shared/ports.ts";
-
-class FakeRegistry implements Registry {
-	infoCalls = 0;
-	constructor(
-		private versions: Record<string, string> = {},
-		private pages: Record<number, SearchPage> = {},
-	) {}
-	async search(): Promise<SearchPage> {
-		return { results: [], total: 0 };
-	}
-	async searchPage(_q: string, from: number, _size?: number): Promise<SearchPage> {
-		return this.pages[from] ?? { results: [], total: 0 };
-	}
-	async searchAll(q: string): Promise<import("../src/shared/ports.ts").Pkg[]> {
-		const out: import("../src/shared/ports.ts").Pkg[] = [];
-		let from = 0;
-		for (;;) {
-			const { results, total } = await this.searchPage(q, from, 0);
-			out.push(...results);
-			from += results.length;
-			if (results.length === 0 || from >= total) return out;
-		}
-	}
-	async info(name: string): Promise<PkgInfo> {
-		this.infoCalls++;
-		const v = this.versions[name];
-		if (!v) throw new Error(`404 ${name}`);
-		return { name, version: v };
-	}
-}
+import { checkUpdates, loadUpdates, saveUpdates, startWatcher } from "../src/daemon/watcher.ts";
+import { catalogStatus } from "../src/packages/catalog.ts";
+import { dbPath, openDb, replaceAll } from "../src/packages/db.ts";
+import {
+	isPinnedNpmSource,
+	npmPackageName,
+	readInstalledPackages,
+	readInstalledPackagesAcrossScopes,
+	readResolvedVersion,
+	splitNpmSource,
+} from "../src/packages/installed.ts";
+import type { Installer, PkgInfo, Registry, SearchPage, UpdateOutcome, UpdatesSnapshot } from "../src/shared/ports.ts";
 
 function writePiHome(settings: unknown, nodeModules: Record<string, string> = {}): string {
 	const dir = mkdtempSync(join(tmpdir(), "packed-pihome-"));
@@ -129,7 +106,9 @@ describe("readInstalledPackages", () => {
 describe("readInstalledPackagesAcrossScopes", () => {
 	it("tags every entry with its scope and is global-only without a projectRoot", () => {
 		const home = writePiHome({ packages: ["npm:pi-global@1.0.0"] });
-		expect(readInstalledPackagesAcrossScopes(home)).toEqual([{ name: "pi-global", pinned: "1.0.0", installed: undefined, scope: "global" }]);
+		expect(readInstalledPackagesAcrossScopes(home)).toEqual([
+			{ name: "pi-global", pinned: "1.0.0", installed: undefined, scope: "global" },
+		]);
 	});
 
 	it("reproduces the real jittor gap: a stale project-scoped pin is invisible to a global-only read, visible once project scope is included", () => {
@@ -150,7 +129,9 @@ describe("readInstalledPackagesAcrossScopes", () => {
 	it("is unaffected by a missing project settings file", () => {
 		const home = writePiHome({ packages: ["npm:pi-global@1.0.0"] });
 		const projectRoot = mkdtempSync(join(tmpdir(), "packed-project-"));
-		expect(readInstalledPackagesAcrossScopes(home, projectRoot)).toEqual([{ name: "pi-global", pinned: "1.0.0", installed: undefined, scope: "global" }]);
+		expect(readInstalledPackagesAcrossScopes(home, projectRoot)).toEqual([
+			{ name: "pi-global", pinned: "1.0.0", installed: undefined, scope: "global" },
+		]);
 	});
 });
 
@@ -173,7 +154,9 @@ describe("checkUpdates (mirror-based)", () => {
 	it("carries scope through so a project-scoped drift entry is distinguishable from a global one", () => {
 		const latest = (name: string) => ({ papyrus: "0.38.1" })[name];
 		const updates = checkUpdates(latest, [{ name: "papyrus", pinned: "0.21.2", scope: "project" }]);
-		expect(updates).toEqual([{ name: "papyrus", installed: "0.21.2", latest: "0.38.1", detectedAt: updates[0]!.detectedAt, scope: "project" }]);
+		expect(updates).toEqual([
+			{ name: "papyrus", installed: "0.21.2", latest: "0.38.1", detectedAt: updates[0]!.detectedAt, scope: "project" },
+		]);
 	});
 
 	// Real, screenshot-confirmed bug: the mirror's own "latest" can lag
@@ -203,16 +186,30 @@ describe("checkUpdates (mirror-based)", () => {
 });
 
 class NoopRegistry implements Registry {
-	async search(): Promise<SearchPage> { return { results: [], total: 0 }; }
-	async searchPage(): Promise<SearchPage> { return { results: [], total: 0 }; }
-	async searchAll() { return []; }
-	async info(name: string): Promise<PkgInfo> { return { name, version: "1.0.0" }; }
+	async search(): Promise<SearchPage> {
+		return { results: [], total: 0 };
+	}
+	async searchPage(): Promise<SearchPage> {
+		return { results: [], total: 0 };
+	}
+	async searchAll() {
+		return [];
+	}
+	async info(name: string): Promise<PkgInfo> {
+		return { name, version: "1.0.0" };
+	}
 }
 
 class NoopInstaller implements Installer {
-	async install() { return "ok"; }
-	async remove() { return "ok"; }
-	async update(): Promise<UpdateOutcome> { return { output: "ok", reloadRequired: false, alreadyUpToDate: true, pinned: false }; }
+	async install() {
+		return "ok";
+	}
+	async remove() {
+		return "ok";
+	}
+	async update(): Promise<UpdateOutcome> {
+		return { output: "ok", reloadRequired: false, alreadyUpToDate: true, pinned: false };
+	}
 }
 
 describe("package.updates.project (daemon RPC wiring)", () => {
@@ -225,16 +222,28 @@ describe("package.updates.project (daemon RPC wiring)", () => {
 		writeFileSync(join(projectHome, "settings.json"), JSON.stringify({ packages: ["npm:papyrus@0.21.2"] }));
 		const stateDir = mkdtempSync(join(tmpdir(), "packed-updates-project-state-"));
 		const db = openDb(dbPath(stateDir));
-		replaceAll(db, [{ name: "pi-global", version: "1.0.0" }, { name: "papyrus", version: "0.38.1" }], "test");
+		replaceAll(
+			db,
+			[
+				{ name: "pi-global", version: "1.0.0" },
+				{ name: "papyrus", version: "0.38.1" },
+			],
+			"test",
+		);
 		db.close();
 		const app = createApp({ reg: new NoopRegistry(), inst: new NoopInstaller(), token: "test-token", stateDir, piHome: home });
-		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", { label: "Packed", transport: (request) => app.fetch(request) });
+		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", {
+			label: "Packed",
+			transport: (request) => app.fetch(request),
+		});
 
 		const globalSnapshot = await client.call("package.updates", {});
 		expect(globalSnapshot.updates).toEqual([]);
 
 		const result = await client.call("package.updates.project", { projectRoot });
-		expect(result.updates).toEqual([{ name: "papyrus", installed: "0.21.2", latest: "0.38.1", detectedAt: result.updates[0]!.detectedAt, scope: "project" }]);
+		expect(result.updates).toEqual([
+			{ name: "papyrus", installed: "0.21.2", latest: "0.38.1", detectedAt: result.updates[0]!.detectedAt, scope: "project" },
+		]);
 	});
 });
 
@@ -258,7 +267,7 @@ describe("watcher producer", () => {
 			{ intervalMs: 60_000 },
 		);
 		const deadline = Date.now() + 2000;
-		let snap;
+		let snap: UpdatesSnapshot | undefined;
 		while (Date.now() < deadline) {
 			snap = await loadUpdates(dir);
 			if (snap?.updates.length) break;
@@ -273,7 +282,7 @@ describe("catalog status", () => {
 	it("stale when unsynced, fresh after sync", () => {
 		const dir = mkdtempSync(join(tmpdir(), "packed-"));
 		expect(catalogStatus(dir, 6 * 3_600_000).stale).toBe(true);
-		const db = openDb(dir + "/packed.db");
+		const db = openDb(`${dir}/packed.db`);
 		replaceAll(db, [{ name: "a", version: "1" }], "test");
 		db.close();
 		expect(catalogStatus(dir, 6 * 3_600_000).stale).toBe(false);

@@ -21,7 +21,9 @@ describe("PANEL_MNEMONIC_TREE (the /packed panel's real keybindings)", () => {
 		const broken = {
 			...PANEL_MNEMONIC_TREE,
 			children: PANEL_MNEMONIC_TREE.children!.map((child) =>
-				child.name === "packages" ? { ...child, bindings: [...child.bindings, { key: "\t", description: "a fake conflicting Tab binding" }] } : child,
+				child.name === "packages"
+					? { ...child, bindings: [...child.bindings, { key: "\t", description: "a fake conflicting Tab binding" }] }
+					: child,
 			),
 		};
 		const conflicts = findMnemonicConflicts(broken);

@@ -1,12 +1,11 @@
-import { describe, expect, it, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Server } from "bun";
+import { buildIndex, generateIndex, indexPath, indexStatus, readIndex, writeIndex } from "../src/index/build-index.ts";
+import { dbPath, openDb, replaceAll } from "../src/packages/db.ts";
 import { HttpRegistry } from "../src/registry/registry.ts";
-import { openDb, replaceAll, dbPath } from "../src/packages/db.ts";
-import { buildIndex, writeIndex, readIndex, indexStatus, generateIndex, indexPath } from "../src/index/build-index.ts";
-import { readFileSync } from "node:fs";
 
 // Guards the "never bulk GitHub calls" constraint against regression: a
 // future edit could easily start threading a GitHub-commit fetcher through
@@ -35,22 +34,33 @@ describe("buildIndex", () => {
 	beforeAll(() => {
 		catalogDir = mkdtempSync(join(tmpdir(), "packed-index-catalog-"));
 		const db = openDb(dbPath(catalogDir));
-		replaceAll(db, [
-			{ name: "pi-alpha", version: "1.0.0" },
-			{ name: "pi-beta", version: "2.0.0" },
-			{ name: "pi-missing", version: "0.0.1" }, // 404s -- must be skipped, not fatal
-		], "npm:keywords:pi-package");
+		replaceAll(
+			db,
+			[
+				{ name: "pi-alpha", version: "1.0.0" },
+				{ name: "pi-beta", version: "2.0.0" },
+				{ name: "pi-missing", version: "0.0.1" }, // 404s -- must be skipped, not fatal
+			],
+			"npm:keywords:pi-package",
+		);
 		db.close();
 
 		const infoDocs: Record<string, unknown> = {
 			"pi-alpha": {
-				name: "pi-alpha", version: "1.0.0", description: "alpha package for pi", license: "MIT",
+				name: "pi-alpha",
+				version: "1.0.0",
+				description: "alpha package for pi",
+				license: "MIT",
 				repository: { type: "git", url: "git+https://github.com/x/pi-alpha.git" },
-				keywords: ["pi-package"], pi: { extensions: ["./src/index.ts"] },
+				keywords: ["pi-package"],
+				pi: { extensions: ["./src/index.ts"] },
 				dist: { integrity: "sha512-a" },
 			},
 			"pi-beta": {
-				name: "pi-beta", version: "2.0.0", description: "beta package for pi", license: "MIT",
+				name: "pi-beta",
+				version: "2.0.0",
+				description: "beta package for pi",
+				license: "MIT",
 				keywords: ["pi-package"],
 			},
 		};
@@ -116,18 +126,25 @@ describe("buildIndex bounds", () => {
 	it("never calls downloads() -- confirmed live to trigger npm's 429s at real catalog scale -- and truncates past maxPackages, marking the result", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "packed-index-bounds-"));
 		const db = openDb(dbPath(dir));
-		replaceAll(db, [
-			{ name: "pi-one", version: "1.0.0" },
-			{ name: "pi-two", version: "1.0.0" },
-			{ name: "pi-three", version: "1.0.0" },
-		], "test");
+		replaceAll(
+			db,
+			[
+				{ name: "pi-one", version: "1.0.0" },
+				{ name: "pi-two", version: "1.0.0" },
+				{ name: "pi-three", version: "1.0.0" },
+			],
+			"test",
+		);
 		db.close();
 		let downloadsCalled = false;
 		const server = Bun.serve({
 			port: 0,
 			fetch(req) {
 				const url = new URL(req.url);
-				if (url.pathname.startsWith("/downloads/")) { downloadsCalled = true; return Response.json({ downloads: 1 }); }
+				if (url.pathname.startsWith("/downloads/")) {
+					downloadsCalled = true;
+					return Response.json({ downloads: 1 });
+				}
 				if (url.pathname.endsWith("/latest")) return Response.json({ name: url.pathname.split("/")[1], version: "1.0.0" });
 				return new Response("not found", { status: 404 });
 			},
@@ -153,7 +170,11 @@ describe("buildIndex bounds", () => {
 			port: 0,
 			async fetch(req) {
 				const url = new URL(req.url);
-				if (url.pathname.endsWith("/latest")) { infoCalls++; await Bun.sleep(30); return Response.json({ name: "pi-one", version: "1.0.0" }); }
+				if (url.pathname.endsWith("/latest")) {
+					infoCalls++;
+					await Bun.sleep(30);
+					return Response.json({ name: "pi-one", version: "1.0.0" });
+				}
 				return new Response("not found", { status: 404 });
 			},
 		});
@@ -172,18 +193,34 @@ describe("buildIndex incremental delta scanning", () => {
 	it("partitions the catalog into New/Changed/Unchanged against the prior index -- Unchanged makes zero live registry calls, New and Changed do", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "packed-index-delta-"));
 		const db = openDb(dbPath(dir));
-		replaceAll(db, [
-			{ name: "pi-new", version: "1.0.0", date: "2026-03-01T00:00:00.000Z" }, // absent from prior index
-			{ name: "pi-changed", version: "2.0.0", date: "2026-04-01T00:00:00.000Z" }, // date advanced since last scan
-			{ name: "pi-unchanged", version: "1.5.0", date: "2026-01-01T00:00:00.000Z" }, // date identical to last scan
-		], "test");
+		replaceAll(
+			db,
+			[
+				{ name: "pi-new", version: "1.0.0", date: "2026-03-01T00:00:00.000Z" }, // absent from prior index
+				{ name: "pi-changed", version: "2.0.0", date: "2026-04-01T00:00:00.000Z" }, // date advanced since last scan
+				{ name: "pi-unchanged", version: "1.5.0", date: "2026-01-01T00:00:00.000Z" }, // date identical to last scan
+			],
+			"test",
+		);
 		db.close();
 
 		const priorIndex = {
 			generatedAt: "2026-02-01T00:00:00.000Z",
 			packages: [
-				{ name: "pi-changed", version: "1.9.0", date: "2026-01-01T00:00:00.000Z", dimensions: { discoverability: { status: "ready" as const, met: 1, total: 1, evidence: ["stale"], actions: [] } } as never },
-				{ name: "pi-unchanged", version: "1.5.0", date: "2026-01-01T00:00:00.000Z", dimensions: { discoverability: { status: "ready" as const, met: 1, total: 1, evidence: ["carried forward"], actions: [] } } as never },
+				{
+					name: "pi-changed",
+					version: "1.9.0",
+					date: "2026-01-01T00:00:00.000Z",
+					dimensions: { discoverability: { status: "ready" as const, met: 1, total: 1, evidence: ["stale"], actions: [] } } as never,
+				},
+				{
+					name: "pi-unchanged",
+					version: "1.5.0",
+					date: "2026-01-01T00:00:00.000Z",
+					dimensions: {
+						discoverability: { status: "ready" as const, met: 1, total: 1, evidence: ["carried forward"], actions: [] },
+					} as never,
+				},
 			],
 			truncated: false,
 		};
@@ -229,22 +266,37 @@ describe("buildIndex incremental delta scanning", () => {
 		const dir = mkdtempSync(join(tmpdir(), "packed-index-delta-bound-"));
 		const db = openDb(dbPath(dir));
 		// 5 unchanged entries alone already exceed maxPackages: 1 below.
-		replaceAll(db, [
-			{ name: "pi-a", version: "1.0.0", date: "2026-01-01T00:00:00.000Z" },
-			{ name: "pi-b", version: "1.0.0", date: "2026-01-01T00:00:00.000Z" },
-			{ name: "pi-c", version: "1.0.0", date: "2026-01-01T00:00:00.000Z" },
-			{ name: "pi-d", version: "1.0.0", date: "2026-01-01T00:00:00.000Z" },
-			{ name: "pi-e", version: "1.0.0", date: "2026-01-01T00:00:00.000Z" },
-		], "test");
+		replaceAll(
+			db,
+			[
+				{ name: "pi-a", version: "1.0.0", date: "2026-01-01T00:00:00.000Z" },
+				{ name: "pi-b", version: "1.0.0", date: "2026-01-01T00:00:00.000Z" },
+				{ name: "pi-c", version: "1.0.0", date: "2026-01-01T00:00:00.000Z" },
+				{ name: "pi-d", version: "1.0.0", date: "2026-01-01T00:00:00.000Z" },
+				{ name: "pi-e", version: "1.0.0", date: "2026-01-01T00:00:00.000Z" },
+			],
+			"test",
+		);
 		db.close();
 		const priorIndex = {
 			generatedAt: "2026-01-01T00:00:00.000Z",
-			packages: ["pi-a", "pi-b", "pi-c", "pi-d", "pi-e"].map((name) => ({ name, version: "1.0.0", date: "2026-01-01T00:00:00.000Z", dimensions: {} as never })),
+			packages: ["pi-a", "pi-b", "pi-c", "pi-d", "pi-e"].map((name) => ({
+				name,
+				version: "1.0.0",
+				date: "2026-01-01T00:00:00.000Z",
+				dimensions: {} as never,
+			})),
 			truncated: false,
 		};
 		writeIndex(indexPath(dir), priorIndex);
 		let liveCalls = 0;
-		const server = Bun.serve({ port: 0, fetch() { liveCalls++; return new Response("not found", { status: 404 }); } });
+		const server = Bun.serve({
+			port: 0,
+			fetch() {
+				liveCalls++;
+				return new Response("not found", { status: 404 });
+			},
+		});
 		try {
 			const reg = new HttpRegistry(`http://127.0.0.1:${server.port}`, 250, 0, 1, `http://127.0.0.1:${server.port}`);
 			const index = await buildIndex(reg, dir, { delayMs: 0, maxPackages: 1 });
@@ -264,7 +316,11 @@ describe("index persistence", () => {
 		expect(readIndex(path)).toBeUndefined();
 		expect(indexStatus(path, 1_000).stale).toBe(true);
 
-		const index = { generatedAt: new Date().toISOString(), packages: [{ name: "pi-alpha", version: "1.0.0", dimensions: {} as never }], truncated: false };
+		const index = {
+			generatedAt: new Date().toISOString(),
+			packages: [{ name: "pi-alpha", version: "1.0.0", dimensions: {} as never }],
+			truncated: false,
+		};
 		writeIndex(path, index);
 		expect(readIndex(path)).toEqual(index);
 		expect(indexStatus(path, 60_000)).toMatchObject({ stale: false, packageCount: 1 });

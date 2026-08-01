@@ -6,10 +6,10 @@
  * versions per package against npm's own bulk advisory endpoint. Zero
  * code execution, one bounded/timed-out network call for the scan itself.
  */
-import { satisfies, valid, compare } from "semver";
-import type { Diagnostic } from "./check.ts";
-import { NPM_REGISTRY_BASE, REGISTRY_FETCH_TIMEOUT_MS } from "../shared/constants.ts";
+import { compare, satisfies, valid } from "semver";
 import { readInstalledPackages, readResolvedVersion } from "../packages/installed.ts";
+import { NPM_REGISTRY_BASE, REGISTRY_FETCH_TIMEOUT_MS } from "../shared/constants.ts";
+import type { Diagnostic } from "./check.ts";
 
 const BULK_ADVISORY_PATH = "/-/npm/v1/security/advisories/bulk";
 const MAX_PACKAGES_PER_SCAN = 200;
@@ -71,7 +71,9 @@ export interface AdvisoryReport {
  * whose version can't be resolved rather than guessing. git:/local
  * sources are omitted (no meaningful npm advisory lookup applies). */
 export function resolveInstalledVersions(piHome: string, only?: string): Record<string, string> {
-	const names = readInstalledPackages(piHome).map((pkg) => pkg.name).filter((name) => !only || name === only);
+	const names = readInstalledPackages(piHome)
+		.map((pkg) => pkg.name)
+		.filter((name) => !only || name === only);
 	const out: Record<string, string> = {};
 	for (const name of names) {
 		const version = readResolvedVersion(piHome, `npm:${name}`);
@@ -115,11 +117,16 @@ export async function fetchBulkAdvisories(
 					const entry = raw as Record<string, unknown>;
 					if (typeof entry.id !== "number" && typeof entry.id !== "string") return undefined;
 					if (typeof entry.vulnerable_versions !== "string") return undefined;
-					const severity: AdvisorySeverity = entry.severity === "critical" || entry.severity === "high" || entry.severity === "moderate" || entry.severity === "low" ? entry.severity : "high";
+					const severity: AdvisorySeverity =
+						entry.severity === "critical" || entry.severity === "high" || entry.severity === "moderate" || entry.severity === "low"
+							? entry.severity
+							: "high";
 					return {
-						id: entry.id, url: typeof entry.url === "string" ? entry.url.slice(0, 2_048) : "",
+						id: entry.id,
+						url: typeof entry.url === "string" ? entry.url.slice(0, 2_048) : "",
 						title: typeof entry.title === "string" ? entry.title.slice(0, 512) : "unknown advisory",
-						severity, vulnerableVersions: entry.vulnerable_versions.slice(0, 512),
+						severity,
+						vulnerableVersions: entry.vulnerable_versions.slice(0, 512),
 					};
 				})
 				.filter((entry): entry is RawAdvisory => entry !== undefined);
@@ -134,7 +141,11 @@ export async function fetchBulkAdvisories(
  * times) to compute a patched-version-age heuristic -- one bounded,
  * best-effort GET per package that actually has an advisory, never per
  * package scanned. Never throws. */
-async function fetchPackageTimes(name: string, registryBase: string, timeoutMs: number): Promise<{ versions: string[]; time: Record<string, string> } | undefined> {
+async function fetchPackageTimes(
+	name: string,
+	registryBase: string,
+	timeoutMs: number,
+): Promise<{ versions: string[]; time: Record<string, string> } | undefined> {
 	try {
 		const encoded = encodeURIComponent(name).replace("%2F", "/");
 		const response = await fetch(`${registryBase}/${encoded}`, {
@@ -166,14 +177,20 @@ function findPatchedVersion(installedVersion: string, vulnerableVersions: string
 }
 
 function diagnosticFor(finding: AdvisoryFinding): Diagnostic {
-	const severityMap: Record<AdvisorySeverity, Diagnostic["severity"]> = { critical: "error", high: "error", moderate: "warning", low: "info" };
+	const severityMap: Record<AdvisorySeverity, Diagnostic["severity"]> = {
+		critical: "error",
+		high: "error",
+		moderate: "warning",
+		low: "info",
+	};
 	const freshNote = finding.patchedVersionAge
 		? finding.patchedVersionAge.fresh
 			? ` (patched in ${finding.patchedVersionAge.version}, published ${finding.patchedVersionAge.ageDays}d ago -- recent enough that the fix itself is a weaker signal)`
 			: ` (patched in ${finding.patchedVersionAge.version}, published ${finding.patchedVersionAge.ageDays}d ago)`
 		: "";
 	return {
-		code: "PI_PACKAGE_ADVISORY", severity: severityMap[finding.severity],
+		code: "PI_PACKAGE_ADVISORY",
+		severity: severityMap[finding.severity],
 		path: finding.packageName,
 		message: `${finding.title} (${finding.severity}, ${finding.id}) affects installed ${finding.installedVersion}; vulnerable range: ${finding.vulnerableVersions}${freshNote}`,
 		...(finding.patchedVersionAge ? { fix: `upgrade to ${finding.patchedVersionAge.version}` } : {}),
@@ -207,7 +224,10 @@ export async function scanInstalledPackages(
 		if (!advisories || advisories.length === 0) continue;
 		let times: { versions: string[]; time: Record<string, string> } | undefined;
 		for (const advisory of advisories) {
-			if (findings.length >= MAX_FINDINGS) { truncated = true; break; }
+			if (findings.length >= MAX_FINDINGS) {
+				truncated = true;
+				break;
+			}
 			let patchedVersionAge: PatchedVersionAge | undefined;
 			if (times === undefined) times = (await fetchPackageTimes(name, registryBase, timeoutMs)) ?? { versions: [], time: {} };
 			const patched = findPatchedVersion(version, advisory.vulnerableVersions, times.versions);
@@ -216,7 +236,16 @@ export async function scanInstalledPackages(
 				const ageDays = Math.max(0, Math.floor((Date.now() - Date.parse(publishedAt)) / (24 * 60 * 60 * 1000)));
 				patchedVersionAge = { version: patched, publishedAt, ageDays, fresh: ageDays < PATCHED_VERSION_FRESH_DAYS };
 			}
-			findings.push({ packageName: name, installedVersion: version, id: advisory.id, url: advisory.url, title: advisory.title, severity: advisory.severity, vulnerableVersions: advisory.vulnerableVersions, patchedVersionAge });
+			findings.push({
+				packageName: name,
+				installedVersion: version,
+				id: advisory.id,
+				url: advisory.url,
+				title: advisory.title,
+				severity: advisory.severity,
+				vulnerableVersions: advisory.vulnerableVersions,
+				patchedVersionAge,
+			});
 		}
 		if (findings.length >= MAX_FINDINGS) break;
 	}
@@ -232,7 +261,8 @@ export function formatAdvisoryReport(report: AdvisoryReport, json: boolean): str
 	if (json) return `${JSON.stringify(report)}\n`;
 	if (report.diagnostics.length === 0) return `no known advisories for ${report.scanned} scanned package(s)\n`;
 	let output = `${report.diagnostics.length} advisory finding(s) across ${report.scanned} scanned package(s)\n`;
-	for (const diagnostic of report.diagnostics) output += `${diagnostic.severity.toUpperCase()} ${diagnostic.path}: ${diagnostic.message}${diagnostic.fix ? ` Fix: ${diagnostic.fix}` : ""}\n`;
+	for (const diagnostic of report.diagnostics)
+		output += `${diagnostic.severity.toUpperCase()} ${diagnostic.path}: ${diagnostic.message}${diagnostic.fix ? ` Fix: ${diagnostic.fix}` : ""}\n`;
 	if (report.truncated) output += "Output truncated by configured bounds.\n";
 	return output.slice(0, MAX_ADVISORY_OUTPUT);
 }

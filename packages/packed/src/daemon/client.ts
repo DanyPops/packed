@@ -2,21 +2,26 @@
 import { readFileSync } from "node:fs";
 import { AuthenticatedRpcClient } from "@danypops/vehicle-client/rpc-client";
 import { readDaemonHandle } from "@danypops/vehicle-server/paths";
-import type { InstalledPkg, Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateEntry, UpdateOutcome } from "../shared/ports.ts";
-import { HttpRegistry } from "../registry/registry.ts";
-import { INDEX_OPERATION_TIMEOUT_MS, MIRROR_OPERATION_TIMEOUT_MS, PROBE_TIMEOUT_MS, REGISTRY_FETCH_TIMEOUT_MS } from "../shared/constants.ts";
-import type { MutationApproval, SecuritySettings } from "../security/security.ts";
-import { resolvePackedPaths, type PackedPaths } from "../shared/paths.ts";
-import type { OperationInputs, OperationName, OperationOutputs } from "./service.ts";
+import type { AdvisoryReport } from "../adoption/advisories.ts";
 import type { CheckReport } from "../adoption/check.ts";
+import type { DoctorReport } from "../adoption/doctor.ts";
 import type { PackReport } from "../adoption/pack.ts";
 import type { AdoptionReport } from "../adoption/score.ts";
-import type { SetupApplyResult, SetupExportReport, SetupPlan, SetupUpdateReport } from "../setup/setup.ts";
-import type { PiVersionReport } from "../pi/pi-version.ts";
-import type { PackageResources, ResourceField } from "../packages/resources.ts";
-import type { AdvisoryReport } from "../adoption/advisories.ts";
-import type { DoctorReport } from "../adoption/doctor.ts";
 import type { PackageIndex } from "../index/build-index.ts";
+import type { PackageResources, ResourceField } from "../packages/resources.ts";
+import type { PiVersionReport } from "../pi/pi-version.ts";
+import { HttpRegistry } from "../registry/registry.ts";
+import type { MutationApproval, SecuritySettings } from "../security/security.ts";
+import type { SetupApplyResult, SetupExportReport, SetupPlan, SetupUpdateReport } from "../setup/setup.ts";
+import {
+	INDEX_OPERATION_TIMEOUT_MS,
+	MIRROR_OPERATION_TIMEOUT_MS,
+	PROBE_TIMEOUT_MS,
+	REGISTRY_FETCH_TIMEOUT_MS,
+} from "../shared/constants.ts";
+import { type PackedPaths, resolvePackedPaths } from "../shared/paths.ts";
+import type { InstalledPkg, Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateEntry, UpdateOutcome } from "../shared/ports.ts";
+import type { OperationInputs, OperationName, OperationOutputs } from "./service.ts";
 
 export type FetchTransport = (request: Request) => Promise<Response>;
 type RpcClient = AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>;
@@ -41,28 +46,46 @@ export interface PackageDaemonPort {
 	security(): Promise<SecuritySettings>;
 	setMutationApproval(value: MutationApproval, approved?: boolean): Promise<SecuritySettings>;
 	install(source: string, approved?: boolean): Promise<string>;
-	installService(source: string, approved?: boolean): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }>;
+	installService(
+		source: string,
+		approved?: boolean,
+	): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }>;
 	remove(name: string, approved?: boolean): Promise<string>;
 	update(source: string, approved?: boolean): Promise<UpdateOutcome>;
 	piStatus(): Promise<PiVersionReport>;
 	resourcesList(projectRoot?: string): Promise<{ global: PackageResources[]; project: PackageResources[] }>;
-	resourcesToggle(source: string, field: ResourceField, path: string, enabled: boolean, projectRoot?: string, approved?: boolean): Promise<string>;
+	resourcesToggle(
+		source: string,
+		field: ResourceField,
+		path: string,
+		enabled: boolean,
+		projectRoot?: string,
+		approved?: boolean,
+	): Promise<string>;
 	advisoriesScan(name?: string): Promise<AdvisoryReport>;
 	doctor(projectRoot?: string): Promise<DoctorReport>;
 }
 
 export class PackageDaemonError extends Error {
 	/** True only for install_service's "this package isn't Vehicle-shaped at all" outcome -- distinct from a real failure (systemctl unavailable, spec resolved but the install itself failed). Lets a caller composing install + install-service (see cli.ts's `install` command) stay silent instead of surfacing a false alarm on every ordinary, non-daemon package install. */
-	constructor(message: string, readonly operation: string, readonly status?: number, readonly notADaemon?: boolean) {
+	constructor(
+		message: string,
+		readonly operation: string,
+		readonly status?: number,
+		readonly notADaemon?: boolean,
+	) {
 		super(message);
 		this.name = "PackageDaemonError";
 	}
 }
 
 function timeoutTransport(transport: FetchTransport, timeoutMs = REGISTRY_FETCH_TIMEOUT_MS): FetchTransport {
-	return (request) => transport(new Request(request, {
-		signal: AbortSignal.any([request.signal, AbortSignal.timeout(timeoutMs)]),
-	}));
+	return (request) =>
+		transport(
+			new Request(request, {
+				signal: AbortSignal.any([request.signal, AbortSignal.timeout(timeoutMs)]),
+			}),
+		);
 }
 
 export class PackageDaemonClient implements PackageDaemonPort {
@@ -72,8 +95,14 @@ export class PackageDaemonClient implements PackageDaemonPort {
 
 	constructor(base: string, token: string, transport: FetchTransport = fetch) {
 		this.rpc = new AuthenticatedRpcClient(base, token, { label: "Packed", transport: timeoutTransport(transport) });
-		this.maintenanceRpc = new AuthenticatedRpcClient(base, token, { label: "Packed", transport: timeoutTransport(transport, MIRROR_OPERATION_TIMEOUT_MS) });
-		this.indexRpc = new AuthenticatedRpcClient(base, token, { label: "Packed", transport: timeoutTransport(transport, INDEX_OPERATION_TIMEOUT_MS) });
+		this.maintenanceRpc = new AuthenticatedRpcClient(base, token, {
+			label: "Packed",
+			transport: timeoutTransport(transport, MIRROR_OPERATION_TIMEOUT_MS),
+		});
+		this.indexRpc = new AuthenticatedRpcClient(base, token, {
+			label: "Packed",
+			transport: timeoutTransport(transport, INDEX_OPERATION_TIMEOUT_MS),
+		});
 	}
 
 	private async call<Name extends OperationName>(operation: Name, input: OperationInputs[Name]): Promise<OperationOutputs[Name]> {
@@ -136,7 +165,14 @@ export class PackageDaemonClient implements PackageDaemonPort {
 		return this.call("resources.list", { projectRoot });
 	}
 
-	async resourcesToggle(source: string, field: ResourceField, path: string, enabled: boolean, projectRoot?: string, approved?: boolean): Promise<string> {
+	async resourcesToggle(
+		source: string,
+		field: ResourceField,
+		path: string,
+		enabled: boolean,
+		projectRoot?: string,
+		approved?: boolean,
+	): Promise<string> {
 		return (await this.call("resources.toggle", { source, field, path, enabled, projectRoot, approved })).output;
 	}
 
@@ -190,9 +226,18 @@ export class PackageDaemonClient implements PackageDaemonPort {
 		return result.output;
 	}
 
-	async installService(source: string, approved = false): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }> {
+	async installService(
+		source: string,
+		approved = false,
+	): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }> {
 		const result = await this.call("package.install_service", { source, approved });
-		if (!result.ok) throw new PackageDaemonError(result.output || `failed to install a persistent service for ${source}`, "package.install_service", undefined, result.notADaemon === true);
+		if (!result.ok)
+			throw new PackageDaemonError(
+				result.output || `failed to install a persistent service for ${source}`,
+				"package.install_service",
+				undefined,
+				result.notADaemon === true,
+			);
 		return { output: result.output, spec: result.spec };
 	}
 
@@ -218,17 +263,24 @@ export class PackageDaemonClient implements PackageDaemonPort {
 
 export class PackageDaemonInstaller implements Installer {
 	constructor(private readonly client: PackageDaemonClient) {}
-	install(source: string, options?: { approved?: boolean; local?: boolean }): Promise<string> { return this.client.install(source, options?.approved); }
+	install(source: string, options?: { approved?: boolean; local?: boolean }): Promise<string> {
+		return this.client.install(source, options?.approved);
+	}
 	remove(source: string, options?: { approved?: boolean; local?: boolean }): Promise<string> {
-		if (!source.startsWith("npm:") || source.length <= 4) throw new PackageDaemonError("daemon package removal requires an npm: source", "package.remove");
+		if (!source.startsWith("npm:") || source.length <= 4)
+			throw new PackageDaemonError("daemon package removal requires an npm: source", "package.remove");
 		return this.client.remove(source.slice(4), options?.approved);
 	}
-	update(source: string, options?: { approved?: boolean; local?: boolean }): Promise<UpdateOutcome> { return this.client.update(source, options?.approved); }
+	update(source: string, options?: { approved?: boolean; local?: boolean }): Promise<UpdateOutcome> {
+		return this.client.update(source, options?.approved);
+	}
 }
 
 export class DaemonBackedSecurity {
 	constructor(private readonly paths: PackedPaths = resolvePackedPaths()) {}
-	async security(): Promise<SecuritySettings> { return (await connectPackageDaemon(this.paths)).security(); }
+	async security(): Promise<SecuritySettings> {
+		return (await connectPackageDaemon(this.paths)).security();
+	}
 	async setMutationApproval(value: MutationApproval, options?: { approved?: boolean }): Promise<SecuritySettings> {
 		return (await connectPackageDaemon(this.paths)).setMutationApproval(value, options?.approved);
 	}
@@ -236,32 +288,52 @@ export class DaemonBackedSecurity {
 
 export class DaemonBackedInstaller implements Installer {
 	constructor(private readonly paths: PackedPaths = resolvePackedPaths()) {}
-	async install(source: string, options?: { approved?: boolean }): Promise<string> { return (await connectPackageDaemon(this.paths)).install(source, options?.approved); }
-	async remove(source: string, options?: { approved?: boolean }): Promise<string> { return new PackageDaemonInstaller(await connectPackageDaemon(this.paths)).remove(source, options); }
-	async update(source: string, options?: { approved?: boolean }): Promise<UpdateOutcome> { return (await connectPackageDaemon(this.paths)).update(source, options?.approved); }
+	async install(source: string, options?: { approved?: boolean }): Promise<string> {
+		return (await connectPackageDaemon(this.paths)).install(source, options?.approved);
+	}
+	async remove(source: string, options?: { approved?: boolean }): Promise<string> {
+		return new PackageDaemonInstaller(await connectPackageDaemon(this.paths)).remove(source, options);
+	}
+	async update(source: string, options?: { approved?: boolean }): Promise<UpdateOutcome> {
+		return (await connectPackageDaemon(this.paths)).update(source, options?.approved);
+	}
 }
 
 export interface DaemonServiceInstallerPort {
-	install(source: string, approved?: boolean): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }>;
+	install(
+		source: string,
+		approved?: boolean,
+	): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }>;
 }
 
 export class DaemonBackedDaemonServiceInstaller implements DaemonServiceInstallerPort {
 	constructor(private readonly paths: PackedPaths = resolvePackedPaths()) {}
-	async install(source: string, approved?: boolean): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }> {
+	async install(
+		source: string,
+		approved?: boolean,
+	): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }> {
 		return (await connectPackageDaemon(this.paths)).installService(source, approved);
 	}
 }
 
 export class DaemonRegistry implements Registry {
 	private readonly client: PackageDaemonClient;
-	constructor(base: string, token: string, transport: FetchTransport = fetch) { this.client = new PackageDaemonClient(base, token, transport); }
+	constructor(base: string, token: string, transport: FetchTransport = fetch) {
+		this.client = new PackageDaemonClient(base, token, transport);
+	}
 	async search(query: string, limit: number): Promise<SearchPage> {
 		const body = await this.client.search(query, limit);
 		return { results: body.results, total: body.total };
 	}
-	async searchPage(query: string, _from: number, size: number): Promise<SearchPage> { return this.search(query, size).catch(() => ({ results: [], total: 0 })); }
-	async searchAll(): Promise<never> { throw new Error("searchAll is not supported via the daemon proxy"); }
-	info(name: string): Promise<PkgInfo> { return this.client.info(name); }
+	async searchPage(query: string, _from: number, size: number): Promise<SearchPage> {
+		return this.search(query, size).catch(() => ({ results: [], total: 0 }));
+	}
+	async searchAll(): Promise<never> {
+		throw new Error("searchAll is not supported via the daemon proxy");
+	}
+	info(name: string): Promise<PkgInfo> {
+		return this.client.info(name);
+	}
 }
 
 /** version is the daemon's own live-reported version (its real /health
@@ -270,7 +342,11 @@ export class DaemonRegistry implements Registry {
  * stale code for as long as it stays reachable. Confirmed live: an 11-
  * hour-old daemon kept flagging false "update available" rows because it
  * predated a same-day fix to the exact comparison logic deciding that. */
-export interface DaemonHandle { base: string; token: string; version: string }
+export interface DaemonHandle {
+	base: string;
+	token: string;
+	version: string;
+}
 
 export async function probe(paths: PackedPaths = resolvePackedPaths()): Promise<DaemonHandle | undefined> {
 	const handle = readDaemonHandle(paths.handle);

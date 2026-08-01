@@ -1,22 +1,31 @@
-import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { cliRun, type CliDeps } from "../src/cli/cli.ts";
-import { DaemonRegistry, PackageDaemonClient, PackageDaemonInstaller, probe, resolveRegistry, type PackageDaemonPort } from "../src/daemon/client.ts";
 import { writeDaemonHandle } from "@danypops/vehicle-server/paths";
-import { resolvePackedPaths, type PackedPaths } from "../src/shared/paths.ts";
-import { createApp } from "../src/daemon/service.ts";
-import { saveUpdates } from "../src/daemon/watcher.ts";
-import { openDb, replaceAll, dbPath, catalogList } from "../src/packages/db.ts";
-import { HttpRegistry } from "../src/registry/registry.ts";
-import type { Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/shared/ports.ts";
 import type { Server } from "bun";
+import { type CliDeps, cliRun } from "../src/cli/cli.ts";
+import {
+	DaemonRegistry,
+	PackageDaemonClient,
+	PackageDaemonInstaller,
+	type PackageDaemonPort,
+	probe,
+	resolveRegistry,
+} from "../src/daemon/client.ts";
+import { createApp } from "../src/daemon/service.ts";
+import { catalogList, dbPath, openDb, replaceAll } from "../src/packages/db.ts";
+import { HttpRegistry } from "../src/registry/registry.ts";
+import { type PackedPaths, resolvePackedPaths } from "../src/shared/paths.ts";
+import type { Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/shared/ports.ts";
 import { VERSION } from "../src/shared/version.ts";
 
 class FakeRegistry implements Registry {
-	constructor(private results: Pkg[] = [], private versions: Record<string, string> = {}) {}
+	constructor(
+		private results: Pkg[] = [],
+		private versions: Record<string, string> = {},
+	) {}
 	async search(_q: string, _limit: number): Promise<SearchPage> {
 		return { results: this.results, total: this.results.length };
 	}
@@ -67,11 +76,17 @@ class FakeDaemonServiceInstaller {
 	gotSource = "";
 	approved = false;
 	fail = false;
-	async install(source: string, approved?: boolean): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }> {
+	async install(
+		source: string,
+		approved?: boolean,
+	): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }> {
 		this.gotSource = source;
 		this.approved = approved === true;
 		if (this.fail) throw new Error("install-service failed");
-		return { output: `installed a persistent service for ${source}`, spec: { name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/tmp/probe.service" } };
+		return {
+			output: `installed a persistent service for ${source}`,
+			spec: { name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/tmp/probe.service" },
+		};
 	}
 }
 
@@ -81,8 +96,12 @@ function deps(over: Partial<CliDeps> = {}): CliDeps {
 		inst: new FakeInstaller(),
 		daemonService: new FakeDaemonServiceInstaller(),
 		security: {
-			async security() { return { mutationApproval: "always" as const }; },
-			async setMutationApproval(mutationApproval) { return { mutationApproval }; },
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async setMutationApproval(mutationApproval) {
+				return { mutationApproval };
+			},
 		},
 		stateDir: mkdtempSync(join(tmpdir(), "packed-")),
 		piHome: mkdtempSync(join(tmpdir(), "packed-pihome-")),
@@ -101,7 +120,9 @@ describe("CLI", () => {
 		let mutationApproval: "always" | "never" = "always";
 		const d = deps({
 			security: {
-				async security() { return { mutationApproval }; },
+				async security() {
+					return { mutationApproval };
+				},
 				async setMutationApproval(value, options) {
 					expect(options?.approved).toBe(true);
 					mutationApproval = value;
@@ -116,8 +137,12 @@ describe("CLI", () => {
 	it("runs static check standalone without consulting daemon security state", async () => {
 		const d = deps({
 			security: {
-				async security(): Promise<never> { throw new Error("daemon unavailable"); },
-				async setMutationApproval(): Promise<never> { throw new Error("daemon unavailable"); },
+				async security(): Promise<never> {
+					throw new Error("daemon unavailable");
+				},
+				async setMutationApproval(): Promise<never> {
+					throw new Error("daemon unavailable");
+				},
 			},
 		});
 		const root = new URL("..", import.meta.url).pathname;
@@ -130,8 +155,37 @@ describe("CLI", () => {
 	it("packs and scores standalone through bounded application ports", async () => {
 		const empty = { status: "unknown" as const, met: 0, total: 0, evidence: [], actions: [] };
 		const d = deps({
-			packer: { async verify(path) { return { root: path, ok: true, command: ["npm", "pack", "--dry-run", "--json", "--ignore-scripts"], files: [], shape: { kind: "manifest", verified: true, evidence: ["pi.extensions"] }, diagnostics: [], truncated: false }; } },
-			scorer: { async score(target) { return { target, source: "registry" as const, package: { name: target, version: "1" }, dimensions: { discoverability: empty, firstRun: empty, trust: empty, maintenance: empty, traction: empty, compatibility: empty, freshness: empty } }; } },
+			packer: {
+				async verify(path) {
+					return {
+						root: path,
+						ok: true,
+						command: ["npm", "pack", "--dry-run", "--json", "--ignore-scripts"],
+						files: [],
+						shape: { kind: "manifest", verified: true, evidence: ["pi.extensions"] },
+						diagnostics: [],
+						truncated: false,
+					};
+				},
+			},
+			scorer: {
+				async score(target) {
+					return {
+						target,
+						source: "registry" as const,
+						package: { name: target, version: "1" },
+						dimensions: {
+							discoverability: empty,
+							firstRun: empty,
+							trust: empty,
+							maintenance: empty,
+							traction: empty,
+							compatibility: empty,
+							freshness: empty,
+						},
+					};
+				},
+			},
 		});
 		expect(JSON.parse((await cliRun(["pack", ".", "--json"], d)).out).shape.verified).toBe(true);
 		expect(JSON.parse((await cliRun(["score", "pi-demo", "--json"], d)).out).target).toBe("pi-demo");
@@ -139,10 +193,43 @@ describe("CLI", () => {
 
 	it("generates and checks staged-publish workflows without agent-callable publishing", async () => {
 		const calls: string[] = [];
-		const d = deps({ publisher: {
-			async setup(path, options) { calls.push(`setup:${path}:${options?.force}`); return { root: path, ok: true, wrote: true, workflowPath: `${path}/.github/workflows/packed-stage-publish.yml`, packageName: "pi-demo", repository: "example/pi-demo", diagnostics: [] }; },
-			async status(path) { calls.push(`status:${path}`); return { root: path, ready: true, workflowPath: `${path}/.github/workflows/packed-stage-publish.yml`, checks: { packageExists: true, repository: true, workflow: true, lockfile: true, node: true, npm: true, trustedPublisher: "unknown", coreFirst: true, loggedIn: true }, diagnostics: [], nextSteps: [] }; },
-		} });
+		const d = deps({
+			publisher: {
+				async setup(path, options) {
+					calls.push(`setup:${path}:${options?.force}`);
+					return {
+						root: path,
+						ok: true,
+						wrote: true,
+						workflowPath: `${path}/.github/workflows/packed-stage-publish.yml`,
+						packageName: "pi-demo",
+						repository: "example/pi-demo",
+						diagnostics: [],
+					};
+				},
+				async status(path) {
+					calls.push(`status:${path}`);
+					return {
+						root: path,
+						ready: true,
+						workflowPath: `${path}/.github/workflows/packed-stage-publish.yml`,
+						checks: {
+							packageExists: true,
+							repository: true,
+							workflow: true,
+							lockfile: true,
+							node: true,
+							npm: true,
+							trustedPublisher: "unknown",
+							coreFirst: true,
+							loggedIn: true,
+						},
+						diagnostics: [],
+						nextSteps: [],
+					};
+				},
+			},
+		});
 		const root = resolve(".");
 		expect(JSON.parse((await cliRun(["publish", "setup", ".", "--force", "--json"], d)).out).wrote).toBe(true);
 		expect(JSON.parse((await cliRun(["publish", "status", ".", "--json"], d)).out).ready).toBe(true);
@@ -152,12 +239,39 @@ describe("CLI", () => {
 
 	it("exports, plans, and approval-gates setup apply standalone", async () => {
 		const calls: string[] = [];
-		const d = deps({ setup: {
-			async export(projectRoot, options) { calls.push(`export:${projectRoot}:${options?.force}`); return { ok: true, path: `${projectRoot}/pi-setup.json`, manifest: { $schema: "./schema/pi-setup-v1.schema.json", schemaVersion: 1, packages: [], profiles: {} }, diagnostics: [], wrote: true }; },
-			async update(manifestPath) { calls.push(`update:${manifestPath}`); return { ok: true, path: manifestPath, manifest: { $schema: "./schema/pi-setup-v1.schema.json", schemaVersion: 1, packages: [], profiles: {} }, diagnostics: [], wrote: true, updated: 0 }; },
-			async plan(manifestPath) { calls.push(`plan:${manifestPath}`); return { ok: true, manifestPath, operations: [], diagnostics: [] }; },
-			async apply(manifestPath) { calls.push(`apply:${manifestPath}`); return { ok: true, manifestPath, operations: [], reloadRequired: false, diagnostics: [] }; },
-		} });
+		const d = deps({
+			setup: {
+				async export(projectRoot, options) {
+					calls.push(`export:${projectRoot}:${options?.force}`);
+					return {
+						ok: true,
+						path: `${projectRoot}/pi-setup.json`,
+						manifest: { $schema: "./schema/pi-setup-v1.schema.json", schemaVersion: 1, packages: [], profiles: {} },
+						diagnostics: [],
+						wrote: true,
+					};
+				},
+				async update(manifestPath) {
+					calls.push(`update:${manifestPath}`);
+					return {
+						ok: true,
+						path: manifestPath,
+						manifest: { $schema: "./schema/pi-setup-v1.schema.json", schemaVersion: 1, packages: [], profiles: {} },
+						diagnostics: [],
+						wrote: true,
+						updated: 0,
+					};
+				},
+				async plan(manifestPath) {
+					calls.push(`plan:${manifestPath}`);
+					return { ok: true, manifestPath, operations: [], diagnostics: [] };
+				},
+				async apply(manifestPath) {
+					calls.push(`apply:${manifestPath}`);
+					return { ok: true, manifestPath, operations: [], reloadRequired: false, diagnostics: [] };
+				},
+			},
+		});
 		const root = resolve(".");
 		expect((await cliRun(["setup", "export", ".", "--force", "--json"], d)).code).toBe(0);
 		expect((await cliRun(["setup", "update", ".", "--json"], d)).code).toBe(0);
@@ -169,12 +283,24 @@ describe("CLI", () => {
 
 	it("setup plan/apply --ecosystem resolves the bundled @danypops starter manifest, not the cwd", async () => {
 		const calls: string[] = [];
-		const d = deps({ setup: {
-			async export() { throw new Error("not exercised"); },
-			async update() { throw new Error("not exercised"); },
-			async plan(manifestPath) { calls.push(`plan:${manifestPath}`); return { ok: true, manifestPath, operations: [], diagnostics: [] }; },
-			async apply(manifestPath) { calls.push(`apply:${manifestPath}`); return { ok: true, manifestPath, operations: [], reloadRequired: false, diagnostics: [] }; },
-		} });
+		const d = deps({
+			setup: {
+				async export() {
+					throw new Error("not exercised");
+				},
+				async update() {
+					throw new Error("not exercised");
+				},
+				async plan(manifestPath) {
+					calls.push(`plan:${manifestPath}`);
+					return { ok: true, manifestPath, operations: [], diagnostics: [] };
+				},
+				async apply(manifestPath) {
+					calls.push(`apply:${manifestPath}`);
+					return { ok: true, manifestPath, operations: [], reloadRequired: false, diagnostics: [] };
+				},
+			},
+		});
 		expect((await cliRun(["setup", "plan", "--ecosystem", "--json"], d)).code).toBe(0);
 		expect((await cliRun(["setup", "apply", "--ecosystem", "--approve", "--json"], d)).code).toBe(0);
 		expect(calls[0]).toContain("setup/danypops-ecosystem.pi-setup.json");
@@ -233,7 +359,14 @@ describe("CLI", () => {
 		mkdirSync(projectHome, { recursive: true });
 		writeFileSync(join(projectHome, "settings.json"), JSON.stringify({ packages: ["npm:papyrus@0.21.2"] }));
 		const db = openDb(dbPath(d.stateDir));
-		replaceAll(db, [{ name: "pi-global", version: "1.0.0" }, { name: "papyrus", version: "0.38.1" }], "test");
+		replaceAll(
+			db,
+			[
+				{ name: "pi-global", version: "1.0.0" },
+				{ name: "papyrus", version: "0.38.1" },
+			],
+			"test",
+		);
 		db.close();
 
 		const globalOnly = await cliRun(["updates", "--json"], d);
@@ -241,7 +374,9 @@ describe("CLI", () => {
 
 		const withProject = await cliRun(["updates", "--project", projectRoot, "--json"], d);
 		const updates = JSON.parse(withProject.out).updates;
-		expect(updates).toEqual([{ name: "papyrus", installed: "0.21.2", latest: "0.38.1", detectedAt: updates[0].detectedAt, scope: "project" }]);
+		expect(updates).toEqual([
+			{ name: "papyrus", installed: "0.21.2", latest: "0.38.1", detectedAt: updates[0].detectedAt, scope: "project" },
+		]);
 		const human = await cliRun(["updates", "--project", projectRoot], d);
 		expect(human.out).toContain("papyrus [project]");
 	});
@@ -324,14 +459,19 @@ describe("CLI", () => {
 		const json = await cliRun(["install", "npm:foo", "--approve", "--json"], d);
 		expect(json.code).toBe(0);
 		expect(JSON.parse(json.out)).toEqual({
-			ok: true, source: "npm:foo", output: "Installed npm:foo",
+			ok: true,
+			source: "npm:foo",
+			output: "Installed npm:foo",
 			serviceInstall: { detected: true, ok: true, output: "installed a persistent service for npm:foo" },
 		});
 
 		// notADaemon: the overwhelmingly common case (an ordinary, non-daemon package) stays silent.
 		const notADaemon = deps();
 		(notADaemon.daemonService as FakeDaemonServiceInstaller).install = async () => {
-			throw Object.assign(new Error("foo does not declare a packed.daemonService manifest and no Vehicle-shaped daemon dependency was detected"), { notADaemon: true });
+			throw Object.assign(
+				new Error("foo does not declare a packed.daemonService manifest and no Vehicle-shaped daemon dependency was detected"),
+				{ notADaemon: true },
+			);
 		};
 		const silent = await cliRun(["install", "npm:foo", "--approve", "--json"], notADaemon);
 		expect(JSON.parse(silent.out)).toEqual({ ok: true, source: "npm:foo", output: "Installed npm:foo" });
@@ -343,7 +483,9 @@ describe("CLI", () => {
 		const failed = await cliRun(["install", "npm:foo", "--approve", "--json"], realFailure);
 		expect(failed.code).toBe(0);
 		expect(JSON.parse(failed.out)).toEqual({
-			ok: true, source: "npm:foo", output: "Installed npm:foo",
+			ok: true,
+			source: "npm:foo",
+			output: "Installed npm:foo",
 			serviceInstall: { detected: true, ok: false, output: "install-service failed" },
 		});
 
@@ -416,7 +558,13 @@ describe("CLI", () => {
 	});
 
 	it("update --self requires approval under the guarded default, same as every other mutation", async () => {
-		const d = deps({ selfUpdater: { async run() { throw new Error("must never run without approval"); } } });
+		const d = deps({
+			selfUpdater: {
+				async run() {
+					throw new Error("must never run without approval");
+				},
+			},
+		});
 		const { code, out } = await cliRun(["update", "--self"], d);
 		expect(code).toBe(1);
 		expect(out).toContain("approval required");
@@ -426,7 +574,14 @@ describe("CLI", () => {
 		const d = deps({
 			selfUpdater: {
 				async run() {
-					return { ok: true, previousVersion: "0.1.1", latestVersion: "0.2.0", updated: true, restarted: true, message: "updated via npm and restarted the pi-packed service" };
+					return {
+						ok: true,
+						previousVersion: "0.1.1",
+						latestVersion: "0.2.0",
+						updated: true,
+						restarted: true,
+						message: "updated via npm and restarted the pi-packed service",
+					};
 				},
 			},
 		});
@@ -435,14 +590,27 @@ describe("CLI", () => {
 		expect(human.out).toContain("updated via npm and restarted the pi-packed service");
 		expect(human.out).toContain("(0.1.1 \u2192 0.2.0)");
 		const json = await cliRun(["update", "--self", "--approve", "--json"], d);
-		expect(JSON.parse(json.out)).toEqual({ ok: true, previousVersion: "0.1.1", latestVersion: "0.2.0", updated: true, restarted: true, message: "updated via npm and restarted the pi-packed service" });
+		expect(JSON.parse(json.out)).toEqual({
+			ok: true,
+			previousVersion: "0.1.1",
+			latestVersion: "0.2.0",
+			updated: true,
+			restarted: true,
+			message: "updated via npm and restarted the pi-packed service",
+		});
 	});
 
 	it("update --self reports failure with exit code 1 when the selfUpdater itself reports not ok", async () => {
 		const d = deps({
 			selfUpdater: {
 				async run() {
-					return { ok: false, previousVersion: "0.1.1", updated: false, restarted: false, message: "npm install --global @danypops/packed@latest failed (exit 1)" };
+					return {
+						ok: false,
+						previousVersion: "0.1.1",
+						updated: false,
+						restarted: false,
+						message: "npm install --global @danypops/packed@latest failed (exit 1)",
+					};
 				},
 			},
 		});
@@ -497,33 +665,163 @@ describe("CLI", () => {
 	it("routes daemon-owned catalog reads and refresh through the authenticated client", async () => {
 		const calls: string[] = [];
 		const daemon: PackageDaemonPort = {
-			async search(query, _limit, offline) { calls.push(`search:${offline}`); return { query, total: 1, results: [{ name: "pi-daemon", version: "1.0.0" }] }; },
-			async info(name) { return { name, version: "1.0.0" }; },
-			async installed() { calls.push("installed"); return [{ name: "pi-daemon", pinned: "1.0.0" }]; },
-			async catalog() { calls.push("catalog"); return { fetchedAt: "2026-01-01T00:00:00.000Z", sha256: "a".repeat(64), packages: [{ name: "pi-daemon", version: "1.0.0" }] }; },
-			async mirror() { calls.push("mirror"); return 1; },
-			async index() { calls.push("index"); return { generatedAt: "2026-01-01T00:00:00.000Z", packages: [{ name: "pi-daemon", version: "1.0.0", dimensions: {} as never }], truncated: false }; },
-			async indexBuild() { calls.push("indexBuild"); return { generatedAt: "2026-01-01T00:00:00.000Z", packages: [{ name: "pi-daemon", version: "1.0.0", dimensions: {} as never }], truncated: false }; },
-			async updates() { calls.push("updates"); return [{ name: "pi-daemon", installed: "1.0.0", latest: "1.1.0", detectedAt: "2026-01-01T00:00:00.000Z" }]; },
-			async check(path, smoke) { calls.push(`check:${path}:${smoke}`); return { root: path, ok: true, diagnostics: [], summary: { errors: 0, warnings: 0, info: 0 }, checkedFiles: 1, truncated: false }; },
-			async pack(path) { calls.push(`pack:${path}`); return { root: path, ok: true, command: ["npm", "pack"], files: [], shape: { kind: "manifest", verified: true, evidence: [] }, diagnostics: [], truncated: false }; },
-			async score(target) { calls.push(`score:${target}`); return { target, source: "registry", package: { name: target, version: "1" }, dimensions: { discoverability: { status: "ready", met: 1, total: 1, evidence: [], actions: [] }, firstRun: { status: "unknown", met: 0, total: 0, evidence: [], actions: [] }, trust: { status: "unknown", met: 0, total: 0, evidence: [], actions: [] }, maintenance: { status: "unknown", met: 0, total: 0, evidence: [], actions: [] }, traction: { status: "unknown", met: 0, total: 0, evidence: [], actions: [] }, compatibility: { status: "unknown", met: 0, total: 0, evidence: [], actions: [] }, freshness: { status: "unknown", met: 0, total: 0, evidence: [], actions: [] } } }; },
-			async setupExport(projectRoot, force) { calls.push(`setupExport:${projectRoot}:${force}`); return { ok: true, path: `${projectRoot}/pi-setup.json`, manifest: { $schema: "./schema/pi-setup-v1.schema.json", schemaVersion: 1, packages: [], profiles: {} }, diagnostics: [], wrote: true }; },
-			async setupUpdate(manifestPath) { calls.push(`setupUpdate:${manifestPath}`); return { ok: true, path: manifestPath, manifest: { $schema: "./schema/pi-setup-v1.schema.json", schemaVersion: 1, packages: [], profiles: {} }, diagnostics: [], wrote: true, updated: 0 }; },
-			async setupPlan(manifestPath) { calls.push(`setupPlan:${manifestPath}`); return { ok: true, manifestPath, operations: [], diagnostics: [] }; },
-			async setupApply(manifestPath, approved) { calls.push(`setupApply:${manifestPath}:${approved}`); return { ok: true, manifestPath, operations: [], reloadRequired: false, diagnostics: [] }; },
-			async security() { return { mutationApproval: "always" }; },
-			async setMutationApproval(mutationApproval) { return { mutationApproval }; },
-			async install(source) { return source; },
-			async installService(source) { calls.push(`installService:${source}`); return { output: source, spec: { name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/tmp/probe.service" } }; },
-			async remove(name) { return name; },
-			async update(source) { return { output: source, reloadRequired: false, alreadyUpToDate: true, pinned: false }; },
-			async piStatus() { calls.push("piStatus"); return { current: "0.82.1", latest: "0.83.0", upToDate: false }; },
-			async resourcesList(projectRoot) { calls.push(`resourcesList:${projectRoot}`); return { global: [{ source: "npm:pi-daemon", name: "pi-daemon", scope: "global" as const, extensions: [{ path: "extensions/index.ts", enabled: true }], skills: [], prompts: [], themes: [] }], project: [] }; },
-			async resourcesToggle(source, field, path, enabled) { calls.push(`resourcesToggle:${source}:${field}:${path}:${enabled}`); return `${enabled ? "enabled" : "disabled"} ${path}`; },
-			async advisoriesScan(name) { calls.push(`advisoriesScan:${name}`); return { scanned: 1, findings: [], diagnostics: [], truncated: false }; },
-			async doctor(projectRoot) { calls.push(`doctor:${projectRoot}`); return { ok: true, conflicts: [], extensions: [], scanned: 0, truncated: false }; },
-			async updatesForProject(projectRoot) { calls.push(`updatesForProject:${projectRoot}`); return []; },
+			async search(query, _limit, offline) {
+				calls.push(`search:${offline}`);
+				return { query, total: 1, results: [{ name: "pi-daemon", version: "1.0.0" }] };
+			},
+			async info(name) {
+				return { name, version: "1.0.0" };
+			},
+			async installed() {
+				calls.push("installed");
+				return [{ name: "pi-daemon", pinned: "1.0.0" }];
+			},
+			async catalog() {
+				calls.push("catalog");
+				return { fetchedAt: "2026-01-01T00:00:00.000Z", sha256: "a".repeat(64), packages: [{ name: "pi-daemon", version: "1.0.0" }] };
+			},
+			async mirror() {
+				calls.push("mirror");
+				return 1;
+			},
+			async index() {
+				calls.push("index");
+				return {
+					generatedAt: "2026-01-01T00:00:00.000Z",
+					packages: [{ name: "pi-daemon", version: "1.0.0", dimensions: {} as never }],
+					truncated: false,
+				};
+			},
+			async indexBuild() {
+				calls.push("indexBuild");
+				return {
+					generatedAt: "2026-01-01T00:00:00.000Z",
+					packages: [{ name: "pi-daemon", version: "1.0.0", dimensions: {} as never }],
+					truncated: false,
+				};
+			},
+			async updates() {
+				calls.push("updates");
+				return [{ name: "pi-daemon", installed: "1.0.0", latest: "1.1.0", detectedAt: "2026-01-01T00:00:00.000Z" }];
+			},
+			async check(path, smoke) {
+				calls.push(`check:${path}:${smoke}`);
+				return { root: path, ok: true, diagnostics: [], summary: { errors: 0, warnings: 0, info: 0 }, checkedFiles: 1, truncated: false };
+			},
+			async pack(path) {
+				calls.push(`pack:${path}`);
+				return {
+					root: path,
+					ok: true,
+					command: ["npm", "pack"],
+					files: [],
+					shape: { kind: "manifest", verified: true, evidence: [] },
+					diagnostics: [],
+					truncated: false,
+				};
+			},
+			async score(target) {
+				calls.push(`score:${target}`);
+				return {
+					target,
+					source: "registry",
+					package: { name: target, version: "1" },
+					dimensions: {
+						discoverability: { status: "ready", met: 1, total: 1, evidence: [], actions: [] },
+						firstRun: { status: "unknown", met: 0, total: 0, evidence: [], actions: [] },
+						trust: { status: "unknown", met: 0, total: 0, evidence: [], actions: [] },
+						maintenance: { status: "unknown", met: 0, total: 0, evidence: [], actions: [] },
+						traction: { status: "unknown", met: 0, total: 0, evidence: [], actions: [] },
+						compatibility: { status: "unknown", met: 0, total: 0, evidence: [], actions: [] },
+						freshness: { status: "unknown", met: 0, total: 0, evidence: [], actions: [] },
+					},
+				};
+			},
+			async setupExport(projectRoot, force) {
+				calls.push(`setupExport:${projectRoot}:${force}`);
+				return {
+					ok: true,
+					path: `${projectRoot}/pi-setup.json`,
+					manifest: { $schema: "./schema/pi-setup-v1.schema.json", schemaVersion: 1, packages: [], profiles: {} },
+					diagnostics: [],
+					wrote: true,
+				};
+			},
+			async setupUpdate(manifestPath) {
+				calls.push(`setupUpdate:${manifestPath}`);
+				return {
+					ok: true,
+					path: manifestPath,
+					manifest: { $schema: "./schema/pi-setup-v1.schema.json", schemaVersion: 1, packages: [], profiles: {} },
+					diagnostics: [],
+					wrote: true,
+					updated: 0,
+				};
+			},
+			async setupPlan(manifestPath) {
+				calls.push(`setupPlan:${manifestPath}`);
+				return { ok: true, manifestPath, operations: [], diagnostics: [] };
+			},
+			async setupApply(manifestPath, approved) {
+				calls.push(`setupApply:${manifestPath}:${approved}`);
+				return { ok: true, manifestPath, operations: [], reloadRequired: false, diagnostics: [] };
+			},
+			async security() {
+				return { mutationApproval: "always" };
+			},
+			async setMutationApproval(mutationApproval) {
+				return { mutationApproval };
+			},
+			async install(source) {
+				return source;
+			},
+			async installService(source) {
+				calls.push(`installService:${source}`);
+				return { output: source, spec: { name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/tmp/probe.service" } };
+			},
+			async remove(name) {
+				return name;
+			},
+			async update(source) {
+				return { output: source, reloadRequired: false, alreadyUpToDate: true, pinned: false };
+			},
+			async piStatus() {
+				calls.push("piStatus");
+				return { current: "0.82.1", latest: "0.83.0", upToDate: false };
+			},
+			async resourcesList(projectRoot) {
+				calls.push(`resourcesList:${projectRoot}`);
+				return {
+					global: [
+						{
+							source: "npm:pi-daemon",
+							name: "pi-daemon",
+							scope: "global" as const,
+							extensions: [{ path: "extensions/index.ts", enabled: true }],
+							skills: [],
+							prompts: [],
+							themes: [],
+						},
+					],
+					project: [],
+				};
+			},
+			async resourcesToggle(source, field, path, enabled) {
+				calls.push(`resourcesToggle:${source}:${field}:${path}:${enabled}`);
+				return `${enabled ? "enabled" : "disabled"} ${path}`;
+			},
+			async advisoriesScan(name) {
+				calls.push(`advisoriesScan:${name}`);
+				return { scanned: 1, findings: [], diagnostics: [], truncated: false };
+			},
+			async doctor(projectRoot) {
+				calls.push(`doctor:${projectRoot}`);
+				return { ok: true, conflicts: [], extensions: [], scanned: 0, truncated: false };
+			},
+			async updatesForProject(projectRoot) {
+				calls.push(`updatesForProject:${projectRoot}`);
+				return [];
+			},
 		};
 		const d = deps({ daemon });
 		expect(JSON.parse((await cliRun(["search", "daemon", "--offline", "--json"], d)).out).results[0].name).toBe("pi-daemon");
@@ -542,11 +840,47 @@ describe("CLI", () => {
 		expect((await cliRun(["setup", "apply", "/tmp/project/pi-setup.json", "--approve", "--json"], d)).code).toBe(0);
 		expect(JSON.parse((await cliRun(["pi", "status", "--json"], d)).out)).toEqual({ current: "0.82.1", latest: "0.83.0", upToDate: false });
 		expect(JSON.parse((await cliRun(["resources", "list", "--json"], d)).out).global[0].name).toBe("pi-daemon");
-		expect(JSON.parse((await cliRun(["resources", "toggle", "npm:pi-daemon", "extensions", "extensions/index.ts", "off", "--approve", "--json"], d)).out)).toMatchObject({ ok: true, enabled: false });
-		expect(JSON.parse((await cliRun(["advisories", "--json"], d)).out)).toEqual({ scanned: 1, findings: [], diagnostics: [], truncated: false });
-		expect(JSON.parse((await cliRun(["doctor", "--json"], d)).out)).toEqual({ ok: true, conflicts: [], extensions: [], scanned: 0, truncated: false });
+		expect(
+			JSON.parse(
+				(await cliRun(["resources", "toggle", "npm:pi-daemon", "extensions", "extensions/index.ts", "off", "--approve", "--json"], d)).out,
+			),
+		).toMatchObject({ ok: true, enabled: false });
+		expect(JSON.parse((await cliRun(["advisories", "--json"], d)).out)).toEqual({
+			scanned: 1,
+			findings: [],
+			diagnostics: [],
+			truncated: false,
+		});
+		expect(JSON.parse((await cliRun(["doctor", "--json"], d)).out)).toEqual({
+			ok: true,
+			conflicts: [],
+			extensions: [],
+			scanned: 0,
+			truncated: false,
+		});
 		expect(JSON.parse((await cliRun(["updates", "--project", "/tmp/project", "--json"], d)).out).updates).toEqual([]);
-		expect(calls).toEqual(["search:true", "installed", "updates", "catalog", "mirror", "index", "indexBuild", "check:/tmp/package:true", "pack:/tmp/package", "score:pi-daemon", "setupExport:/tmp/project:true", "setupUpdate:/tmp/project/pi-setup.json", "setupPlan:/tmp/project/pi-setup.json", "setupApply:/tmp/project/pi-setup.json:true", "piStatus", "resourcesList:undefined", "resourcesToggle:npm:pi-daemon:extensions:extensions/index.ts:false", "advisoriesScan:undefined", "doctor:undefined", "updatesForProject:/tmp/project"]);
+		expect(calls).toEqual([
+			"search:true",
+			"installed",
+			"updates",
+			"catalog",
+			"mirror",
+			"index",
+			"indexBuild",
+			"check:/tmp/package:true",
+			"pack:/tmp/package",
+			"score:pi-daemon",
+			"setupExport:/tmp/project:true",
+			"setupUpdate:/tmp/project/pi-setup.json",
+			"setupPlan:/tmp/project/pi-setup.json",
+			"setupApply:/tmp/project/pi-setup.json:true",
+			"piStatus",
+			"resourcesList:undefined",
+			"resourcesToggle:npm:pi-daemon:extensions:extensions/index.ts:false",
+			"advisoriesScan:undefined",
+			"doctor:undefined",
+			"updatesForProject:/tmp/project",
+		]);
 	});
 
 	it("advisories runs standalone without a daemon and degrades to zero findings, never a real network call, when nothing is installed", async () => {
@@ -572,7 +906,10 @@ describe("CLI", () => {
 		writeFileSync(join(piHome, "settings.json"), JSON.stringify({ packages: ["npm:pi-demo"] }));
 		const pkgDir = join(piHome, "npm", "node_modules", "pi-demo");
 		mkdirSync(pkgDir, { recursive: true });
-		writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ name: "pi-demo", version: "1.0.0", pi: { extensions: ["extensions/index.ts"] } }));
+		writeFileSync(
+			join(pkgDir, "package.json"),
+			JSON.stringify({ name: "pi-demo", version: "1.0.0", pi: { extensions: ["extensions/index.ts"] } }),
+		);
 		mkdirSync(join(pkgDir, "extensions"), { recursive: true });
 		writeFileSync(join(pkgDir, "extensions", "index.ts"), "export default function () {}");
 		const d = deps({ piHome });
@@ -586,7 +923,10 @@ describe("CLI", () => {
 		expect(human.out).toContain("extensions/index.ts");
 
 		expect((await cliRun(["resources", "toggle", "npm:pi-demo", "extensions", "extensions/index.ts", "off"], d)).code).toBe(1); // approval required
-		const toggled = await cliRun(["resources", "toggle", "npm:pi-demo", "extensions", "extensions/index.ts", "off", "--approve", "--json"], d);
+		const toggled = await cliRun(
+			["resources", "toggle", "npm:pi-demo", "extensions", "extensions/index.ts", "off", "--approve", "--json"],
+			d,
+		);
 		expect(JSON.parse(toggled.out)).toMatchObject({ ok: true, enabled: false });
 		const after = JSON.parse((await cliRun(["resources", "list", "--json"], d)).out);
 		expect(after.global[0].extensions).toEqual([{ path: "extensions/index.ts", enabled: false }]);
@@ -598,37 +938,48 @@ describe("CLI", () => {
 	// Same sandbox-availability probe as smoke.test.ts/doctor.test.ts: binary
 	// presence alone doesn't prove bwrap actually works under this host's
 	// user namespaces.
-	const bwrapUsable = existsSync("/usr/bin/bwrap") && spawnSync("/usr/bin/bwrap", ["--ro-bind", "/", "/", "--unshare-all", "--", "/bin/true"], { timeout: 5_000 }).status === 0;
-	(bwrapUsable ? it : it.skip)("doctor runs standalone without a daemon and reproduces the jittor incident through the real CLI (CLI parity for the daemon-only doctor.run operation)", async () => {
-		const piHome = mkdtempSync(join(tmpdir(), "packed-doctor-cli-"));
-		writeFileSync(join(piHome, "settings.json"), JSON.stringify({ packages: ["npm:pi-papyrus"] }));
-		const globalPkg = join(piHome, "npm", "node_modules", "pi-papyrus");
-		mkdirSync(join(globalPkg, "extension"), { recursive: true });
-		writeFileSync(join(globalPkg, "package.json"), JSON.stringify({ name: "pi-papyrus", version: "1.0.0", pi: { extensions: ["extension/index.ts"] } }));
-		writeFileSync(join(globalPkg, "extension", "index.ts"), 'export default function (pi: any) { pi.registerTool({ name: "tasks" }); }');
-		const projectRoot = mkdtempSync(join(tmpdir(), "packed-doctor-cli-project-"));
-		const projectHome = join(projectRoot, ".pi");
-		mkdirSync(projectHome, { recursive: true });
-		writeFileSync(join(projectHome, "settings.json"), JSON.stringify({ packages: ["npm:papyrus"] }));
-		const projectPkg = join(projectHome, "npm", "node_modules", "papyrus");
-		mkdirSync(join(projectPkg, "extension"), { recursive: true });
-		writeFileSync(join(projectPkg, "package.json"), JSON.stringify({ name: "papyrus", version: "1.0.0", pi: { extensions: ["extension/index.ts"] } }));
-		writeFileSync(join(projectPkg, "extension", "index.ts"), 'export default function (pi: any) { pi.registerTool({ name: "tasks" }); }');
-		const d = deps({ piHome });
+	const bwrapUsable =
+		existsSync("/usr/bin/bwrap") &&
+		spawnSync("/usr/bin/bwrap", ["--ro-bind", "/", "/", "--unshare-all", "--", "/bin/true"], { timeout: 5_000 }).status === 0;
+	(bwrapUsable ? it : it.skip)(
+		"doctor runs standalone without a daemon and reproduces the jittor incident through the real CLI (CLI parity for the daemon-only doctor.run operation)",
+		async () => {
+			const piHome = mkdtempSync(join(tmpdir(), "packed-doctor-cli-"));
+			writeFileSync(join(piHome, "settings.json"), JSON.stringify({ packages: ["npm:pi-papyrus"] }));
+			const globalPkg = join(piHome, "npm", "node_modules", "pi-papyrus");
+			mkdirSync(join(globalPkg, "extension"), { recursive: true });
+			writeFileSync(
+				join(globalPkg, "package.json"),
+				JSON.stringify({ name: "pi-papyrus", version: "1.0.0", pi: { extensions: ["extension/index.ts"] } }),
+			);
+			writeFileSync(join(globalPkg, "extension", "index.ts"), 'export default function (pi: any) { pi.registerTool({ name: "tasks" }); }');
+			const projectRoot = mkdtempSync(join(tmpdir(), "packed-doctor-cli-project-"));
+			const projectHome = join(projectRoot, ".pi");
+			mkdirSync(projectHome, { recursive: true });
+			writeFileSync(join(projectHome, "settings.json"), JSON.stringify({ packages: ["npm:papyrus"] }));
+			const projectPkg = join(projectHome, "npm", "node_modules", "papyrus");
+			mkdirSync(join(projectPkg, "extension"), { recursive: true });
+			writeFileSync(
+				join(projectPkg, "package.json"),
+				JSON.stringify({ name: "papyrus", version: "1.0.0", pi: { extensions: ["extension/index.ts"] } }),
+			);
+			writeFileSync(join(projectPkg, "extension", "index.ts"), 'export default function (pi: any) { pi.registerTool({ name: "tasks" }); }');
+			const d = deps({ piHome });
 
-		const clean = await cliRun(["doctor", "--json"], d);
-		expect(clean.code).toBe(0);
-		expect(JSON.parse(clean.out)).toMatchObject({ ok: true, conflicts: [] });
+			const clean = await cliRun(["doctor", "--json"], d);
+			expect(clean.code).toBe(0);
+			expect(JSON.parse(clean.out)).toMatchObject({ ok: true, conflicts: [] });
 
-		const withProject = await cliRun(["doctor", "--project", projectRoot, "--json"], d);
-		expect(withProject.code).toBe(1);
-		const report = JSON.parse(withProject.out);
-		expect(report.ok).toBe(false);
-		expect(report.conflicts).toHaveLength(1);
-		expect(report.conflicts[0]).toMatchObject({ kind: "tool", name: "tasks" });
-		const human = await cliRun(["doctor", "--project", projectRoot], d);
-		expect(human.out).toContain('CONFLICT tool "tasks"');
-	});
+			const withProject = await cliRun(["doctor", "--project", projectRoot, "--json"], d);
+			expect(withProject.code).toBe(1);
+			const report = JSON.parse(withProject.out);
+			expect(report.ok).toBe(false);
+			expect(report.conflicts).toHaveLength(1);
+			expect(report.conflicts[0]).toMatchObject({ kind: "tool", name: "tasks" });
+			const human = await cliRun(["doctor", "--project", projectRoot], d);
+			expect(human.out).toContain('CONFLICT tool "tasks"');
+		},
+	);
 
 	it("version reports just the installed version when no daemon is reachable", async () => {
 		const { code, out } = await cliRun(["version", "--json"], deps({ daemonVersionCheck: async () => undefined }));
@@ -671,20 +1022,79 @@ describe("daemon client", () => {
 			reg: new FakeRegistry([{ name: "pi-lsp", version: "0.3.0" }]),
 			inst: daemonInstaller,
 			daemonServiceInstaller: {
-				install: () => ({ ok: true, result: { installed: true }, spec: { name: "pi-lsp", binPath: "/opt/pi-lsp/cli.js", descriptorPath: "/tmp/pi-lsp.service" } }),
+				install: () => ({
+					ok: true,
+					result: { installed: true },
+					spec: { name: "pi-lsp", binPath: "/opt/pi-lsp/cli.js", descriptorPath: "/tmp/pi-lsp.service" },
+				}),
 			},
 			token: daemonToken,
 			stateDir: daemonDir,
 			piHome: mkdtempSync(join(tmpdir(), "packed-daemon-pi-")),
-			packer: { async verify(path) { return { root: path, ok: true, command: ["npm", "pack"], files: [], shape: { kind: "manifest", verified: true, evidence: ["pi.extensions"] }, diagnostics: [], truncated: false }; } },
-			scorer: { async score(target) { const empty = { status: "unknown" as const, met: 0, total: 0, evidence: [], actions: [] }; return { target, source: "registry" as const, package: { name: target, version: "1" }, dimensions: { discoverability: empty, firstRun: empty, trust: empty, maintenance: empty, traction: empty, compatibility: empty, freshness: empty } }; } },
-			setup: {
-				async export(projectRoot) { return { ok: true, path: `${projectRoot}/pi-setup.json`, manifest: { $schema: "./schema/pi-setup-v1.schema.json", schemaVersion: 1, packages: [], profiles: {} }, diagnostics: [], wrote: true }; },
-				async update(manifestPath) { return { ok: true, path: manifestPath, manifest: { $schema: "./schema/pi-setup-v1.schema.json", schemaVersion: 1, packages: [], profiles: {} }, diagnostics: [], wrote: true, updated: 0 }; },
-				async plan(manifestPath) { return { ok: true, manifestPath, operations: [], diagnostics: [] }; },
-				async apply(manifestPath) { return { ok: true, manifestPath, operations: [], reloadRequired: false, diagnostics: [] }; },
+			packer: {
+				async verify(path) {
+					return {
+						root: path,
+						ok: true,
+						command: ["npm", "pack"],
+						files: [],
+						shape: { kind: "manifest", verified: true, evidence: ["pi.extensions"] },
+						diagnostics: [],
+						truncated: false,
+					};
+				},
 			},
-			piVersion: { async check() { return { current: "0.82.1", latest: "0.83.0", upToDate: false }; } },
+			scorer: {
+				async score(target) {
+					const empty = { status: "unknown" as const, met: 0, total: 0, evidence: [], actions: [] };
+					return {
+						target,
+						source: "registry" as const,
+						package: { name: target, version: "1" },
+						dimensions: {
+							discoverability: empty,
+							firstRun: empty,
+							trust: empty,
+							maintenance: empty,
+							traction: empty,
+							compatibility: empty,
+							freshness: empty,
+						},
+					};
+				},
+			},
+			setup: {
+				async export(projectRoot) {
+					return {
+						ok: true,
+						path: `${projectRoot}/pi-setup.json`,
+						manifest: { $schema: "./schema/pi-setup-v1.schema.json", schemaVersion: 1, packages: [], profiles: {} },
+						diagnostics: [],
+						wrote: true,
+					};
+				},
+				async update(manifestPath) {
+					return {
+						ok: true,
+						path: manifestPath,
+						manifest: { $schema: "./schema/pi-setup-v1.schema.json", schemaVersion: 1, packages: [], profiles: {} },
+						diagnostics: [],
+						wrote: true,
+						updated: 0,
+					};
+				},
+				async plan(manifestPath) {
+					return { ok: true, manifestPath, operations: [], diagnostics: [] };
+				},
+				async apply(manifestPath) {
+					return { ok: true, manifestPath, operations: [], reloadRequired: false, diagnostics: [] };
+				},
+			},
+			piVersion: {
+				async check() {
+					return { current: "0.82.1", latest: "0.83.0", upToDate: false };
+				},
+			},
 		});
 		server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => app.fetch(req) });
 		writeDaemonHandle(daemonPaths.handle, { host: "127.0.0.1", port: server.port!, pid: process.pid });

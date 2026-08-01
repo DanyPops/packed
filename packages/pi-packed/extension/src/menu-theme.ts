@@ -33,5 +33,10 @@ export function tabBarTheme(theme: Theme): TabBarTheme {
 	return {
 		tab: (s) => theme.fg("muted", s),
 		activeTab: (s) => theme.bold(theme.fg("accent", s)),
+		// Every tab's first letter is a jump mnemonic (p/f/c/s) -- a distinct
+		// warning-colored bold, so it reads as "press this letter" on both the
+		// active and inactive tabs alike, not just whichever accent color
+		// activeTab already uses for the whole label.
+		mnemonic: (s) => theme.bold(theme.fg("warning", s)),
 	};
 }

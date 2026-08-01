@@ -429,6 +429,16 @@ export class PackagesTab implements Component {
 		return this.searchActive || this.updatingRowName !== undefined;
 	}
 
+	/** Same condition as capturesEscape -- an active filter or an in-flight
+	 * mutation means every printable key (including a letter that would
+	 * otherwise be a global tab-jump mnemonic) belongs to this tab right now.
+	 * Packages itself never needs this check at the host level (see
+	 * renderUnifiedPanel's own dispatcher), but implementing it keeps this
+	 * tab's own contract honest and consistent with the other three. */
+	capturesMnemonics(): boolean {
+		return this.searchActive || this.updatingRowName !== undefined;
+	}
+
 	invalidate(): void {
 		this.table.invalidate();
 	}
@@ -462,7 +472,7 @@ export class PackagesTab implements Component {
 		const line1 = truncateToWidth(hint, width, "");
 		const dot = "·";
 		const line2 = truncateToWidth(
-			theme.fg("muted", `${this.statusLine()} ${dot} view: ${this.mode} ${dot} / filter ${dot} tab view ${dot} ${this.rows.length} installed`),
+			theme.fg("muted", `${this.statusLine()} ${dot} view: ${this.mode} ${dot} / filter ${dot} v view ${dot} ${this.rows.length} installed`),
 			width,
 			"",
 		);
@@ -528,7 +538,7 @@ export class PackagesTab implements Component {
 			case "\x1b[B":
 				this.selectedIndex = (this.selectedIndex + 1) % Math.max(this.filtered.length, 1);
 				break;
-			case "\t":
+			case "v": // Tab is now reserved globally for sweeping between menus (TabbedContainer)
 				this.mode = nextMode(this.mode);
 				this.applyFilter();
 				break;
@@ -655,9 +665,19 @@ interface TabScope {
 	 * Packages, or close from Packages" handling. Defaults to false. */
 	capturesEscape?(): boolean;
 	/** True while this tab wants Left/Right for itself right now (Find's
-	 * always-on query cursor) instead of the host's own tab-cycling.
-	 * Defaults to false. */
+	 * always-on query cursor) instead of the host's own tab-cycling via
+	 * TabbedContainer. Tab/Shift-Tab have no such exception -- nothing needs
+	 * a literal Tab character for itself, so they always sweep between
+	 * menus. Defaults to false. */
 	capturesHorizontalArrows?(): boolean;
+	/** True while this tab wants every printable character for itself (an
+	 * active filter, an in-flight mutation, or Find's permanent query box)
+	 * instead of the host's own mnemonic letter-jump (p/f/c/s). Defaults to
+	 * false. Never consulted while Packages itself is active -- Packages'
+	 * own f/c/s bindings already do the same jump (c additionally scopes
+	 * Config to the selected row), so the generic host-level jump only
+	 * matters for reaching a tab from one of the OTHER three. */
+	capturesMnemonics?(): boolean;
 }
 
 export async function showPackedPanel(
@@ -799,10 +819,35 @@ function renderUnifiedPanel(
 					tui.requestRender();
 					return;
 				}
+				// Tab/Shift-Tab always sweep between menus -- nothing needs a literal
+				// Tab character for itself (Packages'/Config's own former Tab bindings
+				// moved to v once Tab was claimed globally; see the mnemonics.test.ts
+				// conflict check for why that reassignment was necessary).
+				if (data === "\t" || data === "\x1b[Z") {
+					tabbedContainer.handleInput(data);
+					tui.requestRender();
+					return;
+				}
 				if ((data === "\x1b[C" || data === "\x1b[D") && !(activeTab.capturesHorizontalArrows?.() ?? false)) {
 					tabbedContainer.handleInput(data); // owns Left/Right cycling itself
 					tui.requestRender();
 					return;
+				}
+				// The first letter of each tab's label is a jump mnemonic
+				// (Packages/Find/Config/Settings -> p/f/c/s), highlighted in the tab
+				// bar itself -- but only reachable FROM one of the other three tabs.
+				// Packages' own f/c/s bindings already do the same jump (c
+				// additionally scopes Config to the selected row); letting the
+				// generic version fire there too would just be redundant, not wrong,
+				// but skipping it keeps this one dispatcher the single source of
+				// truth for "which code path actually owns key X" per active tab.
+				if (activeKey !== "packages" && data.length === 1) {
+					const target = tabbedContainer.resolveMnemonic(data);
+					if (target && target !== activeKey && !(activeTab.capturesMnemonics?.() ?? false)) {
+						tabbedContainer.setActive(target as PackedTabKey);
+						tui.requestRender();
+						return;
+					}
 				}
 				activeTab.handleInput?.(data);
 				tui.requestRender();

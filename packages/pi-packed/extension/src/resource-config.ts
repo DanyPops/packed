@@ -153,6 +153,13 @@ export class ConfigTab implements Component {
 		return this.searchActive || this.busy;
 	}
 
+	/** Same condition as capturesEscape -- an active filter or an in-flight
+	 * toggle means every printable key (including a letter that would
+	 * otherwise be a global tab-jump mnemonic) belongs to this tab right now. */
+	capturesMnemonics(): boolean {
+		return this.searchActive || this.busy;
+	}
+
 	invalidate(): void {}
 
 	render(width: number): string[] {
@@ -160,7 +167,7 @@ export class ConfigTab implements Component {
 		const scopeLabel = theme.bold(this.scope === "project" ? "Project Resources" : "Global Resources");
 		const hint = this.searchActive
 			? rawKeyHint("esc", "clear")
-			: rawKeyHint("space", "toggle") + theme.fg("muted", " \u00b7 ") + rawKeyHint("/", "filter") + theme.fg("muted", " \u00b7 ") + rawKeyHint("tab", "scope") + theme.fg("muted", " \u00b7 ") + rawKeyHint("r", "refresh");
+			: rawKeyHint("space", "toggle") + theme.fg("muted", " · ") + rawKeyHint("/", "filter") + theme.fg("muted", " · ") + rawKeyHint("v", "scope") + theme.fg("muted", " · ") + rawKeyHint("r", "refresh");
 		const spacing = Math.max(1, width - visibleWidth(scopeLabel) - visibleWidth(hint));
 		const line1 = truncateToWidth(`${scopeLabel}${" ".repeat(spacing)}${hint}`, width, "");
 		const line2 = truncateToWidth(theme.fg("muted", `${this.items.length} resource(s) \u00b7 extensions need a reload after a change`), width, "");
@@ -199,7 +206,7 @@ export class ConfigTab implements Component {
 		switch (raw) {
 			case "\x1b[A": this.selectedIndex = (this.selectedIndex - 1 + this.filtered.length) % Math.max(this.filtered.length, 1); break;
 			case "\x1b[B": this.selectedIndex = (this.selectedIndex + 1) % Math.max(this.filtered.length, 1); break;
-			case "\t":
+			case "v": // Tab is now reserved globally for sweeping between menus (TabbedContainer)
 				this.scope = this.scope === "global" ? "project" : "global";
 				this.rebuildItems();
 				this.applyFilter();

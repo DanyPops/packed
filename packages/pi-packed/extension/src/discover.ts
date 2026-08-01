@@ -88,6 +88,14 @@ export class FindTab implements Component {
 		return this.busy;
 	}
 
+	/** Unlike capturesEscape, this is ALWAYS true, busy or not: every
+	 * printable character (a letter that would otherwise be a global
+	 * tab-jump mnemonic included) is query text here, always -- there's no
+	 * separate "browse mode" to fall back to the way Packages/Config have. */
+	capturesMnemonics(): boolean {
+		return true;
+	}
+
 	invalidate(): void {}
 
 	render(width: number): string[] {

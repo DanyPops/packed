@@ -546,6 +546,95 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		expect(customCallCount).toBe(1); // one overlay throughout -- never closed and reopened for find
 	});
 
+	it("Tab and Shift-Tab sweep between every menu, wrapping at both ends, same as Left/Right", async () => {
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
+					return new Promise((resolve) => {
+						const theme = { fg: (_c: string, s: string) => s, bold: (s: string) => s };
+						const component = factory({ requestRender() {} }, theme, {}, resolve);
+						expect(component.render(60).join("\n")).toContain("No packages"); // Packages, the default
+						component.handleInput("\t"); // tab -> Find
+						expect(component.render(60).join("\n")).toContain("Type a query and press enter to search npm");
+						component.handleInput("\x1b[Z"); // shift+tab -> back to Packages
+						expect(component.render(60).join("\n")).toContain("No packages");
+						component.handleInput("\x1b[Z"); // shift+tab wraps backward -> Settings (the last tab)
+						setTimeout(() => {
+							expect(component.render(60).join("\n")).toContain("current: always");
+							resolve(undefined);
+						}, 0);
+					});
+				},
+				notify() {},
+			},
+		} as unknown as ExtensionCommandContext;
+		const natives = baseNatives();
+
+		await showPackedPanel(ctx, natives);
+	});
+
+	it("a tab's own first-letter mnemonic (p/f/c/s) jumps to it from any OTHER non-Packages tab", async () => {
+		// From Config (idle, not filtering) -- a tab whose capturesMnemonics()
+		// isn't unconditionally true -- "s" jumps straight to Settings.
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
+					return new Promise((resolve) => {
+						const theme = { fg: (_c: string, s: string) => s, bold: (s: string) => s };
+						const component = factory({ requestRender() {} }, theme, {}, resolve);
+						component.handleInput("c"); // Packages' own c -> Config, scoped to the selected row
+						expect(component.render(60).join("\n")).toContain("Global Resources");
+						component.handleInput("s"); // Config -> Settings via the generic host-level mnemonic
+						setTimeout(() => {
+							expect(component.render(60).join("\n")).toContain("current: always");
+							resolve(undefined);
+						}, 0);
+					});
+				},
+				notify() {},
+			},
+		} as unknown as ExtensionCommandContext;
+		const natives = baseNatives({ async installed() { return [{ name: "pi-lsp", installed: "1.0.0" }]; } });
+
+		await showPackedPanel(ctx, natives);
+	});
+
+	it("never steals a letter as a mnemonic while Config is mid-filter, or while Find's query box is focused (always true there)", async () => {
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
+					return new Promise((resolve) => {
+						const theme = { fg: (_c: string, s: string) => s, bold: (s: string) => s };
+						const component = factory({ requestRender() {} }, theme, {}, resolve);
+
+						// Config's own filter box: typing "s" while filtering must not jump.
+						component.handleInput("c");
+						component.handleInput("/"); // start filtering
+						component.handleInput("s");
+						expect(component.render(60).join("\n")).not.toContain("current: always"); // did NOT jump to Settings
+						component.handleInput("\x1b"); // clear the filter, still on Config
+
+						// Find's query box: every letter is always query text, never a mnemonic.
+						component.handleInput("\x1b"); // back to Packages
+						component.handleInput("f");
+						component.handleInput("s");
+						component.handleInput("e");
+						expect(component.render(60).join("\n")).toContain("se"); // typed into the query box
+						expect(component.render(60).join("\n")).not.toContain("current: always"); // did NOT jump to Settings
+						resolve(undefined);
+					});
+				},
+				notify() {},
+			},
+		} as unknown as ExtensionCommandContext;
+		const natives = baseNatives({ async installed() { return [{ name: "pi-lsp", installed: "1.0.0" }]; } });
+
+		await showPackedPanel(ctx, natives);
+	});
+
 	it("renders its approval and reload confirms as an inline Dialog on this SAME overlay, dispatched by literal y/n keys -- never a separate ctx.ui.confirm", async () => {
 		// mutationApproval "never" skips the approval step entirely, leaving
 		// confirmReload as the one dialog to interact with -- isolates the

@@ -25,7 +25,7 @@ const ANSI_RESET = "\u001b[0m";
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-9;]*m/g;
 const realishTheme = {
 	fg: (_color: string, s: string) => `${ANSI_ORANGE}${s}${ANSI_RESET}`,
-	inverse: (s: string) => `\u001b[7m${s}\u001b[27m`,
+	bg: (_color: string, s: string) => `${ANSI_ORANGE}${s}${ANSI_RESET}`,
 	bold: (s: string) => `${ANSI_BOLD}${s}${ANSI_RESET}`,
 };
 function stripAnsi(s: string): string {
@@ -87,7 +87,7 @@ function fakeCtxDeferReload(notices: string[], reloads: { count: number }): Exte
 function autoResolvingCustom() {
 	return <T>(factory: (tui: unknown, theme: unknown, kb: unknown, done: (result: T) => void) => unknown): Promise<T> =>
 		new Promise<T>((resolve) => {
-			factory({ requestRender() {} }, { fg: (_c: string, s: string) => s, inverse: (s: string) => s, bold: (s: string) => s }, {}, resolve);
+			factory({ requestRender() {} }, { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s }, {}, resolve);
 		});
 }
 
@@ -104,7 +104,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
 					customCallCount += 1;
 					return new Promise((resolve) => {
-						const theme = { fg: (_c: string, s: string) => s, inverse: (s: string) => s, bold: (s: string) => s };
+						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
 						const component = factory({ requestRender() {} }, theme, {}, resolve);
 						component.handleInput("s");
 						setTimeout(() => {
@@ -177,7 +177,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 			ui: {
 				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[] }) {
 					return new Promise((resolve) => {
-						const theme = { fg: (_c: string, s: string) => s, inverse: (s: string) => s, bold: (s: string) => s };
+						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
 						const component = factory({ requestRender() {} }, theme, {}, resolve);
 						rendered = component.render(60);
 						resolve(undefined);
@@ -204,7 +204,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 			ui: {
 				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[] }) {
 					return new Promise((resolve) => {
-						const theme = { fg: (_c: string, s: string) => s, inverse: (s: string) => s, bold: (s: string) => s };
+						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
 						const component = factory({ requestRender() {} }, theme, {}, resolve);
 						rendered = component.render(90);
 						resolve(undefined);
@@ -284,7 +284,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 			ui: {
 				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
 					return new Promise((resolve) => {
-						const theme = { fg: (_c: string, s: string) => s, inverse: (s: string) => s, bold: (s: string) => s };
+						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
 						const tui = { requestRender() { renderedFrames.push(component.render(60).join("\n")); } };
 						const component = factory(tui, theme, {}, resolve);
 						component.handleInput("U");
@@ -332,7 +332,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 			ui: {
 				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
 					return new Promise((resolve) => {
-						const theme = { fg: (_c: string, s: string) => s, inverse: (s: string) => s, bold: (s: string) => s };
+						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
 						const tui = { requestRender() { renderedFrames.push(component.render(60).join("\n")); } };
 						const component = factory(tui, theme, {}, resolve);
 						component.handleInput("U");
@@ -376,7 +376,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { handleInput(data: string): void }) {
 					customCallCount += 1;
 					return new Promise((resolve) => {
-						const component = factory({ requestRender() {} }, { fg: (_c: string, s: string) => s, inverse: (s: string) => s, bold: (s: string) => s }, {}, resolve);
+						const component = factory({ requestRender() {} }, { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s }, {}, resolve);
 						component.handleInput("U");
 						setTimeout(() => {
 							component.handleInput("y"); // approval
@@ -413,7 +413,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { handleInput(data: string): void }) {
 					customCallCount += 1;
 					return new Promise((resolve) => {
-						const component = factory({ requestRender() { renderRequests += 1; } }, { fg: (_c: string, s: string) => s, inverse: (s: string) => s, bold: (s: string) => s }, {}, resolve);
+						const component = factory({ requestRender() { renderRequests += 1; } }, { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s }, {}, resolve);
 						component.handleInput("U");
 						// approval only -- nothing changed (changed === 0) never reaches the
 						// separate reload confirm. Then, back in list mode, press esc to close.
@@ -456,7 +456,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 			ui: {
 				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
 					return new Promise((resolve) => {
-						const theme = { fg: (_c: string, s: string) => s, inverse: (s: string) => s, bold: (s: string) => s };
+						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
 						const tui = { requestRender() { renderedFrames.push(component.render(70).join("\n")); } };
 						const component = factory(tui, theme, {}, resolve);
 						component.handleInput("u");
@@ -496,7 +496,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
 					customCallCount += 1;
 					return new Promise((resolve) => {
-						const theme = { fg: (_c: string, s: string) => s, inverse: (s: string) => s, bold: (s: string) => s };
+						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
 						const component = factory({ requestRender() {} }, theme, {}, resolve);
 						expect(component.render(60).join("\n")).toContain("pi-lsp"); // Packages tab, already loaded
 						component.handleInput("c");
@@ -528,7 +528,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
 					customCallCount += 1;
 					return new Promise((resolve) => {
-						const theme = { fg: (_c: string, s: string) => s, inverse: (s: string) => s, bold: (s: string) => s };
+						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
 						const component = factory({ requestRender() {} }, theme, {}, resolve);
 						component.handleInput("f");
 						expect(component.render(60).join("\n")).toContain("Type a query and press enter to search npm"); // now on the Find tab
@@ -553,7 +553,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 			ui: {
 				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
 					return new Promise((resolve) => {
-						const theme = { fg: (_c: string, s: string) => s, inverse: (s: string) => s, bold: (s: string) => s };
+						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
 						const component = factory({ requestRender() {} }, theme, {}, resolve);
 						expect(component.render(60).join("\n")).toContain("No packages"); // Packages, the default
 						component.handleInput("\t"); // tab -> Find
@@ -589,7 +589,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 			ui: {
 				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
 					return new Promise((resolve) => {
-						const theme = { fg: (_c: string, s: string) => s, inverse: (s: string) => s, bold: (s: string) => s };
+						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
 						const component = factory({ requestRender() {} }, theme, {}, resolve);
 						expect(component.render(60).join("\n")).toContain("No packages"); // Packages, the default
 						component.handleInput("\x1b[27;2;9~"); // modifyOtherKeys shift+tab -> wraps backward to Settings
@@ -615,7 +615,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 			ui: {
 				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
 					return new Promise((resolve) => {
-						const theme = { fg: (_c: string, s: string) => s, inverse: (s: string) => s, bold: (s: string) => s };
+						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
 						const component = factory({ requestRender() {} }, theme, {}, resolve);
 						component.handleInput("c"); // Packages' own c -> Config, scoped to the selected row
 						expect(component.render(60).join("\n")).toContain("Global Resources");
@@ -640,7 +640,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 			ui: {
 				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
 					return new Promise((resolve) => {
-						const theme = { fg: (_c: string, s: string) => s, inverse: (s: string) => s, bold: (s: string) => s };
+						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
 						const component = factory({ requestRender() {} }, theme, {}, resolve);
 
 						// Config's own filter box: typing "s" while filtering must not jump.
@@ -682,7 +682,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
 					customCallCount += 1;
 					return new Promise((resolve) => {
-						const theme = { fg: (_c: string, s: string) => s, inverse: (s: string) => s, bold: (s: string) => s };
+						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
 						const component = factory({ requestRender() {} }, theme, {}, resolve);
 						component.handleInput("x");
 						setTimeout(() => {
@@ -720,7 +720,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { handleInput(data: string): void }) {
 					customCallCount += 1;
 					return new Promise((resolve) => {
-						const component = factory({ requestRender() {} }, { fg: (_c: string, s: string) => s, inverse: (s: string) => s, bold: (s: string) => s }, {}, resolve);
+						const component = factory({ requestRender() {} }, { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s }, {}, resolve);
 						component.handleInput("d");
 						setTimeout(() => {
 							component.handleInput("y"); // per-item toggle approval
@@ -755,7 +755,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { handleInput(data: string): void }) {
 					customCallCount += 1;
 					return new Promise((resolve) => {
-						const component = factory({ requestRender() {} }, { fg: (_c: string, s: string) => s, inverse: (s: string) => s, bold: (s: string) => s }, {}, resolve);
+						const component = factory({ requestRender() {} }, { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s }, {}, resolve);
 						component.handleInput("d");
 						setTimeout(() => {
 							component.handleInput("y"); // per-item toggle approval
@@ -1053,7 +1053,7 @@ describe("applyUpdateAll (U -- one combined approval and one reload, not N)", ()
 				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[] }) {
 					return new Promise((resolve) => {
 						const tui = { requestRender() { renderCount += 1; if (component) renders.push(component.render(60)); } };
-						component = factory(tui, { fg: (_c: string, s: string) => s, inverse: (s: string) => s, bold: (s: string) => s }, {}, resolve);
+						component = factory(tui, { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s }, {}, resolve);
 					});
 				},
 			},

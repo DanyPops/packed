@@ -31,14 +31,19 @@ export function dialogTheme(theme: Theme): DialogTheme {
  * overlay, replacing what used to be four separately-opened screens. */
 export function tabBarTheme(theme: Theme): TabBarTheme {
 	return {
-		// Matches pi-tickets' own TabMenu convention (tab/activeTab, same
-		// reverse-video choice) rather than inventing a new one: real ANSI
-		// reverse-video for the focused tab, since a theme's own selectedBg
-		// can be too close in luminance to the surrounding UI to read as a
-		// highlight at all -- reverse video swaps whatever foreground and
-		// background are already in effect, guaranteeing contrast on any theme.
+		// Real bug, reported live: theme.inverse() swaps whatever
+		// foreground/background happen to be ambient at that point in the
+		// ANSI stream, not a specific color -- and Envelope wraps a whole
+		// content line (including this tab bar) in one continuous border-color
+		// span with no reset until the line's end, so which tab is active
+		// changed what "ambient" meant (blue when Packages was first on the
+		// line and nothing had reset yet, white once an earlier inactive tab's
+		// own fg reset already cleared it). An explicit theme.bg() always
+		// overwrites rather than swaps, so it's immune to that -- matches
+		// Pi's own core session-selector.js, which highlights its selected
+		// line the same way.
 		tab: (s) => theme.fg("dim", s),
-		activeTab: (s) => theme.inverse(s),
+		activeTab: (s) => theme.bg("selectedBg", s),
 		// Every tab's first letter is a jump mnemonic (p/f/c/s) -- a distinct
 		// warning-colored bold, so it reads as "press this letter" on both the
 		// active and inactive tabs alike, not just whichever style tab/activeTab

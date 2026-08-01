@@ -147,11 +147,12 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		expect(securityCalled).toBe(false);
 	});
 
-	it("opens as a real overlay pinned to a fixed percentage of terminal height, not raw-centered around content", async () => {
-		// row is a real percentage of terminal height (pi-tui resolves "40%"
-		// against the actual terminal, not a fixed row count) -- anchor:"center"
-		// still governs horizontal centering only, since an explicit row
-		// overrides anchor's own vertical resolution.
+	it("opens as a real overlay pinned to the top of the terminal, not floating around content", async () => {
+		// anchor:"top-center"+offsetY:1 is a fixed row count regardless of
+		// terminal size -- the header stays put and only the footer moves as
+		// content height changes. A row-percentage position was tried instead
+		// and reverted: it visibly jittered as tabs with different content
+		// heights (Packages' table vs. Config's shorter list) became active.
 		let capturedOptions: unknown;
 		const ctx = {
 			hasUI: true,
@@ -167,7 +168,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 
 		await showPackedPanel(ctx, natives);
 
-		expect(capturedOptions).toMatchObject({ overlay: true, overlayOptions: { anchor: "center", row: "40%" } });
+		expect(capturedOptions).toMatchObject({ overlay: true, overlayOptions: { anchor: "top-center", offsetY: 1 } });
 	});
 
 	it("renders a real bordered box with rounded corners, not just a horizontal rule", async () => {

@@ -865,14 +865,13 @@ function renderUnifiedPanel(
 				tui.requestRender();
 			},
 		};
-		// row is a real percentage of terminal height (0%=top, 100%=bottom) --
-		// unlike anchor:"top-center"+offsetY (a fixed row count, effectively
-		// pinned to the very top on any terminal size), this scales with the
-		// actual screen. anchor:"center" still governs horizontal centering
-		// (row overrides only the vertical resolution). Note this isn't fully
-		// content-height-independent -- pi-tui's own row-percentage formula
-		// interpolates over the range of positions that still fit the current
-		// content height, so a shorter/taller row count shifts this somewhat;
-		// only exactly 0%/100% are perfectly jitter-free in that library.
-	}, { overlay: true, overlayOptions: { width: "70%", maxHeight: "70%", anchor: "center", row: "40%" } });
+		// Pinned to the very top (anchor:"top-center"+offsetY:1 -- a fixed row
+		// count regardless of terminal size), not row:"40%". The percentage
+		// positioning was tried instead but reverted: pi-tui's row-percentage
+		// formula interpolates over the range of positions that still fit the
+		// CURRENT content height, so the panel visibly jittered up and down
+		// every time a tab with a different content height (Packages' table vs.
+		// Config's shorter list) became active. A fixed top offset keeps the
+		// header pinned in place and only the footer moves as content grows.
+	}, { overlay: true, overlayOptions: { width: "70%", maxHeight: "70%", anchor: "top-center", offsetY: 1 } });
 }

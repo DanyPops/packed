@@ -7,7 +7,7 @@
   ],
   "scripts": {
     "test": "bun run --cwd packages/packed build && bun test packages/packed/test packages/pi-packed/test",
-    "typecheck": "bunx tsc --noEmit && bunx tsc -p packages/packed/tsconfig.json --noEmit && bunx tsc -p packages/packed/tsconfig.consumer.json && bunx tsc -p packages/pi-packed/tsconfig.json --noEmit",
+    "typecheck": "bun run --cwd packages/packed build && bunx tsc --noEmit && bunx tsc -p packages/packed/tsconfig.json --noEmit && bunx tsc -p packages/packed/tsconfig.consumer.json && bunx tsc -p packages/pi-packed/tsconfig.json --noEmit",
     "prepare": "git config core.hooksPath .githooks",
     "format": "biome format --write .",
     "lint": "biome check --write . && eslint packages --max-warnings 0",

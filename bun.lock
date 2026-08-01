@@ -46,10 +46,10 @@
     },
     "packages/pi-packed": {
       "name": "@danypops/pi-packed",
-      "version": "0.19.5",
+      "version": "0.19.6",
       "dependencies": {
         "@danypops/packed": "^0.5.0",
-        "@danypops/vehicle-client": "^0.1.1",
+        "@danypops/vehicle-client": "^0.2.0",
         "@danypops/vehicle-client-pi": "^0.1.5",
         "malevich-tui-components": "^0.16.1",
       },
@@ -631,6 +631,8 @@
 
     "@danypops/packed/jiti": ["jiti@2.6.1", "", { "bin": { "jiti": "lib/jiti-cli.mjs" } }, "sha512-ekilCSN1jwRvIbgeg/57YFh8qQDNbwDb9xT/qu2DAHbFFZUicIl4ygVaAvzveMhMVr3LnpSKTNnwt8PoOfmKhQ=="],
 
+    "@danypops/pi-packed/@danypops/vehicle-client": ["@danypops/vehicle-client@0.2.0", "", { "dependencies": { "@danypops/vehicle-core": "^0.3.0", "@danypops/vehicle-server": "^0.4.1" } }, "sha512-vQ6LK+WCC3PP5476BXMx08w8zmCIqvqH/x19eE/AVYSjEnfeJugTCrOcRyBh6YvDJnlA6fuQXsGP3O630OZhAw=="],
+
     "@danypops/vehicle-client/@danypops/vehicle-core": ["@danypops/vehicle-core@0.1.1", "", {}, "sha512-aj02iT0V2BpVP4GTI6vWQ+/C56UPzztvYyio3X7fnSXY7IvTaZ5z51Se2G8wmw+4qmS2/n3mx88IvZImaziEeQ=="],
 
     "@danypops/vehicle-client/@danypops/vehicle-server": ["@danypops/vehicle-server@0.1.1", "", { "dependencies": { "@danypops/vehicle-core": "^0.1.0", "pino": "^10.3.1" } }, "sha512-7yOxstICfQ9W77CjwvCrDI93lGxFTl1SeAy8SJXM5MfzGXlov2TlpUTRzbb9Sv+t5W+jNVcOs4iZHsaUGRDgrA=="],
@@ -658,5 +660,9 @@
     "p-retry/retry": ["retry@0.13.1", "", {}, "sha512-XQBQ3I8W1Cge0Seh+6gjj03LbmRFWuoszgK9ooCpwYIrhhoO80pfq4cUkU5DkknwfOfFteRwlZ56PYOGYyFWdg=="],
 
     "thread-stream/real-require": ["real-require@1.0.0", "", {}, "sha512-P4nbQYQfePJxRSmY+v/KINxVucm4NF3p3s7pJveMTtom52FR4YGltUQLB8idDXwDDWW+eYrWDFbuzUnjoWHF7g=="],
+
+    "@danypops/pi-packed/@danypops/vehicle-client/@danypops/vehicle-core": ["@danypops/vehicle-core@0.3.0", "", {}, "sha512-TWZMQ/VpdY+bMaBSKi+S2drAnwWVezAmj5Bkccn8c83epbY9u5oA8JsRYt696ijxZz4pzSEXqjNcFuk3LJg2ew=="],
+
+    "@danypops/pi-packed/@danypops/vehicle-client/@danypops/vehicle-server": ["@danypops/vehicle-server@0.4.1", "", { "dependencies": { "@danypops/vehicle-core": "^0.3.0", "pino": "^10.3.1" } }, "sha512-hUdQb6XLmzYApt7D+5gnvBPaE5r90plLKUESDfqov1EA2XUOw5nqg0VTWkLuNowFN9eCGH1DiAPxTQHug0Du6Q=="],
   }
 }

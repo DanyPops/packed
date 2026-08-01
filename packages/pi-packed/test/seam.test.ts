@@ -211,6 +211,32 @@ describe("packed extension seam", () => {
 		expect(connectCalls).toBe(1);
 	});
 
+	it("never transparently retries a mutating operation after a stale connection -- callOnce()'s whole point", async () => {
+		const daemon = new FakePackageDaemon();
+		class DeadOnceDaemon extends FakePackageDaemon {
+			override async install(_source: string, _approved = false): Promise<string> {
+				throw new TypeError("fetch failed");
+			}
+		}
+		const deadDaemon: PackageDaemonPort = new DeadOnceDaemon();
+		let connectCalls = 0;
+		const natives = await createNatives(async () => {
+			connectCalls++;
+			return connectCalls === 1 ? deadDaemon : daemon;
+		});
+
+		// The first call's own request really did fail against the dead connection --
+		// never silently retried into a second, possibly duplicate, install attempt.
+		await expect(natives.install("npm:pi-lsp@1.0.0", true)).rejects.toThrow("fetch failed");
+		expect(connectCalls).toBe(1);
+		expect(daemon.calls).toHaveLength(0);
+
+		// The stale connection was still dropped, so the *next* call reconnects and succeeds.
+		const result = await natives.install("npm:pi-lsp@1.0.0", true);
+		expect(result).toContain("Installed");
+		expect(connectCalls).toBe(2);
+	});
+
 	it("contains no Bun-only installer or direct SQLite access", () => {
 		const source = readFileSync(new URL("../extension/src/packed.ts", import.meta.url), "utf8");
 		expect(source).not.toContain("Bun.");

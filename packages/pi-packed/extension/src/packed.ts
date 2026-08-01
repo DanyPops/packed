@@ -8,6 +8,13 @@
  * the rest of the Pi session -- vehicle-client's createRetryingClient detects
  * that on the failing call itself and reconnects, so the happy path reuses
  * one connected client instead of reconnecting on every single operation.
+ *
+ * Reads/idempotent lookups use call() (transparent retry once on a stale
+ * connection); install/installService/remove/update/setMutationApproval/
+ * setupApply/toggleResource use callOnce() instead -- a stale connection
+ * during any of those must surface its one real failure rather than risk a
+ * silently duplicated mutation (installing/removing/updating a package
+ * twice) if the retried call actually reached the daemon the first time.
  */
 
 import { ensurePackedClient, InstallServiceError, type PackedExtensionClient } from "@danypops/packed/client";
@@ -77,22 +84,25 @@ export async function createNatives(connect: PackageDaemonConnector = connectDef
 	const client = createRetryingClient(connect, { label: "pi-packed" });
 
 	return {
+		// Reads/idempotent lookups: transparently retried once on a stale connection.
 		search: (query, limit) => client.call((daemon) => daemon.search(query, limit)),
 		searchOffline: (query, limit) => client.call((daemon) => daemon.search(query, limit, true)),
 		info: (name) => client.call((daemon) => daemon.info(name)),
 		installed: () => client.call((daemon) => daemon.installed()),
 		updates: () => client.call((daemon) => daemon.updates()),
 		security: () => client.call((daemon) => daemon.security()),
-		setMutationApproval: (value, approved) => client.call((daemon) => daemon.setMutationApproval(value, approved)),
-		install: (source, approved) => client.call((daemon) => daemon.install(source, approved)),
-		installService: (source, approved) => client.call((daemon) => daemon.installService(source, approved)),
-		remove: (name, approved) => client.call((daemon) => daemon.remove(name, approved)),
-		update: (source, approved) => client.call((daemon) => daemon.update(source, approved)),
 		setupPlan: (manifestPath, prune) => client.call((daemon) => daemon.setupPlan(manifestPath, prune)),
-		setupApply: (manifestPath, approved, prune) => client.call((daemon) => daemon.setupApply(manifestPath, approved, prune)),
 		listResources: (projectRoot) => client.call((daemon) => daemon.listResources(projectRoot)),
-		toggleResource: (source, field, path, enabled, projectRoot, approved) =>
-			client.call((daemon) => daemon.toggleResource(source, field, path, enabled, projectRoot, approved)),
 		piStatus: () => client.call((daemon) => daemon.piStatus()),
+		// Mutations: never transparently retried -- a stale connection surfaces its one
+		// real failure instead of risking a silently duplicated install/remove/update.
+		setMutationApproval: (value, approved) => client.callOnce((daemon) => daemon.setMutationApproval(value, approved)),
+		install: (source, approved) => client.callOnce((daemon) => daemon.install(source, approved)),
+		installService: (source, approved) => client.callOnce((daemon) => daemon.installService(source, approved)),
+		remove: (name, approved) => client.callOnce((daemon) => daemon.remove(name, approved)),
+		update: (source, approved) => client.callOnce((daemon) => daemon.update(source, approved)),
+		setupApply: (manifestPath, approved, prune) => client.callOnce((daemon) => daemon.setupApply(manifestPath, approved, prune)),
+		toggleResource: (source, field, path, enabled, projectRoot, approved) =>
+			client.callOnce((daemon) => daemon.toggleResource(source, field, path, enabled, projectRoot, approved)),
 	};
 }

@@ -1,13 +1,13 @@
 {
   "name": "@danypops/packed",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Standalone package lifecycle, validation, catalog, setup, and daemon service for Pi packages",
   "type": "module",
   "bin": {
     "packed": "src/cli/cli.ts"
   },
   "scripts": {
-    "build": "rm -rf dist && bun build src/public/client.ts src/public/protocol.ts --outdir dist --target node --format esm --minify && bunx tsc -p tsconfig.public.json",
+    "build": "rm -rf dist && bun build src/public/client.ts src/public/protocol.ts src/public/atomic-json.ts --outdir dist --target node --format esm --minify && bunx tsc -p tsconfig.public.json",
     "test": "bun run build && bun test test",
     "typecheck": "bunx tsc --noEmit",
     "cli": "bun src/cli/cli.ts",
@@ -15,7 +15,8 @@
   },
   "dependencies": {
     "@danypops/pi-extension-harness": "^0.2.0",
-    "@danypops/vehicle-server": "^0.3.2",
+    "@danypops/vehicle-server": "^0.7.0",
+    "@danypops/vehicle-core": "^0.6.1",
     "@danypops/vehicle-client": "^0.1.1",
     "@earendil-works/pi-coding-agent": "^0.82.0",
     "@earendil-works/pi-tui": "^0.82.0",
@@ -35,6 +36,10 @@
     "./protocol": {
       "types": "./dist/protocol.d.ts",
       "import": "./dist/protocol.js"
+    },
+    "./atomic-json": {
+      "types": "./dist/atomic-json.d.ts",
+      "import": "./dist/atomic-json.js"
     }
   },
   "repository": {

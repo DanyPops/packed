@@ -6,6 +6,7 @@ import { Type } from "typebox";
 import { Compile } from "typebox/compile";
 import type { Diagnostic } from "../adoption/check.ts";
 import { npmPackageName, readResolvedIntegrity, readResolvedVersion } from "../packages/installed.ts";
+import { writeJsonAtomic } from "../shared/atomic-json.ts";
 import type { Installer, Registry } from "../shared/ports.ts";
 
 export const SETUP_MANIFEST_FILE = "pi-setup.json";
@@ -317,16 +318,8 @@ function readProfiles(path: string): Record<string, Omit<SetupProfile, "scope">>
 	}
 	return profiles;
 }
-function atomicJson(path: string, value: unknown, mode: number): void {
-	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-	if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw new Error(`SETUP_PATH_UNSAFE: refusing to replace symlink ${path}`);
-	const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-	try {
-		writeFileSync(temporary, `${JSON.stringify(stableValue(value), null, 2)}\n`, { flag: "wx", mode });
-		renameSync(temporary, path);
-	} finally {
-		rmSync(temporary, { force: true });
-	}
+async function atomicJson(path: string, value: unknown, mode: number): Promise<void> {
+	await writeJsonAtomic(path, stableValue(value), { mode, pretty: true });
 }
 function bundledSchemaText(): string {
 	return readFileSync(join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "schema", "pi-setup-v1.schema.json"), "utf8");
@@ -335,6 +328,9 @@ function bundledSchemaText(): string {
 export function bundledEcosystemManifestPath(): string {
 	return join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), "setup", "danypops-ecosystem.pi-setup.json");
 }
+/** Deliberately NOT on writeJsonAtomic: this writes schemaText's exact bytes verbatim -- a
+ * later drift check (readFileSync(schemaPath) !== schemaText) needs byte-for-byte fidelity,
+ * which a JSON.parse+stringify round-trip through the JSON-specific atomic writer would break. */
 function atomicText(path: string, text: string, mode: number): void {
 	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
 	if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw new Error(`SETUP_PATH_UNSAFE: refusing to replace symlink ${path}`);
@@ -457,7 +453,7 @@ export class SetupManager {
 			);
 		if (diagnostics.some((item) => item.severity === "error")) return { ok: false, path, manifest, diagnostics, wrote: false };
 		atomicText(schemaPath, schemaText, 0o644);
-		atomicJson(path, manifest, 0o644);
+		await atomicJson(path, manifest, 0o644);
 		return { ok: true, path, manifest, diagnostics, wrote: true };
 	}
 
@@ -505,7 +501,7 @@ export class SetupManager {
 		}
 		const next = { ...manifest, packages };
 		if (diagnostics.length) return { ok: false, path, manifest: next, diagnostics, wrote: false, updated };
-		atomicJson(path, next, 0o644);
+		await atomicJson(path, next, 0o644);
 		return { ok: true, path, manifest: next, diagnostics: [], wrote: true, updated };
 	}
 
@@ -699,7 +695,7 @@ export class SetupManager {
 						profiles[operation.name] = profile;
 					}
 				}
-				atomicJson(path, profiles, 0o600);
+				await atomicJson(path, profiles, 0o600);
 				for (const operation of changes) outcomes.push({ kind: operation.kind, target: `${scope}:${operation.name}`, status: "succeeded" });
 			} catch (error) {
 				return {

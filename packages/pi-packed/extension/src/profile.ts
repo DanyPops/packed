@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { writeJsonAtomic } from "@danypops/packed/atomic-json";
 import { CONFIG_DIR_NAME, type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
 export interface Profile {
@@ -125,21 +125,14 @@ function loadLastProfile(agentDir: string): string | undefined {
 	}
 }
 
-function saveLastProfile(agentDir: string, name: string | undefined): void {
+async function saveLastProfile(agentDir: string, name: string | undefined): Promise<void> {
 	mkdirSync(agentDir, { recursive: true, mode: 0o700 });
 	const path = join(agentDir, LAST_PROFILE_FILE);
 	if (!name) {
 		rmSync(path, { force: true });
 		return;
 	}
-	if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw new Error("last-profile state is a symlink");
-	const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-	try {
-		writeFileSync(temporary, `${JSON.stringify({ name })}\n`, { flag: "wx", mode: 0o600 });
-		renameSync(temporary, path);
-	} finally {
-		rmSync(temporary, { force: true });
-	}
+	await writeJsonAtomic(path, { name }, { mode: 0o600 });
 }
 
 function matchesPattern(value: string, pattern: string): boolean {
@@ -204,7 +197,7 @@ export function registerProfiles(pi: ExtensionAPI): void {
 		activeProfile = profile;
 		if (persist) {
 			try {
-				saveLastProfile(agentDir, name);
+				await saveLastProfile(agentDir, name);
 			} catch (error) {
 				ctx.ui.notify(error instanceof Error ? error.message : String(error), "warning");
 			}
@@ -227,7 +220,7 @@ export function registerProfiles(pi: ExtensionAPI): void {
 		}
 		original = undefined;
 		try {
-			saveLastProfile(agentDir, undefined);
+			await saveLastProfile(agentDir, undefined);
 		} catch (error) {
 			ctx.ui.notify(error instanceof Error ? error.message : String(error), "warning");
 		}

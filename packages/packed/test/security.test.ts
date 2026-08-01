@@ -70,9 +70,9 @@ describe("package permission policy", () => {
 		});
 	});
 
-	it("persists an explicit unsafe opt-out and migrates the prior storage key", () => {
+	it("persists an explicit unsafe opt-out and migrates the prior storage key", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "packed-security-"));
-		expect(writeSecuritySettings(dir, { mutationApproval: "never" })).toEqual({ mutationApproval: "never" });
+		expect(await writeSecuritySettings(dir, { mutationApproval: "never" })).toEqual({ mutationApproval: "never" });
 		expect(readSecuritySettings(dir)).toEqual({ mutationApproval: "never" });
 
 		const legacyDir = mkdtempSync(join(tmpdir(), "packed-security-legacy-"));

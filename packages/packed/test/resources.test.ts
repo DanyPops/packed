@@ -209,12 +209,18 @@ describe("resources.list / resources.toggle (daemon RPC wiring)", () => {
 });
 
 describe("toggleResource", () => {
-	it("disables a resource with a minimal -path override, leaving the package's own glob defaults untouched", () => {
+	it("disables a resource with a minimal -path override, leaving the package's own glob defaults untouched", async () => {
 		const home = piHome(["npm:pi-demo"]);
 		installNpmPackage(home, "pi-demo", { extensions: ["extensions/*.ts"] }, { "extensions/one.ts": "" });
 		const settingsPath = join(home, "settings.json");
 
-		const result = toggleResource({ settingsPath, source: "npm:pi-demo", field: "extensions", path: "extensions/one.ts", enabled: false });
+		const result = await toggleResource({
+			settingsPath,
+			source: "npm:pi-demo",
+			field: "extensions",
+			path: "extensions/one.ts",
+			enabled: false,
+		});
 
 		expect(result.ok).toBe(true);
 		const written = JSON.parse(readFileSync(settingsPath, "utf8"));
@@ -223,20 +229,20 @@ describe("toggleResource", () => {
 		expect(global[0]?.extensions).toEqual([{ path: "extensions/one.ts", enabled: false }]);
 	});
 
-	it("is idempotent and replaces a prior override for the same exact path instead of accumulating duplicates", () => {
+	it("is idempotent and replaces a prior override for the same exact path instead of accumulating duplicates", async () => {
 		const home = piHome([{ source: "npm:pi-demo", extensions: ["-extensions/one.ts"] }]);
 		installNpmPackage(home, "pi-demo", { extensions: ["extensions/*.ts"] }, { "extensions/one.ts": "" });
 		const settingsPath = join(home, "settings.json");
 
-		toggleResource({ settingsPath, source: "npm:pi-demo", field: "extensions", path: "extensions/one.ts", enabled: true });
+		await toggleResource({ settingsPath, source: "npm:pi-demo", field: "extensions", path: "extensions/one.ts", enabled: true });
 
 		const written = JSON.parse(readFileSync(settingsPath, "utf8"));
 		expect(written.packages).toEqual([{ source: "npm:pi-demo", extensions: ["+extensions/one.ts"] }]);
 	});
 
-	it("fails closed with an error, not a throw, when the package is not in settings", () => {
+	it("fails closed with an error, not a throw, when the package is not in settings", async () => {
 		const home = piHome(["npm:other"]);
-		const result = toggleResource({
+		const result = await toggleResource({
 			settingsPath: join(home, "settings.json"),
 			source: "npm:pi-demo",
 			field: "extensions",

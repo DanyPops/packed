@@ -16,7 +16,7 @@ describe("pi-packed package boundary", () => {
 		expect(manifest).toMatchObject({
 			name: "@danypops/pi-packed",
 			pi: { extensions: ["extension/src/index.ts"] },
-			dependencies: { "@danypops/packed": "^0.2.0" },
+			dependencies: { "@danypops/packed": "^0.5.0" },
 		});
 		expect(manifest.bin).toBeUndefined();
 		for (const file of sourceFiles(join(root, "extension"))) {

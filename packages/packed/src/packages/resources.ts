@@ -12,10 +12,10 @@
  * follow-up; those entries are simply omitted from the list rather than
  * reported inaccurately.
  */
-import { randomUUID } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { discoverPackageResources, matchesPattern, type ResourceField, walk } from "../adoption/check.ts";
+import { writeJsonAtomic } from "../shared/atomic-json.ts";
 
 export type { ResourceField };
 
@@ -152,16 +152,8 @@ export function resolveToggleSettingsPath(piHome: string, projectRoot?: string):
 	return projectRoot ? join(projectRoot, ".pi", "settings.json") : join(piHome, "settings.json");
 }
 
-function atomicWriteJson(path: string, value: unknown): void {
-	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-	if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw new Error(`RESOURCE_PATH_UNSAFE: refusing to replace symlink ${path}`);
-	const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-	try {
-		writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx", mode: 0o644 });
-		renameSync(temporary, path);
-	} finally {
-		rmSync(temporary, { force: true });
-	}
+async function atomicWriteJson(path: string, value: unknown): Promise<void> {
+	await writeJsonAtomic(path, value, { mode: 0o644, pretty: true });
 }
 
 export interface ToggleResourceInput {
@@ -183,7 +175,7 @@ export interface ToggleResourceInput {
  * it is no longer literally []. This is upstream's real behavior, not a
  * Packed-specific bug -- parity with pi's own semantics matters more than
  * a locally "nicer" model the actual loader wouldn't agree with. */
-export function toggleResource(input: ToggleResourceInput): { ok: boolean; error?: string } {
+export async function toggleResource(input: ToggleResourceInput): Promise<{ ok: boolean; error?: string }> {
 	let settings: Record<string, unknown>;
 	try {
 		settings = JSON.parse(readFileSync(input.settingsPath, "utf8"));
@@ -203,7 +195,7 @@ export function toggleResource(input: ToggleResourceInput): { ok: boolean; error
 	merged[input.field] = updated;
 	packages[index] = merged;
 	try {
-		atomicWriteJson(input.settingsPath, { ...settings, packages });
+		await atomicWriteJson(input.settingsPath, { ...settings, packages });
 	} catch (error) {
 		return { ok: false, error: error instanceof Error ? error.message : String(error) };
 	}

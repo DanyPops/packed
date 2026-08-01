@@ -12,7 +12,7 @@
     "typecheck": "bunx tsc --noEmit"
   },
   "dependencies": {
-    "@danypops/packed": "^0.2.0",
+    "@danypops/packed": "^0.5.0",
     "@danypops/vehicle-client": "^0.1.1",
     "@danypops/vehicle-client-pi": "^0.1.5",
     "malevich-tui-components": "^0.16.1"

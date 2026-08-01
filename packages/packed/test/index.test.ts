@@ -224,7 +224,7 @@ describe("buildIndex incremental delta scanning", () => {
 			],
 			truncated: false,
 		};
-		writeIndex(indexPath(dir), priorIndex);
+		await writeIndex(indexPath(dir), priorIndex);
 
 		const calledInfo: string[] = [];
 		const server = Bun.serve({
@@ -288,7 +288,7 @@ describe("buildIndex incremental delta scanning", () => {
 			})),
 			truncated: false,
 		};
-		writeIndex(indexPath(dir), priorIndex);
+		await writeIndex(indexPath(dir), priorIndex);
 		let liveCalls = 0;
 		const server = Bun.serve({
 			port: 0,
@@ -310,7 +310,7 @@ describe("buildIndex incremental delta scanning", () => {
 });
 
 describe("index persistence", () => {
-	it("writes, reads, and reports staleness", () => {
+	it("writes, reads, and reports staleness", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "packed-index-store-"));
 		const path = indexPath(dir);
 		expect(readIndex(path)).toBeUndefined();
@@ -321,12 +321,12 @@ describe("index persistence", () => {
 			packages: [{ name: "pi-alpha", version: "1.0.0", dimensions: {} as never }],
 			truncated: false,
 		};
-		writeIndex(path, index);
+		await writeIndex(path, index);
 		expect(readIndex(path)).toEqual(index);
 		expect(indexStatus(path, 60_000)).toMatchObject({ stale: false, packageCount: 1 });
 
 		const old = { generatedAt: new Date(Date.now() - 100_000).toISOString(), packages: [], truncated: false };
-		writeIndex(path, old);
+		await writeIndex(path, old);
 		expect(indexStatus(path, 1_000).stale).toBe(true);
 	});
 

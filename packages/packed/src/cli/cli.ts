@@ -522,7 +522,7 @@ const commands: Record<string, { usage: string; run: Command }> = {
 						assertPackagePermission(await d.security.security(), "resources.toggle", flags.approved);
 						const settingsPath = resolveToggleSettingsPath(d.piHome, flags.project);
 						if (flags.project && !existsSync(settingsPath)) throw new Error("no project settings file to toggle");
-						const result = toggleResource({ settingsPath, source, field: field as ResourceField, path, enabled });
+						const result = await toggleResource({ settingsPath, source, field: field as ResourceField, path, enabled });
 						if (!result.ok) throw new Error(result.error ?? "toggle failed");
 						output = `${enabled ? "enabled" : "disabled"} ${path}`;
 					}

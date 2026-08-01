@@ -275,7 +275,7 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			}
 			const denied = authorize("security.write", body.approved === true);
 			if (denied) return denied;
-			return json(writeSecuritySettings(deps.stateDir, { mutationApproval: body.mutationApproval as MutationApproval }));
+			return json(await writeSecuritySettings(deps.stateDir, { mutationApproval: body.mutationApproval as MutationApproval }));
 		}
 
 		if (path === "/search" && req.method === "GET") {
@@ -455,7 +455,7 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 		if (op === "package.index") return readIndex(indexPath(dataDir)) as OperationOutputs[Name];
 		if (op === "package.index.build") {
 			const index = await buildIndex(deps.reg, dataDir);
-			writeIndex(indexPath(dataDir), index);
+			await writeIndex(indexPath(dataDir), index);
 			return index as OperationOutputs[Name];
 		}
 		if (op === "package.check" || op === "package.pack") {
@@ -548,7 +548,13 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			const piHome = deps.piHome ?? defaultPiHome();
 			const settingsPath = resolveToggleSettingsPath(piHome, value.projectRoot);
 			if (value.projectRoot && !fileExistsSync(settingsPath)) throw new PackageOperationError("no project settings file to toggle", 404);
-			const result = toggleResource({ settingsPath, source: value.source, field: value.field, path: value.path, enabled: value.enabled });
+			const result = await toggleResource({
+				settingsPath,
+				source: value.source,
+				field: value.field,
+				path: value.path,
+				enabled: value.enabled,
+			});
 			return {
 				ok: result.ok,
 				output: result.ok ? `${value.enabled ? "enabled" : "disabled"} ${value.path}` : (result.error ?? "toggle failed"),

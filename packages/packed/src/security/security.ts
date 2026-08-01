@@ -1,5 +1,6 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { writeJsonAtomic } from "../shared/atomic-json.ts";
 import { SECURITY_FILE } from "../shared/constants.ts";
 
 export const MUTATION_APPROVAL_VALUES = ["always", "never"] as const;
@@ -120,12 +121,8 @@ export function readSecuritySettings(stateDir: string): SecuritySettings {
 	}
 }
 
-export function writeSecuritySettings(stateDir: string, settings: SecuritySettings): SecuritySettings {
+export async function writeSecuritySettings(stateDir: string, settings: SecuritySettings): Promise<SecuritySettings> {
 	if (!MUTATION_APPROVAL_VALUES.includes(settings.mutationApproval)) throw new Error("mutationApproval must be always or never");
-	mkdirSync(stateDir, { recursive: true, mode: 0o700 });
-	const target = join(stateDir, SECURITY_FILE);
-	const temporary = `${target}.tmp`;
-	writeFileSync(temporary, `${JSON.stringify(settings)}\n`, { mode: 0o600 });
-	renameSync(temporary, target);
+	await writeJsonAtomic(join(stateDir, SECURITY_FILE), settings, { mode: 0o600 });
 	return { ...settings };
 }

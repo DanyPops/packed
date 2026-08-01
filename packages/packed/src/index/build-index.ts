@@ -15,11 +15,12 @@
  * single-attempt design was built around -- bulk generation instead
  * always falls back to the npm publish-date proxy, by construction.
  */
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { type AdoptionReport, assessRegistryAdoption, PI_COMMAND_NAME } from "../adoption/score.ts";
 import { catalogList, dbPath, openDb } from "../packages/db.ts";
 import { resolveCurrentPiVersion } from "../pi/pi-version.ts";
+import { writeJsonAtomic } from "../shared/atomic-json.ts";
 import { INDEX_FILE, PAGE_DELAY_MS } from "../shared/constants.ts";
 import { createLogger } from "../shared/log.ts";
 import type { Registry } from "../shared/ports.ts";
@@ -217,11 +218,8 @@ async function buildIndexNow(reg: Registry, catalogDir: string, options: BuildIn
 
 /** Atomic write -- tmp file + rename, same partial-write-safety convention
  * as security.ts's writeSecuritySettings. */
-export function writeIndex(path: string, index: PackageIndex): void {
-	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-	const temporary = `${path}.${process.pid}.tmp`;
-	writeFileSync(temporary, JSON.stringify(index));
-	renameSync(temporary, path);
+export async function writeIndex(path: string, index: PackageIndex): Promise<void> {
+	await writeJsonAtomic(path, index, { trailingNewline: false });
 }
 
 export function readIndex(path: string): PackageIndex | undefined {
@@ -253,6 +251,6 @@ export async function generateIndex(
 	options: BuildIndexOptions = {},
 ): Promise<PackageIndex> {
 	const index = await buildIndex(reg, catalogDir, options);
-	writeIndex(path, index);
+	await writeIndex(path, index);
 	return index;
 }

@@ -31,12 +31,14 @@ export function dialogTheme(theme: Theme): DialogTheme {
  * overlay, replacing what used to be four separately-opened screens. */
 export function tabBarTheme(theme: Theme): TabBarTheme {
 	return {
-		// Unfocused: foreground color, no background. Focused: inverted --
-		// a background color and no explicit foreground, so it reads as a
-		// real highlighted/selected tab rather than just a differently
-		// colored label.
-		tab: (s) => theme.fg("muted", s),
-		activeTab: (s) => theme.bold(theme.bg("selectedBg", s)),
+		// Matches pi-tickets' own TabMenu convention (tab/activeTab, same
+		// reverse-video choice) rather than inventing a new one: real ANSI
+		// reverse-video for the focused tab, since a theme's own selectedBg
+		// can be too close in luminance to the surrounding UI to read as a
+		// highlight at all -- reverse video swaps whatever foreground and
+		// background are already in effect, guaranteeing contrast on any theme.
+		tab: (s) => theme.fg("dim", s),
+		activeTab: (s) => theme.inverse(s),
 		// Every tab's first letter is a jump mnemonic (p/f/c/s) -- a distinct
 		// warning-colored bold, so it reads as "press this letter" on both the
 		// active and inactive tabs alike, not just whichever style tab/activeTab

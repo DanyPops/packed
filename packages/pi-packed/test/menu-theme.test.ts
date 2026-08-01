@@ -29,7 +29,10 @@ describe("tabBarTheme (the /packed panel's tab bar styling)", () => {
 		expect(result).toBe("INVERSE:Packages");
 	});
 
-	it("the mnemonic letter is styled distinctly on both focused and unfocused tabs", () => {
+	// tabBarTheme's own mnemonic function always works when called; it's
+	// TabbedContainer's job (not this theme mapping's) to only actually call
+	// it for unfocused tabs -- see tabbed-container.test.ts.
+	it("the mnemonic letter is styled distinctly, whenever a caller invokes it", () => {
 		const theme = tabBarTheme(fakeTheme());
 		expect(theme.mnemonic("P")).toContain("FG(warning)");
 	});

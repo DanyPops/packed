@@ -7,7 +7,15 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 echo "pre-commit: format"
-bunx biome format --staged
+# biome.json scopes formatting to .ts files only; --staged exits nonzero when
+# none of the staged files fall in that scope (e.g. a pure package.json bump)
+# even though there's nothing to actually flag -- distinguish that from a
+# real formatting violation instead of blocking every non-.ts-only commit.
+format_output="$(bunx biome format --staged 2>&1)" || format_exit=$?
+echo "$format_output"
+if [ "${format_exit:-0}" -ne 0 ] && ! grep -q "No files were processed" <<<"$format_output"; then
+	exit "$format_exit"
+fi
 
 echo "pre-commit: typecheck"
 bun run typecheck

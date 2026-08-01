@@ -1,26 +1,25 @@
 /**
- * discover.ts — /packed find: query the npm registry for installable Pi
- * packages and install one. A sub-flow like settings/config, reachable
- * from the packages panel via f and returning to it on close. Search
- * itself never mutates; only Install/Cancel (behind the standard
- * approval) does.
+ * discover.ts — /packed's Find tab: query the npm registry for installable
+ * Pi packages and install one. A real Component (not its own ctx.ui.custom
+ * overlay) so it plugs straight into TabbedContainer alongside
+ * Packages/Config/Settings on the same overlay -- it used to open a
+ * second, visually distinct screen (no Malevich Envelope, its own
+ * hand-rolled Container+DynamicBorder chrome), confirmed live as a real
+ * "opens a different TUI" complaint. Search itself never mutates; only
+ * Install (behind a quick inline confirm, then the standard approval
+ * every mutation surface requires) does.
  */
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { DynamicBorder, rawKeyHint } from "@earendil-works/pi-coding-agent";
-import { Container, Input, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { Menu, type MenuItem } from "malevich-tui-components";
+import { rawKeyHint } from "@earendil-works/pi-coding-agent";
+import { Input, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import type { Component } from "malevich-tui-components";
 import { shouldSearch } from "./discover-model.js";
 import type { Natives, PackageSummary } from "./packed.js";
 import { InstallServiceError } from "./packed.js";
 import { approvePackageOperation } from "./tools.js";
-import { menuTheme } from "./menu-theme.js";
+import type { TabHost } from "./tab-host.js";
 
 const SEARCH_LIMIT = 20;
-
-interface FindPanelAction {
-	type: "install" | "close";
-	result?: PackageSummary;
-}
 
 export type InstallOutcome = "installed" | "cancelled" | "failed";
 
@@ -53,141 +52,126 @@ export async function applyInstall(result: PackageSummary, natives: Natives, ctx
 	}
 }
 
-async function showInstallMenu(ctx: ExtensionCommandContext, result: PackageSummary): Promise<boolean> {
-	return ctx.ui.custom<boolean>(
-		(_tui, theme, _kb, done) => {
-			const items: MenuItem[] = [
-				{ label: `Install ${result.name}@${result.version}`, action: () => done(true) },
-				{ label: "Cancel", action: () => done(false) },
-			];
-			return new Menu({ items, theme: menuTheme(theme), onClose: () => done(false) });
-		},
-		{ overlay: true, overlayOptions: { width: 40, anchor: "center" } },
-	);
-}
+interface Theme { fg(color: string, s: string): string; bold(s: string): string; }
 
-export async function showDiscoverPanel(ctx: ExtensionCommandContext, natives: Natives): Promise<void> {
-	if (!ctx.hasUI) {
-		ctx.ui.notify("/packed find requires interactive mode", "warning");
-		return;
+/** /packed's Find tab -- a real Component. Its query box always captures
+ * free text (isCapturingInput() is unconditionally true), unlike
+ * Packages/Config's toggleable search: there's no "browse mode" here to
+ * fall back to, searching is the whole point of this tab. */
+export class FindTab implements Component {
+	private readonly queryInput = new Input();
+	private results: PackageSummary[] = [];
+	private lastSearchedQuery: string | undefined;
+	private selectedIndex = 0;
+	private searching = false;
+	private error: string | undefined;
+	private busy = false;
+	private readonly maxVisible = 15;
+
+	constructor(
+		private readonly natives: Natives,
+		private readonly host: TabHost,
+		private readonly theme: Theme,
+	) {}
+
+	/** Find's query box is always in text-edit mode (no separate toggle like
+	 * Packages/Config's `/`) -- Left/Right must stay cursor movement, never
+	 * the host's own tab-cycling. Escape, though, is only captured while an
+	 * install is actually in flight (a genuine "don't let go" moment); no one
+	 * types a literal Escape byte into a search query on purpose, so it's
+	 * otherwise the host's own "back to Packages" to handle. */
+	capturesHorizontalArrows(): boolean {
+		return true;
 	}
 
-	for (;;) {
-		const action = await renderDiscoverPanel(ctx, natives);
-		if (action.type === "close") return;
-		if (!action.result) continue;
-		const install = await showInstallMenu(ctx, action.result);
-		if (!install) continue;
-		const outcome = await applyInstall(action.result, natives, ctx);
-		if (outcome === "installed") return; // ctx.reload() already replaced the session
+	capturesEscape(): boolean {
+		return this.busy;
 	}
-}
 
-function renderDiscoverPanel(ctx: ExtensionCommandContext, natives: Natives): Promise<FindPanelAction> {
-	return ctx.ui.custom<FindPanelAction>((tui, theme, _kb, done) => {
-		const queryInput = new Input();
-		let results: PackageSummary[] = [];
-		let lastSearchedQuery: string | undefined;
-		let selectedIndex = 0;
-		let searching = false;
-		let error: string | undefined;
-		const maxVisible = 15;
+	invalidate(): void {}
 
-		async function runSearch(): Promise<void> {
-			const query = queryInput.getValue().trim();
-			if (!query) return;
-			searching = true;
-			error = undefined;
-			tui.requestRender();
-			try {
-				const response = await natives.search(query, SEARCH_LIMIT);
-				results = response.results;
-				lastSearchedQuery = queryInput.getValue();
-				selectedIndex = 0;
-			} catch (e) {
-				error = e instanceof Error ? e.message : String(e);
-				results = [];
-			} finally {
-				searching = false;
-				tui.requestRender();
-			}
+	render(width: number): string[] {
+		const { theme } = this;
+		const hint = rawKeyHint("enter", "search/install");
+		const status = this.searching ? "searching…" : this.error ? theme.fg("error", this.error) : `${this.results.length} result(s)`;
+		const spacing = Math.max(1, width - visibleWidth(hint) - visibleWidth(status));
+		const line1 = truncateToWidth(`${hint}${" ".repeat(spacing)}`, width, "") + status;
+		const lines = [line1, ...this.queryInput.render(width), ""];
+		if (this.results.length === 0) {
+			lines.push(theme.fg("muted", this.searching ? "  …" : "  Type a query and press enter to search npm"));
+			return lines;
 		}
+		const start = Math.max(0, Math.min(this.selectedIndex - Math.floor(this.maxVisible / 2), this.results.length - this.maxVisible));
+		const end = Math.min(start + this.maxVisible, this.results.length);
+		for (let i = start; i < end; i++) {
+			const result = this.results[i]!;
+			const selected = i === this.selectedIndex;
+			const cursor = selected ? theme.fg("accent", "❯") : " ";
+			const name = selected ? theme.bold(result.name) : result.name;
+			const ver = theme.fg("dim", `@${result.version}`);
+			const description = result.description ? theme.fg("muted", ` — ${result.description}`) : "";
+			lines.push(truncateToWidth(`${cursor} ${name}${ver}${description}`, width, ""));
+		}
+		return lines;
+	}
 
-		const header = {
-			invalidate() {},
-			render(width: number): string[] {
-				const title = theme.bold("Find packages");
-				const hint = rawKeyHint("enter", "search/install") + theme.fg("muted", " · ") + rawKeyHint("esc", "back");
-				const spacing = Math.max(1, width - visibleWidth(title) - visibleWidth(hint));
-				const line1 = truncateToWidth(`${title}${" ".repeat(spacing)}`, width, "") + hint;
-				const status = searching ? "searching…" : error ? theme.fg("error", error) : `${results.length} result(s)`;
-				const line2 = truncateToWidth(theme.fg("muted", status), width, "");
-				return [line1, line2];
-			},
-		};
+	handleInput(data: string): void {
+		if (this.busy) return;
+		switch (data) {
+			case "\x1b[A":
+				if (this.results.length > 0) this.selectedIndex = (this.selectedIndex - 1 + this.results.length) % this.results.length;
+				break;
+			case "\x1b[B":
+				if (this.results.length > 0) this.selectedIndex = (this.selectedIndex + 1) % this.results.length;
+				break;
+			case "\r":
+				if (shouldSearch(this.queryInput.getValue(), this.lastSearchedQuery, this.results.length > 0)) void this.runSearch();
+				else void this.installSelected();
+				return;
+			default:
+				this.queryInput.handleInput(data);
+				break;
+		}
+		this.host.requestRender();
+	}
 
-		const list = {
-			invalidate() {},
-			render(width: number): string[] {
-				const lines = [...queryInput.render(width), ""];
-				if (results.length === 0) {
-					lines.push(theme.fg("muted", searching ? "  …" : "  Type a query and press enter to search npm"));
-					return lines;
-				}
-				const start = Math.max(0, Math.min(selectedIndex - Math.floor(maxVisible / 2), results.length - maxVisible));
-				const end = Math.min(start + maxVisible, results.length);
-				for (let i = start; i < end; i++) {
-					const result = results[i]!;
-					const selected = i === selectedIndex;
-					const cursor = selected ? theme.fg("accent", "❯") : " ";
-					const name = selected ? theme.bold(result.name) : result.name;
-					const ver = theme.fg("dim", `@${result.version}`);
-					const description = result.description ? theme.fg("muted", ` — ${result.description}`) : "";
-					lines.push(truncateToWidth(`${cursor} ${name}${ver}${description}`, width, ""));
-				}
-				return lines;
-			},
-		};
+	private async runSearch(): Promise<void> {
+		const query = this.queryInput.getValue().trim();
+		if (!query) return;
+		this.searching = true;
+		this.error = undefined;
+		this.host.requestRender();
+		try {
+			const response = await this.natives.search(query, SEARCH_LIMIT);
+			this.results = response.results;
+			this.lastSearchedQuery = this.queryInput.getValue();
+			this.selectedIndex = 0;
+		} catch (e) {
+			this.error = e instanceof Error ? e.message : String(e);
+			this.results = [];
+		} finally {
+			this.searching = false;
+			this.host.requestRender();
+		}
+	}
 
-		const border = () => new DynamicBorder((s) => theme.fg("border", s));
-		const container = new Container();
-		container.addChild(new Spacer(1));
-		container.addChild(border());
-		container.addChild(new Spacer(1));
-		container.addChild(header);
-		container.addChild(new Spacer(1));
-		container.addChild(list);
-		container.addChild(new Spacer(1));
-		container.addChild(border());
+	private async installSelected(): Promise<void> {
+		const result = this.results[this.selectedIndex];
+		if (!result) return;
+		this.busy = true;
+		this.host.requestRender();
+		try {
+			const confirmed = await this.host.inlineCtx.ui.confirm(`Install ${result.name}@${result.version}`, "Search itself never mutates -- this is the first of two confirmations before anything installs.");
+			if (!confirmed) return;
+			const outcome = await applyInstall(result, this.natives, this.host.inlineCtx);
+			if (outcome === "installed") this.host.onSessionReplaced();
+		} finally {
+			this.busy = false;
+			this.host.requestRender();
+		}
+	}
+}
 
-		return {
-			render: (width: number) => container.render(width),
-			invalidate: () => container.invalidate(),
-			handleInput(data: string) {
-				switch (data) {
-					case "\x1b[A": // up
-						if (results.length > 0) selectedIndex = (selectedIndex - 1 + results.length) % results.length;
-						break;
-					case "\x1b[B": // down
-						if (results.length > 0) selectedIndex = (selectedIndex + 1) % results.length;
-						break;
-					case "\r":
-						if (shouldSearch(queryInput.getValue(), lastSearchedQuery, results.length > 0)) {
-							void runSearch();
-						} else {
-							const result = results[selectedIndex];
-							if (result) done({ type: "install", result });
-						}
-						return;
-					case "\x1b":
-						done({ type: "close" });
-						return;
-					default:
-						queryInput.handleInput(data);
-						break;
-				}
-				tui.requestRender();
-			},
-		};
-	});
+export function createFindTab(natives: Natives, host: TabHost, theme: Theme): FindTab {
+	return new FindTab(natives, host, theme);
 }

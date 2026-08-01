@@ -123,15 +123,17 @@ describe("handleResourceConfigCommand (/packed config dispatch)", () => {
 	it("only claims the exact 'config' subcommand, leaving other /packed args to the caller", async () => {
 		const natives = {} as Natives;
 		const ctx = { hasUI: false, ui: { notify() {} } } as unknown as ExtensionCommandContext;
-		expect(await handleResourceConfigCommand("setup plan", ctx, natives)).toBe(false);
-		expect(await handleResourceConfigCommand("", ctx, natives)).toBe(false);
+		const openPanel = async () => { throw new Error("must not be called for a non-config subcommand"); };
+		expect(await handleResourceConfigCommand("setup plan", ctx, natives, openPanel)).toBe(false);
+		expect(await handleResourceConfigCommand("", ctx, natives, openPanel)).toBe(false);
 	});
 
-	it("claims 'config' and requires interactive mode", async () => {
-		const notices: string[] = [];
+	it("claims 'config' and opens the shared panel landing directly on the config tab", async () => {
 		const natives = {} as Natives;
-		const ctx = { hasUI: false, ui: { notify: (m: string) => notices.push(m) } } as unknown as ExtensionCommandContext;
-		expect(await handleResourceConfigCommand("config", ctx, natives)).toBe(true);
-		expect(notices.join("\n")).toContain("requires interactive mode");
+		const ctx = { hasUI: false, ui: { notify() {} } } as unknown as ExtensionCommandContext;
+		const calls: unknown[] = [];
+		const openPanel = async (openedCtx: ExtensionCommandContext, openedNatives: Natives, opts?: { initialTab?: "config" }) => { calls.push([openedCtx, openedNatives, opts]); };
+		expect(await handleResourceConfigCommand("config", ctx, natives, openPanel)).toBe(true);
+		expect(calls).toEqual([[ctx, natives, { initialTab: "config" }]]);
 	});
 });

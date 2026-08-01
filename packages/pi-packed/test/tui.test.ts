@@ -31,6 +31,21 @@ function stripAnsi(s: string): string {
 	return s.replace(ANSI_ESCAPE_PATTERN, "");
 }
 
+// Every test below opens the real unified panel, which always constructs
+// all four tabs up front -- Settings and Config both kick off their own
+// async load() in the background regardless of which tab a test actually
+// cares about, so every fake `natives` needs at least these two or the
+// panel throws reaching for a method that was never mocked.
+function baseNatives(overrides: Partial<Natives> = {}): Natives {
+	return {
+		async installed() { return []; },
+		async updates() { return []; },
+		async security() { return { mutationApproval: "always" as const }; },
+		async listResources() { return { global: [], project: [] }; },
+		...overrides,
+	} as unknown as Natives;
+}
+
 function fakeCtx(confirm: boolean, notices: string[], reloads: { count: number }): ExtensionCommandContext {
 	return {
 		hasUI: true,
@@ -76,35 +91,39 @@ function autoResolvingCustom() {
 }
 
 describe("showPackedPanel (/packed folds packages + settings into one panel)", () => {
-	it("opens on the packages panel, and pressing s returns to it afterward instead of exiting", async () => {
-		// ctx.ui.custom is faked directly rather than simulating keypresses --
-		// asserts the panel loop's own dispatch, not the real TUI's rendering.
-		const customCalls: unknown[] = [];
+	it("s switches to the Settings tab inline, and Escape returns to Packages instead of closing -- one overlay throughout", async () => {
+		// Real bug, diagnosed live: s used to open a genuinely separate screen
+		// (Pi's own native ctx.ui.select/confirm) instead of staying on this
+		// same floating panel. Simulate real keypresses on the real returned
+		// component instead of scripting a canned dispatch action.
 		let customCallCount = 0;
-		const securityCalls: string[] = [];
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom(_factory: unknown) {
+				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
 					customCallCount += 1;
-					customCalls.push(_factory);
-					// First open: settings. Second open (after settings returns): close.
-					return customCallCount === 1 ? { type: "settings" } : undefined;
+					return new Promise((resolve) => {
+						const theme = { fg: (_c: string, s: string) => s, bold: (s: string) => s };
+						const component = factory({ requestRender() {} }, theme, {}, resolve);
+						component.handleInput("s");
+						setTimeout(() => {
+							// Settings' own content is genuinely part of THIS SAME component's render output.
+							expect(component.render(60).join("\n")).toContain("current: always");
+							component.handleInput("\x1b"); // back to Packages, not close
+							expect(component.render(60).join("\n")).toContain("No packages");
+							component.handleInput("\x1b"); // close, now that Packages is the active tab
+						}, 0);
+					});
 				},
-				async select() { return "Cancel"; },
+				async select() { throw new Error("must not be called -- settings is a real inline tab now, not ctx.ui.select"); },
 				notify() {},
 			},
 		} as unknown as ExtensionCommandContext;
-		const natives = {
-			async installed() { return []; },
-			async updates() { return []; },
-			async security() { securityCalls.push("security"); return { mutationApproval: "always" as const }; },
-		} as unknown as Natives;
+		const natives = baseNatives();
 
 		await showPackedPanel(ctx, natives);
 
-		expect(customCallCount).toBe(2); // packages panel opened, then reopened after settings
-		expect(securityCalls).toEqual(["security"]); // settings flow actually ran once
+		expect(customCallCount).toBe(1); // one overlay throughout -- never closed and reopened for settings
 	});
 
 	it("closes without ever touching settings when the panel itself is dismissed", async () => {
@@ -466,57 +485,65 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		expect(settledFrame).toBeDefined();
 	});
 
-	it("dispatches config to showResourceConfig, scoped to the selected row, then returns to the same panel", async () => {
+	it("c switches to the Config tab inline, scoped to the selected row's cwd, then Escape returns to Packages -- one overlay throughout", async () => {
 		let customCallCount = 0;
-		let listResourcesCalled = false;
+		let listResourcesCwd: string | undefined;
 		const ctx = {
 			hasUI: true,
+			cwd: "/project",
 			ui: {
-				async custom() {
+				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
 					customCallCount += 1;
-					// 1st: packages panel -> "config". 2nd: showResourceConfig's own panel -> close. 3rd: packages panel reopened -> close.
-					if (customCallCount === 1) return { type: "config", row };
-					if (customCallCount === 2) return { type: "close" };
-					return undefined;
+					return new Promise((resolve) => {
+						const theme = { fg: (_c: string, s: string) => s, bold: (s: string) => s };
+						const component = factory({ requestRender() {} }, theme, {}, resolve);
+						expect(component.render(60).join("\n")).toContain("pi-lsp"); // Packages tab, already loaded
+						component.handleInput("c");
+						expect(component.render(60).join("\n")).toContain("Global Resources"); // now on the Config tab, same component
+						component.handleInput("\x1b"); // back to Packages, not close
+						expect(component.render(60).join("\n")).toContain("pi-lsp");
+						component.handleInput("\x1b"); // close, now that Packages is the active tab
+					});
 				},
 				notify() {},
 			},
 		} as unknown as ExtensionCommandContext;
-		const natives = {
-			async installed() { return []; },
-			async updates() { return []; },
-			async listResources() { listResourcesCalled = true; return { global: [], project: [] }; },
-		} as unknown as Natives;
+		const natives = baseNatives({
+			async installed() { return [{ name: "pi-lsp", installed: "1.0.0" }]; },
+			async listResources(projectRoot?: string) { listResourcesCwd = projectRoot; return { global: [], project: [] }; },
+		});
 
 		await showPackedPanel(ctx, natives);
 
-		expect(listResourcesCalled).toBe(true);
-		expect(customCallCount).toBe(3);
+		expect(listResourcesCwd).toBe("/project");
+		expect(customCallCount).toBe(1); // one overlay throughout -- never closed and reopened for config
 	});
 
-	it("dispatches find to showDiscoverPanel, then returns to the same panel when nothing was installed", async () => {
+	it("f switches to the Find tab inline, then Escape returns to Packages -- one overlay throughout", async () => {
 		let customCallCount = 0;
 		const ctx = {
 			hasUI: true,
 			ui: {
-				async custom() {
+				async custom(factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[]; handleInput(data: string): void }) {
 					customCallCount += 1;
-					// 1st: packages panel -> "find". 2nd: showDiscoverPanel's own panel -> close. 3rd: packages panel reopened -> close.
-					if (customCallCount === 1) return { type: "find" };
-					if (customCallCount === 2) return { type: "close" };
-					return undefined;
+					return new Promise((resolve) => {
+						const theme = { fg: (_c: string, s: string) => s, bold: (s: string) => s };
+						const component = factory({ requestRender() {} }, theme, {}, resolve);
+						component.handleInput("f");
+						expect(component.render(60).join("\n")).toContain("Type a query and press enter to search npm"); // now on the Find tab
+						component.handleInput("\x1b"); // back to Packages, not close
+						expect(component.render(60).join("\n")).toContain("No packages");
+						component.handleInput("\x1b"); // close, now that Packages is the active tab
+					});
 				},
 				notify() {},
 			},
 		} as unknown as ExtensionCommandContext;
-		const natives = {
-			async installed() { return []; },
-			async updates() { return []; },
-		} as unknown as Natives;
+		const natives = baseNatives();
 
 		await showPackedPanel(ctx, natives);
 
-		expect(customCallCount).toBe(3);
+		expect(customCallCount).toBe(1); // one overlay throughout -- never closed and reopened for find
 	});
 
 	it("renders its approval and reload confirms as an inline Dialog on this SAME overlay, dispatched by literal y/n keys -- never a separate ctx.ui.confirm", async () => {

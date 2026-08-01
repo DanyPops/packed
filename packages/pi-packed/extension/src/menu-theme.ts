@@ -1,5 +1,5 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import type { DialogTheme, MenuTheme } from "malevich-tui-components";
+import type { DialogTheme, MenuTheme, TabBarTheme } from "malevich-tui-components";
 
 /** Maps Pi's own Theme onto Malevich's Menu -- the one place this mapping
  * exists, shared by every ctx.ui.custom overlay menu in this extension. */
@@ -23,5 +23,15 @@ export function dialogTheme(theme: Theme): DialogTheme {
 		title: (s) => theme.bold(theme.fg("accent", s)),
 		body: (s) => s,
 		dim: (s) => theme.fg("muted", s),
+	};
+}
+
+/** Maps Pi's own Theme onto Malevich's TabbedContainer -- the persistent
+ * Packages/Find/Config/Settings tab bar at the top of /packed's one
+ * overlay, replacing what used to be four separately-opened screens. */
+export function tabBarTheme(theme: Theme): TabBarTheme {
+	return {
+		tab: (s) => theme.fg("muted", s),
+		activeTab: (s) => theme.bold(theme.fg("accent", s)),
 	};
 }

@@ -1,63 +1,65 @@
 /**
- * tui.ts — /packed's default panel. Mnemonics follow lazy.nvim's own
- * convention (folke/lazy.nvim lua/lazy/view/config.lua): uppercase acts on
- * every row, lowercase acts on the row under the cursor -- U/u update,
- * X/x was lazy's delete key (clean); here that pairing is single-target
- * only (x remove -- there is no safe "remove every installed package"
- * bulk analog, so no X is bound). Adds d disable/enable this package's
- * extensions, c jump to full resource config, f find/install new
- * packages, s settings. The panel itself is a real bordered (rounded)
- * floating overlay (`ctx.ui.custom` with overlay:true, Malevich's
- * Envelope for the box), positioned at 40% of terminal height (pi-tui's
- * own row percentage, not a fixed row count -- scales with the real
- * terminal, unlike the anchor:"top-center"+offsetY this replaced, which
- * was pinned 1 row below the absolute top on any terminal size). Enter
- * opens a second, smaller overlay action menu on top of it. U's batch
- * update stays on this same package list -- an indeterminate spinner
- * (Malevich's Spinner, extracted upstream from this panel's original need
- * once no embeddable one existed anywhere) renders inline next to the row
- * currently updating, settling into a real ✓/✗ plus a bounded tail of
- * that row's own actual captured stdout/stderr once it finishes, never a
- * determinate bar (a single subprocess call has no knowable percentage).
- * Rows render through Malevich's Table (real column-aligned
- * Package/Version/status cells, per-row selection styling baked into each
- * cell since Table's own cellStyle is column-wide, not row-wide) inside
- * this panel's own scroll-window slice -- Table deliberately owns no
- * pagination of its own, so the visible-window-around-selectedIndex math
- * stays here. u/x/d and the Enter action menu all run their whole
- * approve+mutate+confirmReload flow inline, without ever closing this
- * overlay first -- every confirm() along the way (mutation approval,
- * confirmReload's separate reload gate) renders as a real Malevich Dialog
- * on this SAME overlay, dispatched by literal y/n keys, instead of
- * ctx.ui.confirm's own separate native dialog (arrow-select only, and a
- * genuinely different overlay stacked on top -- confirmed live as a real
- * user complaint). Declining a reload defers it: the mutation itself
- * already happened, and the panel stays open with refreshed rows instead
- * of ending the session. Every non-"changed" settle point (already up to
- * date, pinned, deferred, a genuine failure) shows its own real reason on
- * that row too via the same settled map U's batch path uses, not only as
- * a scrollback toast -- confirmed live as a real bug: a single-row update
- * that turned out to be a no-op gave zero acknowledgment on the panel
- * itself. All data flows through the packed CLI (thin seam).
+ * tui.ts — /packed's one panel, four tabs. Mnemonics follow lazy.nvim's
+ * own convention (folke/lazy.nvim lua/lazy/view/config.lua): uppercase
+ * acts on every row, lowercase acts on the row under the cursor -- U/u
+ * update, X/x was lazy's delete key (clean); here that pairing is
+ * single-target only (x remove -- there is no safe "remove every
+ * installed package" bulk analog, so no X is bound). Adds d disable/
+ * enable this package's extensions, c jump to Config (scoped to the
+ * selected row), f jump to Find, s jump to Settings.
+ *
+ * All four (Packages/Find/Config/Settings) live inside ONE
+ * `ctx.ui.custom` floating overlay for the panel's whole lifetime --
+ * Malevich's Envelope for the box (rounded border), TabbedContainer for
+ * the persistent tab bar + active-tab content swap, and (on top of that)
+ * a Dialog swapped in for any y/n decision, the same content-replacement
+ * stacking Envelope's own setContent already provides, generalized one
+ * level further here. This replaced each tab opening its own separate
+ * screen (Find/Config: a second, visually distinct ctx.ui.custom with no
+ * Envelope at all; Settings: Pi's own native ctx.ui.select/confirm) --
+ * confirmed live as a real user complaint ("Find, Settings, Config all
+ * open a different TUI"). Left/Right cycle tabs; Escape returns to
+ * Packages from anywhere else, or closes the whole panel from Packages
+ * itself -- unless the active tab's own capturesEscape()/
+ * capturesHorizontalArrows() says it wants that key for itself right now
+ * (an active text filter, an in-flight mutation, or Find's always-on
+ * query box), in which case it's delegated straight through instead.
+ *
+ * Packages itself: an indeterminate spinner (Malevich's Spinner) renders
+ * inline next to the row currently updating, settling into a real ✓/✗
+ * plus a bounded tail of that row's own actual captured stdout/stderr
+ * once it finishes, never a determinate bar (a single subprocess call has
+ * no knowable percentage). Rows render through Malevich's Table (real
+ * column-aligned Package/Version/status cells, per-row selection styling
+ * baked into each cell since Table's own cellStyle is column-wide, not
+ * row-wide) inside this tab's own scroll-window slice -- Table
+ * deliberately owns no pagination of its own, so the visible-window-
+ * around-selectedIndex math stays here. u/x/d and the Enter action menu
+ * all run their whole approve+mutate+confirmReload flow inline, via the
+ * shared TabHost's inlineCtx -- every confirm() along the way renders as
+ * a real Malevich Dialog on this SAME overlay, dispatched by literal y/n
+ * keys, instead of ctx.ui.confirm's own separate native dialog. Every
+ * non-"changed" settle point (already up to date, pinned, deferred, a
+ * genuine failure) shows its own real reason on that row too via the same
+ * settled map U's batch path uses, not only as a scrollback toast. All
+ * data flows through the packed CLI (thin seam).
  */
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder, rawKeyHint } from "@earendil-works/pi-coding-agent";
 import { Container, Input, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { Dialog, Envelope, Menu, Spinner, Table, type MenuItem, type TableColumn, type TextMeasure } from "malevich-tui-components";
+import { Dialog, Envelope, Menu, Spinner, Table, TabbedContainer, type Component, type MenuItem, type TextMeasure } from "malevich-tui-components";
 import { filterRows, mergeRows, nextMode, visibleRows } from "./model.js";
 import type { Row, ViewMode } from "./model.js";
 import type { Natives, PackageResources } from "./packed.js";
 import { approvePackageOperation } from "./tools.js";
-import { showPackedSettings } from "./security-tui.js";
-import { showResourceConfig, applyResourceToggle } from "./resource-config.js";
-import { showDiscoverPanel } from "./discover.js";
-import { dialogTheme, menuTheme } from "./menu-theme.js";
+import { createSettingsTab, SettingsTab } from "./security-tui.js";
+import { createConfigTab, ConfigTab, applyResourceToggle } from "./resource-config.js";
+import { createFindTab, FindTab } from "./discover.js";
+import { dialogTheme, menuTheme, tabBarTheme } from "./menu-theme.js";
 import { confirmReload } from "./reload.js";
+import type { TabHost } from "./tab-host.js";
 
-interface PanelAction {
-	type: "config" | "find" | "refresh" | "settings";
-	row?: Row;
-}
+export type PackedTabKey = "packages" | "find" | "config" | "settings";
 
 /** Outcome of a confirmed row action, resolved after any real mutation and
  * reload decision -- "changed" means the daemon state changed and Pi has
@@ -369,86 +371,327 @@ async function showActionMenu(ctx: ExtensionCommandContext, row: Row): Promise<"
 	);
 }
 
-export async function showPackedPanel(ctx: ExtensionCommandContext, natives: Natives): Promise<void> {
+interface PackagesTabTheme { fg(color: string, s: string): string; bold(s: string): string; }
+
+/** Packages -- the panel's default/"home" tab. A real Component (not the
+ * panel's own top-level ctx.ui.custom owner anymore); the shared TabHost
+ * gives it inline approval/reload dialogs and a way to signal the overlay
+ * should close once a mutation actually replaces the session. */
+export class PackagesTab implements Component {
+	private rows: Row[];
+	private mode: ViewMode = "all";
+	private readonly searchInput = new Input();
+	private searchActive = false;
+	private filtered: Row[];
+	private selectedIndex = 0;
+	// Set only while U's batch update (or a single row's own u/x/d) is
+	// running -- blocks input for the duration (the mutation/installer owns
+	// input until it finishes). Which specific row currently shows a spinner
+	// vs. a settled ✓/✗ is settled's own job, not this -- a just-finished row
+	// must show its glyph immediately, even for the instant before the next
+	// row's "start" event reassigns this to the next name.
+	private updatingRowName: string | undefined;
+	private readonly spinner = new Spinner();
+	private readonly settled = new Map<string, { ok: boolean; tail: string | undefined }>();
+	private readonly table: Table;
+	private readonly maxVisible = 20;
+
+	constructor(
+		private readonly natives: Natives,
+		private readonly host: TabHost,
+		private readonly theme: PackagesTabTheme,
+		measure: TextMeasure,
+		initialRows: Row[],
+		/** c on a row, or the Enter action menu's "Configure resources" --
+		 * switches the shared TabbedContainer to Config, seeded with that
+		 * row's own name as its filter. f/s switch tabs with no filter. */
+		private readonly switchTab: (target: "find" | "config" | "settings", configFilter?: string) => void,
+	) {
+		this.rows = initialRows;
+		this.filtered = visibleRows(this.rows, this.mode);
+		this.table = new Table({
+			columns: [
+				{ header: "Package", key: "name" },
+				{ header: "Version", key: "version" },
+				{ header: "", key: "status" },
+			],
+			rows: [],
+			measure,
+			headerStyle: (s) => theme.fg("muted", s),
+		});
+	}
+
+	/** An active filter or an in-flight mutation means Escape/Left-Right
+	 * belong to this tab (clearing the filter; blocking navigation away
+	 * mid-mutation), not the host's own back/tab-cycle handling. Packages
+	 * never uses Left/Right for itself otherwise. */
+	capturesEscape(): boolean {
+		return this.searchActive || this.updatingRowName !== undefined;
+	}
+
+	invalidate(): void {
+		this.table.invalidate();
+	}
+
+	private applyFilter(): void {
+		this.filtered = filterRows(visibleRows(this.rows, this.mode), this.searchInput.getValue());
+		this.selectedIndex = 0;
+	}
+
+	private statusLine(): string {
+		if (this.updatingRowName) return "updating…";
+		const outdated = this.rows.filter((r) => r.hasUpdate).length;
+		return outdated > 0 ? `${outdated} update(s)` : "up to date";
+	}
+
+	render(width: number): string[] {
+		const { theme } = this;
+		const hint = this.searchActive
+			? rawKeyHint("esc", "clear")
+			: rawKeyHint("enter", "menu") +
+				theme.fg("muted", " · ") +
+				rawKeyHint("u/U", "update/all") +
+				theme.fg("muted", " · ") +
+				rawKeyHint("x", "remove") +
+				theme.fg("muted", " · ") +
+				rawKeyHint("d", "disable") +
+				theme.fg("muted", " · ") +
+				rawKeyHint("c", "config") +
+				theme.fg("muted", " · ") +
+				rawKeyHint("r", "refresh");
+		const line1 = truncateToWidth(hint, width, "");
+		const dot = "·";
+		const line2 = truncateToWidth(
+			theme.fg("muted", `${this.statusLine()} ${dot} view: ${this.mode} ${dot} / filter ${dot} tab view ${dot} ${this.rows.length} installed`),
+			width,
+			"",
+		);
+		const lines: string[] = [line1, line2];
+		if (this.searchActive) lines.push(...this.searchInput.render(width));
+		lines.push("");
+		if (this.filtered.length === 0) {
+			lines.push(theme.fg("muted", "  No packages"));
+			return lines;
+		}
+		// No scrolling of its own (Malevich's Table is deliberately
+		// unopinionated about pagination) -- the visible window around
+		// selectedIndex stays this tab's own job.
+		const start = Math.max(0, Math.min(this.selectedIndex - Math.floor(this.maxVisible / 2), this.filtered.length - this.maxVisible));
+		const end = Math.min(start + this.maxVisible, this.filtered.length);
+		this.table.setRows(
+			this.filtered.slice(start, end).map((row, offset) => {
+				const i = start + offset;
+				const selected = i === this.selectedIndex;
+				const cursor = selected ? theme.fg("accent", "❯ ") : "  ";
+				const name = selected ? theme.bold(row.name) : row.name;
+				// A settled row shows its real outcome even for the instant before
+				// the next row's "start" event moves updatingRowName off it --
+				// settled always wins over "still spinning".
+				const rowSettled = this.settled.get(row.name);
+				const isUpdating = !rowSettled && this.updatingRowName === row.name;
+				const status = isUpdating
+					? theme.fg("accent", `${this.spinner.glyph()} updating…`)
+					: rowSettled
+						? theme.fg(rowSettled.ok ? "success" : "error", `${rowSettled.ok ? "✓" : "✗"}${rowSettled.tail ? ` ${rowSettled.tail}` : ""}`)
+						: row.hasUpdate ? theme.fg("warning", `↑${row.latest}`) : "";
+				return { name: `${cursor}${name}`, version: theme.fg("dim", row.version), status };
+			}),
+		);
+		lines.push(...this.table.render(width));
+		const hasScroll = start > 0 || end < this.filtered.length;
+		lines.push(theme.fg("dim", `  ${hasScroll ? `${this.selectedIndex + 1}/${this.filtered.length} ` : ""}${this.mode}`));
+		return lines;
+	}
+
+	handleInput(data: string): void {
+		if (this.updatingRowName) return; // the mutation/installer owns input until it finishes
+
+		if (this.searchActive) {
+			if (data === "\x1b") {
+				this.searchActive = false;
+				this.searchInput.setValue?.("");
+				this.applyFilter();
+			} else if (data === "\r") {
+				this.searchActive = false;
+			} else {
+				this.searchInput.handleInput(data);
+				this.applyFilter();
+			}
+			this.host.requestRender();
+			return;
+		}
+
+		switch (data) {
+			case "\x1b[A":
+				this.selectedIndex = (this.selectedIndex - 1 + this.filtered.length) % Math.max(this.filtered.length, 1);
+				break;
+			case "\x1b[B":
+				this.selectedIndex = (this.selectedIndex + 1) % Math.max(this.filtered.length, 1);
+				break;
+			case "\t":
+				this.mode = nextMode(this.mode);
+				this.applyFilter();
+				break;
+			case "/":
+				this.searchActive = true;
+				break;
+			case "r":
+				void this.refresh();
+				return;
+			case "s":
+				this.switchTab("settings");
+				return;
+			case "f":
+				this.switchTab("find");
+				return;
+			case "U":
+				void this.runUpdateAllInline();
+				return;
+			case "u": {
+				const row = this.filtered[this.selectedIndex];
+				if (row?.hasUpdate) void this.runRowActionInline({ type: "update", row });
+				return;
+			}
+			case "x": {
+				const row = this.filtered[this.selectedIndex];
+				if (row) void this.runRowActionInline({ type: "remove", row });
+				return;
+			}
+			case "d": {
+				const row = this.filtered[this.selectedIndex];
+				if (row) void this.runRowActionInline({ type: "disable", row });
+				return;
+			}
+			case "c": {
+				const row = this.filtered[this.selectedIndex];
+				if (row) this.switchTab("config", row.name);
+				return;
+			}
+			case "\r": {
+				const row = this.filtered[this.selectedIndex];
+				if (!row) return;
+				void (async () => {
+					const choice = await showActionMenu(this.host.inlineCtx, row);
+					if (choice === "update" || choice === "remove" || choice === "disable") void this.runRowActionInline({ type: choice, row });
+					else if (choice === "config") this.switchTab("config", row.name);
+				})();
+				return;
+			}
+			default:
+				return;
+		}
+		this.host.requestRender();
+	}
+
+	private async refresh(): Promise<void> {
+		const reloaded = await loadRows(this.natives);
+		if (reloaded.error) this.host.ctx.ui.notify(`refresh failed: ${reloaded.error}`, "error");
+		else this.rows = reloaded.rows;
+		this.applyFilter();
+		this.host.requestRender();
+	}
+
+	/** u/x/d and the Enter action menu all funnel through here: approval and
+	 * reload confirms render inline (via host.inlineCtx) on this same
+	 * overlay, never closing it first. */
+	private async runRowActionInline(action: { type: "update" | "remove" | "disable"; row: Row }): Promise<void> {
+		this.updatingRowName = action.row.name;
+		this.host.requestRender();
+		// A non-"changed" settle point (already up to date, pinned, deferred, a
+		// genuine failure) shows its own real reason on this row, the same
+		// settled map U's batch path already renders -- not just a scrollback
+		// toast.
+		const onSettled = (result: PackageChoiceSettled) => this.settled.set(action.row.name, { ok: result.ok, tail: result.message });
+		const outcome = action.type === "disable"
+			? await applyDisableExtensions(action.row, this.natives, this.host.inlineCtx)
+			: await applyPackageChoice(action.type === "update" ? `Update to ${action.row.latest}` : "Remove", action.row, this.natives, this.host.inlineCtx, onSettled);
+		this.updatingRowName = undefined;
+		if (outcome === "changed") {
+			this.host.onSessionReplaced(); // ctx.reload() already replaced the session
+			return;
+		}
+		const reloaded = await loadRows(this.natives);
+		if (reloaded.error) this.host.ctx.ui.notify(`refresh failed: ${reloaded.error}`, "error");
+		else this.rows = reloaded.rows;
+		this.applyFilter();
+		this.host.requestRender();
+	}
+
+	/** U -- runs the whole approve+update+notify+reload flow without ever
+	 * closing this tab or replacing the list: each row's own settled outcome
+	 * (spinner while in flight, then a real ✓/✗ plus a bounded tail of its
+	 * actual captured output) appears inline next to that row. Rows refresh
+	 * in place afterward unless a reload already ended the session. */
+	private async runUpdateAllInline(): Promise<void> {
+		const outdated = this.rows.filter((row) => row.hasUpdate);
+		this.settled.clear();
+		const outcome = await approveAndRunUpdateAll(outdated, this.natives, this.host.inlineCtx, (batch, approved) => {
+			this.spinner.start(() => this.host.requestRender());
+			return performUpdateAll(batch, this.natives, approved, (event) => {
+				this.updatingRowName = event.row.name;
+				if (event.phase === "done" && event.result) {
+					this.settled.set(event.row.name, { ok: event.result.ok, tail: logTail(event.result.output) });
+				}
+				this.host.requestRender();
+			}).finally(() => this.spinner.stop());
+		});
+		this.updatingRowName = undefined;
+		if (outcome === "changed") {
+			this.host.onSessionReplaced(); // ctx.reload() already replaced the session
+			return;
+		}
+		const reloaded = await loadRows(this.natives);
+		if (reloaded.error) this.host.ctx.ui.notify(`refresh failed: ${reloaded.error}`, "error");
+		else this.rows = reloaded.rows;
+		this.settled.clear(); // fresh state for a subsequent batch
+		this.applyFilter();
+		this.host.requestRender();
+	}
+}
+
+interface TabScope {
+	/** True while this tab wants Escape for itself right now (an active
+	 * filter, an in-flight mutation) instead of the host's own "back to
+	 * Packages, or close from Packages" handling. Defaults to false. */
+	capturesEscape?(): boolean;
+	/** True while this tab wants Left/Right for itself right now (Find's
+	 * always-on query cursor) instead of the host's own tab-cycling.
+	 * Defaults to false. */
+	capturesHorizontalArrows?(): boolean;
+}
+
+export async function showPackedPanel(
+	ctx: ExtensionCommandContext,
+	natives: Natives,
+	opts?: { initialTab?: PackedTabKey; initialConfigFilter?: string },
+): Promise<void> {
 	if (!ctx.hasUI) {
 		ctx.ui.notify("/packed requires interactive mode", "warning");
 		return;
 	}
 
-	let { rows, error } = await loadRows(natives);
+	const { rows, error } = await loadRows(natives);
 	if (error) {
 		ctx.ui.notify(`packed unavailable: ${error}`, "error");
 		return;
 	}
 
-	// A deferred reload means the mutation itself genuinely happened but
-	// ctx.reload() was declined -- the session is still alive, so refresh
-	// rows (real on-disk versions) and keep the panel open, same as "refresh".
-	async function refreshRows(): Promise<void> {
-		({ rows, error } = await loadRows(natives));
-		if (error) ctx.ui.notify(`refresh failed: ${error}`, "error");
-	}
-
-	// Panel loop: actions resolve the component, run outside it, then reopen.
-	// Every mutation (u/x/d, U, and whatever the Enter action menu picks) is
-	// handled entirely inside renderPanel itself -- approval and reload
-	// confirms render inline on the same already-open overlay -- and never
-	// reaches here; only non-mutation navigation resolves this loop.
-	for (;;) {
-		const action = await renderPanel(ctx, natives, rows);
-		if (!action) return; // closed
-
-		if (action.type === "refresh") {
-			await refreshRows();
-			continue;
-		}
-
-		if (action.type === "settings") {
-			await showPackedSettings(ctx, natives);
-			continue; // settings never changes package rows -- reopen as-is
-		}
-
-		if (action.type === "find") {
-			await showDiscoverPanel(ctx, natives);
-			continue; // a successful install already reloaded; a no-op returns here
-		}
-
-		await showResourceConfig(ctx, natives, action.row?.name);
-		// showResourceConfig already handles its own reload prompt
-	}
+	await renderUnifiedPanel(ctx, natives, rows, opts?.initialTab ?? "packages", opts?.initialConfigFilter);
 }
 
-function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows: Row[]): Promise<PanelAction | undefined> {
-	return ctx.ui.custom<PanelAction | undefined>((tui, theme, _kb, done) => {
-		let rows = initialRows;
-		let mode: ViewMode = "all";
-		const searchInput = new Input();
-		let searchActive = false;
-		let filtered = visibleRows(rows, mode);
-		let selectedIndex = 0;
-		// Set only while U's batch update is running -- blocks input for the
-		// whole batch (the installer owns input until it finishes), same as
-		// before. The list stays fully visible throughout. Which specific row
-		// currently shows a spinner vs. a settled ✓/✗ is settled's own job
-		// (below), not this -- a just-finished row must show its glyph
-		// immediately, even for the instant before the next row's "start"
-		// event reassigns this to the next name.
-		let updatingRowName: string | undefined;
-		const spinner = new Spinner();
-		const settled = new Map<string, { ok: boolean; tail: string | undefined }>();
-
-		const maxVisible = 20;
-
-		function applyFilter(): void {
-			filtered = filterRows(visibleRows(rows, mode), searchInput.getValue());
-			selectedIndex = 0;
-		}
-
+function renderUnifiedPanel(
+	ctx: ExtensionCommandContext,
+	natives: Natives,
+	initialRows: Row[],
+	initialTab: PackedTabKey,
+	initialConfigFilter: string | undefined,
+): Promise<void> {
+	return ctx.ui.custom<void>((tui, theme, _kb, done) => {
 		// A y/n decision rendered as this SAME overlay's own content (via a real
 		// Malevich Dialog, dispatched by literal key press) instead of
-		// ctx.ui.confirm's separate native dialog -- confirmed live as a real
-		// user complaint: ctx.ui.confirm opens as its own distinct overlay on
-		// top of this one ("a new window"), arrow-select only, no y/n keys.
+		// ctx.ui.confirm's separate native dialog -- shared by every tab via
+		// host.inlineCtx below, exactly like the panel's own approval/reload
+		// dialogs always have been.
 		let pendingDialog: Dialog | undefined;
 
 		function confirmInline(title: string, message: string): Promise<boolean> {
@@ -466,194 +709,75 @@ function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows
 						{ label: "No", key: "n", action: () => settle(false) },
 					],
 					theme: dialogTheme(theme),
+					framed: false, // this overlay's own Envelope already draws a border; a second rule would double up on it
 				});
 				tui.requestRender();
 			});
 		}
 
-		// Every confirm() call inside a mutation flow driven from this open
-		// overlay (approvePackageOperation's own approval, confirmReload's
-		// separate reload gate) routes through confirmInline instead of the
-		// real ctx.ui.confirm -- notify/reload/etc. stay the genuine ctx.
 		const inlineCtx: ExtensionCommandContext = { ...ctx, hasUI: true, ui: { ...ctx.ui, confirm: confirmInline } };
-
-		/** u/x/d and the Enter action menu all funnel through here: approval and
-		 * reload confirms render inline (via inlineCtx/confirmInline) on this
-		 * same overlay, never closing it first the way done()-dispatch used to. */
-		async function runRowActionInline(action: { type: "update" | "remove" | "disable"; row: Row }): Promise<void> {
-			updatingRowName = action.row.name;
-			tui.requestRender();
-			// A non-"changed" settle point (already up to date, pinned, deferred,
-			// a genuine failure) shows its own real reason on this row, the same
-			// settled map U's batch path already renders -- not just a scrollback
-			// toast, which was the whole bug: nothing on the panel itself ever
-			// acknowledged that a single-row action had even run.
-			const onSettled = (result: PackageChoiceSettled) => settled.set(action.row.name, { ok: result.ok, tail: result.message });
-			const outcome = action.type === "disable"
-				? await applyDisableExtensions(action.row, natives, inlineCtx)
-				: await applyPackageChoice(action.type === "update" ? `Update to ${action.row.latest}` : "Remove", action.row, natives, inlineCtx, onSettled);
-			updatingRowName = undefined;
-			if (outcome === "changed") {
-				done(undefined); // ctx.reload() already replaced the session
-				return;
-			}
-			const reloaded = await loadRows(natives);
-			if (reloaded.error) ctx.ui.notify(`refresh failed: ${reloaded.error}`, "error");
-			else rows = reloaded.rows;
-			applyFilter();
-			tui.requestRender();
-		}
-
-		/** U -- runs the whole approve+update+notify+reload flow without ever
-		 * closing this panel or replacing the list: each row's own settled
-		 * outcome (spinner while in flight, then a real ✓/✗ plus a bounded tail
-		 * of its actual captured output) appears inline next to that row, via
-		 * updatingRowName/spinner/settled, which list's own render checks. Rows
-		 * refresh in place afterward unless a reload already ended the session. */
-		async function runUpdateAllInline(): Promise<void> {
-			const outdated = rows.filter((row) => row.hasUpdate);
-			settled.clear();
-			const outcome = await approveAndRunUpdateAll(outdated, natives, inlineCtx, (batch, approved) => {
-				spinner.start(() => tui.requestRender());
-				return performUpdateAll(batch, natives, approved, (event) => {
-					updatingRowName = event.row.name;
-					if (event.phase === "done" && event.result) {
-						settled.set(event.row.name, { ok: event.result.ok, tail: logTail(event.result.output) });
-					}
-					tui.requestRender();
-				}).finally(() => spinner.stop());
-			});
-			updatingRowName = undefined;
-			if (outcome === "changed") {
-				done(undefined); // ctx.reload() already replaced the session
-				return;
-			}
-			const reloaded = await loadRows(natives);
-			if (reloaded.error) ctx.ui.notify(`refresh failed: ${reloaded.error}`, "error");
-			else rows = reloaded.rows;
-			settled.clear(); // fresh state for a subsequent batch
-			applyFilter();
-			tui.requestRender();
-		}
-
-		function panelTitle(): string {
-			if (updatingRowName) return "Packages · updating…";
-			const outdated = rows.filter((r) => r.hasUpdate).length;
-			return outdated > 0 ? `Packages · ${outdated} update(s)` : "Packages";
-		}
-
-		const header = {
-			invalidate() {},
-			render(width: number): string[] {
-				const hint = searchActive
-					? rawKeyHint("esc", "clear")
-					: rawKeyHint("enter", "menu") +
-						theme.fg("muted", " · ") +
-						rawKeyHint("u/U", "update/all") +
-						theme.fg("muted", " · ") +
-						rawKeyHint("x", "remove") +
-						theme.fg("muted", " · ") +
-						rawKeyHint("d", "disable") +
-						theme.fg("muted", " · ") +
-						rawKeyHint("c", "config") +
-						theme.fg("muted", " · ") +
-						rawKeyHint("f", "find") +
-						theme.fg("muted", " · ") +
-						rawKeyHint("s", "settings") +
-						theme.fg("muted", " · ") +
-						rawKeyHint("esc", "close");
-				const line1 = truncateToWidth(hint, width, "");
-				const dot = "·";
-				const line2 = truncateToWidth(
-					theme.fg("muted", `view: ${mode} ${dot} / filter ${dot} tab view ${dot} r refresh ${dot} ${rows.length} installed`),
-					width,
-					"",
-				);
-				return [line1, line2];
-			},
+		const host: TabHost = {
+			ctx,
+			inlineCtx,
+			requestRender: () => tui.requestRender(),
+			onSessionReplaced: () => done(undefined),
 		};
 
-		// pi-tui's own visibleWidth/truncateToWidth are ANSI-aware (they strip
-		// escape codes for measurement, matching the pair Malevich's TextMeasure
-		// port expects) -- rows below bake selection/status styling directly
-		// into each cell's text since Table's own cellStyle is column-wide, not
-		// per-row.
 		const measure: TextMeasure = { visibleWidth, truncateToWidth };
-		const columns: TableColumn[] = [
-			{ header: "Package", key: "name" },
-			{ header: "Version", key: "version" },
-			{ header: "", key: "status" },
-		];
-		const table = new Table({ columns, rows: [], measure, headerStyle: (s) => theme.fg("muted", s) });
 
-		const list = {
-			invalidate() {},
-			render(width: number): string[] {
-				const lines: string[] = [];
-				if (searchActive) lines.push(...searchInput.render(width));
-				lines.push("");
-				if (filtered.length === 0) {
-					lines.push(theme.fg("muted", "  No packages"));
-					return lines;
-				}
-				// No scrolling of its own (Malevich's Table is deliberately
-				// unopinionated about pagination) -- the visible window around
-				// selectedIndex stays this panel's own job, same as before.
-				const start = Math.max(0, Math.min(selectedIndex - Math.floor(maxVisible / 2), filtered.length - maxVisible));
-				const end = Math.min(start + maxVisible, filtered.length);
-				table.setRows(
-					filtered.slice(start, end).map((row, offset) => {
-						const i = start + offset;
-						const selected = i === selectedIndex;
-						const cursor = selected ? theme.fg("accent", "❯ ") : "  ";
-						const name = selected ? theme.bold(row.name) : row.name;
-						// A settled row shows its real outcome even for the instant
-						// before the next row's "start" event moves updatingRowName
-						// off it -- settled always wins over "still spinning".
-						const rowSettled = settled.get(row.name);
-						const isUpdating = !rowSettled && updatingRowName === row.name;
-						const status = isUpdating
-							? theme.fg("accent", `${spinner.glyph()} updating…`)
-							: rowSettled
-								? theme.fg(rowSettled.ok ? "success" : "error", `${rowSettled.ok ? "✓" : "✗"}${rowSettled.tail ? ` ${rowSettled.tail}` : ""}`)
-								: row.hasUpdate ? theme.fg("warning", `↑${row.latest}`) : "";
-						return { name: `${cursor}${name}`, version: theme.fg("dim", row.version), status };
-					}),
-				);
-				lines.push(...table.render(width));
-				const hasScroll = start > 0 || end < filtered.length;
-				lines.push(theme.fg("dim", `  ${hasScroll ? `${selectedIndex + 1}/${filtered.length} ` : ""}${mode}`));
-				return lines;
-			},
+		const packagesTab = new PackagesTab(natives, host, theme, measure, initialRows, (target, configFilter) => {
+			if (target === "config" && configFilter !== undefined) configTab.setFilter(configFilter);
+			tabbedContainer.setActive(target);
+		});
+
+		const findTab = createFindTab(natives, host, theme);
+
+		// Config/Settings both need theme (only available once this factory
+		// runs) so they're constructed here rather than before the overlay
+		// opens; both load their own data asynchronously in the background and
+		// render their own "Loading…" state until it resolves -- no
+		// placeholder-swap machinery needed.
+		const configTab = new ConfigTab(natives, host, theme, initialTab === "config" ? initialConfigFilter : undefined);
+		void configTab.load().then(() => tui.requestRender());
+
+		const settingsTab = new SettingsTab(natives, host, theme);
+		void settingsTab.load().then(() => tui.requestRender());
+
+		const tabByKey: Record<PackedTabKey, Component & TabScope> = {
+			packages: packagesTab,
+			find: findTab,
+			config: configTab,
+			settings: settingsTab,
 		};
 
-		// Real bordered box (rounded corners), not just a horizontal rule --
-		// title carries the live update badge/status instead of a header line.
+		const tabbedContainer = new TabbedContainer({
+			tabs: [
+				{ key: "packages", label: "Packages", content: tabByKey.packages },
+				{ key: "find", label: "Find", content: tabByKey.find },
+				{ key: "config", label: "Config", content: tabByKey.config },
+				{ key: "settings", label: "Settings", content: tabByKey.settings },
+			],
+			theme: tabBarTheme(theme),
+			initialKey: initialTab,
+		});
+
 		// measure must be explicit: Envelope's own default is ASCII-only (raw
-		// .length, blind to ANSI escape codes) and every line below is styled
-		// through theme.fg/theme.bold -- without this, Envelope pads each line
-		// against its own escape-code-inflated "length" instead of its real
-		// visible width, so the right border lands at a different column on
-		// every line depending on how much styling that particular line has.
+		// .length, blind to ANSI escape codes) and every tab's own content is
+		// styled through theme.fg/theme.bold -- without this, Envelope pads
+		// each line against its own escape-code-inflated "length" instead of
+		// its real visible width, so the right border lands at a different
+		// column on every line depending on how much styling it carries.
 		const envelope = new Envelope({
-			title: panelTitle(),
+			title: "packed",
 			borderStyle: "rounded",
 			style: (s) => theme.fg("border", s),
 			titleStyle: (s) => theme.bold(theme.fg("accent", s)),
 			measure,
 		});
-		const body = {
-			invalidate() { header.invalidate(); list.invalidate(); },
-			render(width: number): string[] {
-				return [...header.render(width), "", ...list.render(width)];
-			},
-		};
-		envelope.setContent(body);
 
 		return {
 			render(width: number): string[] {
-				envelope.setTitle(panelTitle());
-				envelope.setContent(pendingDialog ?? body);
+				envelope.setContent(pendingDialog ?? tabbedContainer);
 				return envelope.render(width);
 			},
 			invalidate: () => envelope.invalidate(),
@@ -663,85 +787,24 @@ function renderPanel(ctx: ExtensionCommandContext, natives: Natives, initialRows
 					tui.requestRender();
 					return;
 				}
-				if (updatingRowName) return; // the mutation/installer owns input until it finishes
-
-				if (searchActive) {
-					if (data === "\x1b") {
-						searchActive = false;
-						searchInput.setValue?.("");
-						applyFilter();
-					} else if (data === "\r") {
-						searchActive = false;
-					} else {
-						searchInput.handleInput(data);
-						applyFilter();
-					}
+				const activeKey = tabbedContainer.getActiveKey() as PackedTabKey;
+				const activeTab = tabByKey[activeKey];
+				// Each host-level key is checked against that tab's own capture flag
+				// independently -- conflating them would, e.g., let Find's always-on
+				// capturesHorizontalArrows() also swallow Escape into the query box
+				// instead of navigating back.
+				if (data === "\x1b" && !(activeTab.capturesEscape?.() ?? false)) {
+					if (activeKey !== "packages") tabbedContainer.setActive("packages");
+					else { done(undefined); return; }
 					tui.requestRender();
 					return;
 				}
-
-				switch (data) {
-					case "\x1b[A": // up
-						selectedIndex = (selectedIndex - 1 + filtered.length) % Math.max(filtered.length, 1);
-						break;
-					case "\x1b[B": // down
-						selectedIndex = (selectedIndex + 1) % Math.max(filtered.length, 1);
-						break;
-					case "\t":
-						mode = nextMode(mode);
-						applyFilter();
-						break;
-					case "/":
-						searchActive = true;
-						break;
-					case "r":
-						done({ type: "refresh" });
-						return;
-					case "s":
-						done({ type: "settings" });
-						return;
-					case "f":
-						done({ type: "find" });
-						return;
-					case "U":
-						void runUpdateAllInline();
-						return;
-					case "u": {
-						const row = filtered[selectedIndex];
-						if (row?.hasUpdate) void runRowActionInline({ type: "update", row });
-						return;
-					}
-					case "x": {
-						const row = filtered[selectedIndex];
-						if (row) void runRowActionInline({ type: "remove", row });
-						return;
-					}
-					case "d": {
-						const row = filtered[selectedIndex];
-						if (row) void runRowActionInline({ type: "disable", row });
-						return;
-					}
-					case "c": {
-						const row = filtered[selectedIndex];
-						if (row) done({ type: "config", row });
-						return;
-					}
-					case "\r": {
-						const row = filtered[selectedIndex];
-						if (!row) return;
-						void (async () => {
-							const choice = await showActionMenu(ctx, row);
-							if (choice === "update" || choice === "remove" || choice === "disable") void runRowActionInline({ type: choice, row });
-							else if (choice === "config") done({ type: "config", row });
-						})();
-						return;
-					}
-					case "\x1b":
-						done(undefined);
-						return;
-					default:
-						return;
+				if ((data === "\x1b[C" || data === "\x1b[D") && !(activeTab.capturesHorizontalArrows?.() ?? false)) {
+					tabbedContainer.handleInput(data); // owns Left/Right cycling itself
+					tui.requestRender();
+					return;
 				}
+				activeTab.handleInput?.(data);
 				tui.requestRender();
 			},
 		};

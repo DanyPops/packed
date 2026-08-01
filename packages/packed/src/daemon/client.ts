@@ -50,6 +50,10 @@ export interface PackageDaemonPort {
 		source: string,
 		approved?: boolean,
 	): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }>;
+	restartService(
+		source: string,
+		approved?: boolean,
+	): Promise<{ output: string; restarted?: boolean; spec?: { name: string; binPath: string; descriptorPath: string } }>;
 	remove(name: string, approved?: boolean): Promise<string>;
 	update(source: string, approved?: boolean): Promise<UpdateOutcome>;
 	piStatus(): Promise<PiVersionReport>;
@@ -241,6 +245,21 @@ export class PackageDaemonClient implements PackageDaemonPort {
 		return { output: result.output, spec: result.spec };
 	}
 
+	async restartService(
+		source: string,
+		approved = false,
+	): Promise<{ output: string; restarted?: boolean; spec?: { name: string; binPath: string; descriptorPath: string } }> {
+		const result = await this.call("package.restart_service", { source, approved });
+		if (!result.ok)
+			throw new PackageDaemonError(
+				result.output || `failed to restart the persistent service for ${source}`,
+				"package.restart_service",
+				undefined,
+				result.notADaemon === true,
+			);
+		return { output: result.output, restarted: result.restarted, spec: result.spec };
+	}
+
 	async remove(name: string, approved = false): Promise<string> {
 		const result = await this.call("package.remove", { name, approved });
 		if (!result.ok) throw new PackageDaemonError(result.output || `failed to remove ${name}`, "package.remove");
@@ -304,10 +323,20 @@ export interface DaemonServiceInstallerPort {
 		source: string,
 		approved?: boolean,
 	): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }>;
+	restart(
+		source: string,
+		approved?: boolean,
+	): Promise<{ output: string; restarted?: boolean; spec?: { name: string; binPath: string; descriptorPath: string } }>;
 }
 
 export class DaemonBackedDaemonServiceInstaller implements DaemonServiceInstallerPort {
 	constructor(private readonly paths: PackedPaths = resolvePackedPaths()) {}
+	async restart(
+		source: string,
+		approved?: boolean,
+	): Promise<{ output: string; restarted?: boolean; spec?: { name: string; binPath: string; descriptorPath: string } }> {
+		return (await connectPackageDaemon(this.paths)).restartService(source, approved);
+	}
 	async install(
 		source: string,
 		approved?: boolean,

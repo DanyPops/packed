@@ -141,6 +141,7 @@ describe("daemon-kit migration", () => {
 			"package.security.set",
 			"package.install",
 			"package.install_service",
+			"package.restart_service",
 			"package.remove",
 			"package.update",
 			"resources.list",

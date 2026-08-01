@@ -83,7 +83,7 @@ usage:
   packed search <query> [--offline] [--json]   search npm (or the local mirror with --offline)
   packed info <name> [--json]                  package details
   packed updates [--project <path>] [--json]   updates per the local mirror; --project also checks that project's own .pi/settings.json pins
-  packed update <source> [--approve] [--json]  update one configured package through Pi
+  packed update <source> [--approve] [--no-service] [--json]  update one configured package through Pi; restarts its registered persistent service (if any) to pick up the new code, unless --no-service
   packed update --self [--approve] [--json]    update Packed itself (npm-global installs only) and restart its supervised service
   packed mirror [--json]                       sync upstream into the local SQLite index
   packed installed [--json]                    installed pi packages
@@ -102,6 +102,7 @@ usage:
   packed setup apply [manifest] [--prune] [--approve] [--json] apply an approved setup plan
   packed install <source> [--approve] [--no-service] [--json] pi install npm:|git:|https://… via daemon; auto-registers a detected npm: Vehicle daemon as a service unless --no-service
   packed install-service <source> --approve [--json] register a package's own daemon as a persistent login/boot service (also useful standalone, e.g. re-registering after --no-service)
+  packed restart-service <source> --approve [--json] restart a package's already-registered persistent service standalone (packed update already does this automatically)
   packed remove <name> [--approve] [--json]    remove by bare npm name via daemon
   packed security [always|never] [--approve] [--json] read or set mutation approval policy
   packed serve                                 run the long-running daemon
@@ -141,6 +142,10 @@ export interface CliDeps {
 			source: string,
 			approved?: boolean,
 		): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }>;
+		restart(
+			source: string,
+			approved?: boolean,
+		): Promise<{ output: string; restarted?: boolean; spec?: { name: string; binPath: string; descriptorPath: string } }>;
 	};
 	piVersion?: { check(): Promise<PiVersionReport> };
 	selfUpdater?: { run(): Promise<SelfUpdateReport> };
@@ -230,6 +235,7 @@ const PACKAGE_COMMAND_OPERATIONS: Record<string, PackageOperation | undefined> =
 	mirror: "mirror",
 	install: "install",
 	"install-service": "install_service",
+	"restart-service": "restart_service",
 	remove: "remove",
 	pi: "pi.status",
 	advisories: "advisories.scan",
@@ -618,6 +624,22 @@ const commands: Record<string, { usage: string; run: Command }> = {
 		},
 	},
 
+	"restart-service": {
+		usage: "packed restart-service npm:<pkg>[@ver] --approve [--json]  (restarts a package's already-registered persistent service)",
+		async run(_rest, d, flags, pos) {
+			const source = pos[0] ?? "";
+			if (!SOURCE_RE.test(source)) return usageErr(`usage: ${commands["restart-service"]!.usage}\n`);
+			if (!d.daemonService) return fail("restart-service requires a running packed daemon\n");
+			try {
+				const { output, restarted, spec } = await d.daemonService.restart(source, flags.approved);
+				return flags.json ? ok(`${JSON.stringify({ ok: true, source, output, restarted, spec })}\n`) : ok(`${output}\n`);
+			} catch (e) {
+				const error = e instanceof Error ? e.message : String(e);
+				return flags.json ? fail(`${JSON.stringify({ ok: false, source, error })}\n`) : fail(`${error}\n`);
+			}
+		},
+	},
+
 	security: {
 		usage: "packed security [always|never] [--json]",
 		async run(_rest, d, flags, pos) {
@@ -655,17 +677,35 @@ const commands: Record<string, { usage: string; run: Command }> = {
 			if (!SOURCE_RE.test(source)) return usageErr(`usage: ${commands.update!.usage}\n`);
 			try {
 				const outcome = await d.inst.update(source, { approved: flags.approved });
-				if (flags.json) return ok(`${JSON.stringify({ ok: true, source, ...outcome })}\n`);
 				if (outcome.alreadyUpToDate) {
+					if (flags.json) return ok(`${JSON.stringify({ ok: true, source, ...outcome })}\n`);
 					const version = outcome.currentVersion ?? outcome.previousVersion;
 					const reason = outcome.pinned
 						? `is pinned to ${version ?? "an exact version"} — pi update intentionally leaves pinned packages unchanged; run \`packed install npm:${npmPackageName(source) ?? source}\` to move off the pin`
 						: `is already up to date${version ? ` at ${version}` : ""}`;
 					return ok(`${source} ${reason}\n`);
 				}
+				// Mirrors install's own auto-registration composition: same approval tier, silent for
+				// the common non-daemon case, a failure reported without failing the update itself.
+				let serviceRestart: { detected: true; ok: boolean; output: string } | undefined;
+				if (!flags.noService && source.startsWith("npm:") && d.daemonService) {
+					try {
+						const svc = await d.daemonService.restart(source, flags.approved);
+						serviceRestart = { detected: true, ok: true, output: svc.output };
+					} catch (e) {
+						if (!(e instanceof Error) || !(e as { notADaemon?: boolean }).notADaemon) {
+							serviceRestart = { detected: true, ok: false, output: e instanceof Error ? e.message : String(e) };
+						}
+					}
+				}
+				if (flags.json) return ok(`${JSON.stringify({ ok: true, source, ...outcome, ...(serviceRestart ? { serviceRestart } : {}) })}\n`);
 				const transition =
 					outcome.previousVersion && outcome.currentVersion ? ` (${outcome.previousVersion} → ${outcome.currentVersion})` : "";
-				return ok(`${outcome.output}${transition}\nReload Pi with /reload to activate the updated package.\n`);
+				let human = `${outcome.output}${transition}\n`;
+				if (serviceRestart?.ok) human += `${serviceRestart.output}\n`;
+				else if (serviceRestart && !serviceRestart.ok)
+					human += `note: could not restart its persistent service: ${serviceRestart.output}\n`;
+				return ok(`${human}Reload Pi with /reload to activate the updated package.\n`);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				return flags.json
@@ -748,7 +788,7 @@ export async function cliRun(args: string[], d: CliDeps): Promise<CliResult> {
 	const { flags, pos } = parseFlags(rest);
 	try {
 		const validMutationInput =
-			name === "install" || name === "update" || name === "install-service"
+			name === "install" || name === "update" || name === "install-service" || name === "restart-service"
 				? SOURCE_RE.test(pos[0] ?? "")
 				: name === "remove"
 					? NAME_RE.test(pos[0] ?? "")

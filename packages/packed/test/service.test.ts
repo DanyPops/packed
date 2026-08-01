@@ -63,6 +63,11 @@ class FakeDaemonServiceInstaller implements DaemonServiceInstaller {
 	gotSource = "";
 	resolveFailure: string | undefined;
 	installFailure: string | undefined;
+	restartGotPiHome = "";
+	restartGotSource = "";
+	restartResolveFailure: string | undefined;
+	restartReason: string | undefined;
+	restarted = true;
 	spec: ServiceSpec = { name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/tmp/probe.service" };
 	install(
 		piHome: string,
@@ -73,6 +78,15 @@ class FakeDaemonServiceInstaller implements DaemonServiceInstaller {
 		if (this.resolveFailure) return { ok: false, reason: this.resolveFailure };
 		if (this.installFailure) return { ok: true, result: { installed: false, reason: this.installFailure }, spec: this.spec };
 		return { ok: true, result: { installed: true }, spec: this.spec };
+	}
+	restart(
+		piHome: string,
+		source: string,
+	): { ok: true; restarted: boolean; reason?: string; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean } {
+		this.restartGotPiHome = piHome;
+		this.restartGotSource = source;
+		if (this.restartResolveFailure) return { ok: false, reason: this.restartResolveFailure };
+		return { ok: true, restarted: this.restarted, reason: this.restartReason, spec: this.spec };
 	}
 }
 
@@ -327,6 +341,85 @@ describe("service app", () => {
 		expect(body.ok).toBe(false);
 		expect(body.output).toContain("no supported Linux init system");
 		expect(body.spec).toEqual({ name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/tmp/probe.service" });
+	});
+
+	it("POST /restart-service rejects invalid sources and requires approval, matching /install-service's own guard", async () => {
+		const svc = new FakeDaemonServiceInstaller();
+		const app = createApp(deps({ daemonServiceInstaller: svc }));
+
+		const invalid = await app.fetch(
+			new Request("http://x/restart-service", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ source: "npm:foo && curl x|sh" }),
+			}),
+		);
+		expect(invalid.status).toBe(400);
+		expect(svc.restartGotSource).toBe("");
+
+		const unapproved = await app.fetch(
+			new Request("http://x/restart-service", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ source: "npm:web-spider-daemon" }),
+			}),
+		);
+		expect(unapproved.status).toBe(403);
+		expect(await unapproved.json()).toMatchObject({ code: "approval_required" });
+		expect(svc.restartGotSource).toBe("");
+	});
+
+	it("POST /restart-service restarts a real service once approved, reporting the resolved spec", async () => {
+		const svc = new FakeDaemonServiceInstaller();
+		const piHome = mkdtempSync(join(tmpdir(), "packed-pi-"));
+		const app = createApp(deps({ daemonServiceInstaller: svc, piHome }));
+
+		const res = await app.fetch(
+			new Request("http://x/restart-service", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ source: "npm:web-spider-daemon", approved: true }),
+			}),
+		);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as any;
+		expect(body.ok).toBe(true);
+		expect(body.restarted).toBe(true);
+		expect(body.spec).toEqual({ name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/tmp/probe.service" });
+		expect(svc.restartGotPiHome).toBe(piHome);
+		expect(svc.restartGotSource).toBe("npm:web-spider-daemon");
+	});
+
+	it("POST /restart-service reports a resolution failure or a no-op (no registered service) in-band, not as an HTTP error", async () => {
+		const svc = new FakeDaemonServiceInstaller();
+		svc.restartResolveFailure = "web-spider-daemon does not declare a packed.daemonService manifest";
+		const app = createApp(deps({ daemonServiceInstaller: svc }));
+
+		const resolutionFailure = await app.fetch(
+			new Request("http://x/restart-service", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ source: "npm:web-spider-daemon", approved: true }),
+			}),
+		);
+		expect(resolutionFailure.status).toBe(200);
+		expect(((await resolutionFailure.json()) as any).ok).toBe(false);
+
+		svc.restartResolveFailure = undefined;
+		svc.restarted = false;
+		svc.restartReason = "no persistent service is registered for web-spider-daemon";
+		const noop = await app.fetch(
+			new Request("http://x/restart-service", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ source: "npm:web-spider-daemon", approved: true }),
+			}),
+		);
+		expect(noop.status).toBe(200);
+		const body = (await noop.json()) as any;
+		expect(body.ok).toBe(true);
+		expect(body.restarted).toBe(false);
+		expect(body.output).toContain("no persistent service is registered");
 	});
 
 	it("POST /update validates, authorizes, and delegates one Pi package source", async () => {

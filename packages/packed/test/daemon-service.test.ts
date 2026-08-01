@@ -2,7 +2,8 @@ import { describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { detectVehicleDaemonService, resolveDaemonServiceSpec } from "../src/daemon/daemon-service.ts";
+import type { ServiceInstallDeps } from "@danypops/vehicle-server/service";
+import { detectVehicleDaemonService, resolveDaemonServiceSpec, restartUserService } from "../src/daemon/daemon-service.ts";
 
 function fakePiHome(): string {
 	return mkdtempSync(join(tmpdir(), "packed-daemon-service-"));
@@ -185,5 +186,53 @@ describe("resolveDaemonServiceSpec", () => {
 		expect(detectVehicleDaemonService(dir, "some-cli")).toBeUndefined();
 		const result = resolveDaemonServiceSpec(piHome, "npm:some-cli");
 		expect(result.ok).toBe(false);
+	});
+});
+
+function fakeInstallDeps(over: Partial<ServiceInstallDeps> = {}): ServiceInstallDeps {
+	return {
+		platform: "linux",
+		writeFile: () => {},
+		readFile: () => null,
+		removeFile: () => {},
+		fileExists: () => false,
+		mkdirp: () => {},
+		runCommand: () => ({ ok: true, output: "" }),
+		which: () => true,
+		...over,
+	};
+}
+
+describe("restartUserService", () => {
+	const spec = { name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/home/user/.config/systemd/user/probe.service" };
+
+	it("restarts via systemctl --user restart, using the descriptor's basename as the unit name", () => {
+		const calls: Array<{ command: string; args: string[] }> = [];
+		const deps = fakeInstallDeps({
+			runCommand: (command, args) => {
+				calls.push({ command, args });
+				return { ok: true, output: "" };
+			},
+		});
+
+		const result = restartUserService(spec, deps);
+		expect(result).toEqual({ restarted: true });
+		expect(calls).toEqual([{ command: "systemctl", args: ["--user", "restart", "probe.service"] }]);
+	});
+
+	it("reports a real systemctl failure without throwing", () => {
+		const deps = fakeInstallDeps({ runCommand: () => ({ ok: false, output: "Unit probe.service not loaded" }) });
+
+		const result = restartUserService(spec, deps);
+		expect(result.restarted).toBe(false);
+		expect(result.reason).toContain("Unit probe.service not loaded");
+	});
+
+	it("refuses on a platform with no supported restart mechanism, rather than guessing at one", () => {
+		const deps = fakeInstallDeps({ platform: "darwin" });
+
+		const result = restartUserService(spec, deps);
+		expect(result.restarted).toBe(false);
+		expect(result.reason).toContain('platform "darwin"');
 	});
 });

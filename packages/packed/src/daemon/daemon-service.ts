@@ -26,11 +26,13 @@
  * on disk instead of asking for one more declaration.
  */
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { resolveDaemonPaths } from "@danypops/vehicle-server/paths";
 import {
 	createNodeServiceInstallDeps,
 	installUserService,
+	isServiceInstalled,
+	type ServiceInstallDeps,
 	type ServiceInstallResult,
 	type ServiceSpec,
 } from "@danypops/vehicle-server/service";
@@ -204,6 +206,10 @@ export interface DaemonServiceInstaller {
 		piHome: string,
 		source: string,
 	): { ok: true; result: ServiceInstallResult; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean };
+	restart(
+		piHome: string,
+		source: string,
+	): { ok: true; restarted: boolean; reason?: string; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean };
 }
 
 export class RealDaemonServiceInstaller implements DaemonServiceInstaller {
@@ -216,4 +222,28 @@ export class RealDaemonServiceInstaller implements DaemonServiceInstaller {
 		const result = installUserService(resolved.spec, createNodeServiceInstallDeps());
 		return { ok: true, result, spec: resolved.spec };
 	}
+
+	restart(
+		piHome: string,
+		source: string,
+	): { ok: true; restarted: boolean; reason?: string; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean } {
+		const resolved = resolveDaemonServiceSpec(piHome, source);
+		if (!resolved.ok) return resolved;
+		const deps = createNodeServiceInstallDeps();
+		if (!isServiceInstalled(resolved.spec, deps)) {
+			return { ok: true, restarted: false, reason: `no persistent service is registered for ${resolved.spec.name}`, spec: resolved.spec };
+		}
+		const result = restartUserService(resolved.spec, deps);
+		return { ok: true, restarted: result.restarted, reason: result.reason, spec: resolved.spec };
+	}
+}
+
+/** Linux/systemd only, matching installUserService's platform coverage order -- macOS/Windows report unsupported rather than guessing at launchctl/reg.exe restart equivalents this module doesn't implement. */
+export function restartUserService(spec: ServiceSpec, deps: ServiceInstallDeps): { restarted: boolean; reason?: string } {
+	const platform = deps.platform ?? process.platform;
+	if (platform !== "linux")
+		return { restarted: false, reason: `restart is not supported on platform "${platform}" yet -- restart ${spec.name} manually` };
+	const result = deps.runCommand("systemctl", ["--user", "restart", basename(spec.descriptorPath)]);
+	if (!result.ok) return { restarted: false, reason: `systemctl --user restart failed: ${result.output}` };
+	return { restarted: true };
 }

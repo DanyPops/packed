@@ -89,6 +89,7 @@ export type OperationName =
 	| "package.security.set"
 	| "package.install"
 	| "package.install_service"
+	| "package.restart_service"
 	| "package.remove"
 	| "package.update"
 	| "resources.list"
@@ -118,6 +119,7 @@ export interface OperationInputs {
 	"package.security.set": { mutationApproval: MutationApproval; approved?: boolean };
 	"package.install": { source: string; approved?: boolean };
 	"package.install_service": { source: string; approved?: boolean };
+	"package.restart_service": { source: string; approved?: boolean };
 	"package.remove": { name: string; approved?: boolean };
 	"package.update": { source: string; approved?: boolean };
 	"resources.list": { projectRoot?: string };
@@ -138,6 +140,9 @@ interface InstallServiceResponse {
 	output: string;
 	spec?: Pick<ServiceSpec, "name" | "binPath" | "descriptorPath">;
 	notADaemon?: boolean;
+}
+interface RestartServiceResponse extends InstallServiceResponse {
+	restarted?: boolean;
 }
 
 export interface OperationOutputs {
@@ -160,6 +165,7 @@ export interface OperationOutputs {
 	"package.security.set": { mutationApproval: MutationApproval };
 	"package.install": MutationResponse;
 	"package.install_service": InstallServiceResponse;
+	"package.restart_service": RestartServiceResponse;
 	"package.remove": MutationResponse;
 	"package.update": UpdateMutationResponse;
 	"resources.list": { global: PackageResources[]; project: PackageResources[] };
@@ -190,6 +196,7 @@ export const OPERATION_NAMES: readonly OperationName[] = [
 	"package.security.set",
 	"package.install",
 	"package.install_service",
+	"package.restart_service",
 	"package.remove",
 	"package.update",
 	"resources.list",
@@ -379,6 +386,29 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			return json({ ok: true, output: `installed a persistent service for ${resolved.spec.name}`, spec: pickSpec(resolved.spec) });
 		}
 
+		if (path === "/restart-service" && req.method === "POST") {
+			let source = "";
+			let approved = false;
+			try {
+				const body = (await req.json()) as { source?: unknown; approved?: unknown };
+				source = String(body.source ?? "");
+				approved = body.approved === true;
+			} catch {
+				/* fall through to validation */
+			}
+			if (!SOURCE_RE.test(source)) {
+				return err(400, "invalid source; want npm:<pkg>[@ver] -- daemon-service restart only supports npm sources today");
+			}
+			const denied = authorize("restart_service", approved);
+			if (denied) return denied;
+			const resolved = daemonServiceInstaller.restart(piHomeForServiceInstall, source);
+			if (!resolved.ok) return json({ ok: false, output: resolved.reason, notADaemon: resolved.notADaemon });
+			const output = resolved.restarted
+				? `restarted the persistent service for ${resolved.spec.name}`
+				: (resolved.reason ?? `no restart needed for ${resolved.spec.name}`);
+			return json({ ok: true, output, restarted: resolved.restarted, spec: pickSpec(resolved.spec) });
+		}
+
 		if (path === "/update" && req.method === "POST") {
 			let source = "";
 			let approved = false;
@@ -559,6 +589,10 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 				break;
 			case "package.install_service":
 				path = "/install-service";
+				init = { method: "POST", body: JSON.stringify(input) };
+				break;
+			case "package.restart_service":
+				path = "/restart-service";
 				init = { method: "POST", body: JSON.stringify(input) };
 				break;
 			case "package.remove":

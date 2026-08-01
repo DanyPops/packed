@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# Blocks a commit outright on a typecheck or test failure -- both are cheap
-# and fast enough here to run on every commit, and "it compiled locally" is
-# not a substitute for actually checking. Bypass only with a real reason:
-# git commit --no-verify.
+# Blocks a commit outright on a formatting, typecheck, or test failure --
+# all cheap and fast enough here to run on every commit, and "it compiled
+# locally" is not a substitute for actually checking. Bypass only with a
+# real reason: git commit --no-verify.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
+
+echo "pre-commit: format"
+bunx biome format --staged
 
 echo "pre-commit: typecheck"
 bun run typecheck

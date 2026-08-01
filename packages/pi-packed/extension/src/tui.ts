@@ -46,7 +46,7 @@
  */
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder, rawKeyHint } from "@earendil-works/pi-coding-agent";
-import { Container, Input, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Container, Input, matchesKey, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { Dialog, Envelope, Menu, Spinner, Table, TabbedContainer, type Component, type MenuItem, type TextMeasure } from "malevich-tui-components";
 import { filterRows, mergeRows, nextMode, visibleRows } from "./model.js";
 import type { Row, ViewMode } from "./model.js";
@@ -779,6 +779,13 @@ function renderUnifiedPanel(
 			],
 			theme: tabBarTheme(theme),
 			initialKey: initialTab,
+			// Malevich's own default matcher only recognizes legacy CSI sequences;
+			// pi-tui's real matchesKey also covers the Kitty keyboard protocol and
+			// xterm's modifyOtherKeys encodings for the same keys. Malevich's
+			// KeyMatcher type takes a bare string (it doesn't share pi-tui's KeyId
+			// union), so this only ever forwards the small fixed set of key names
+			// TabbedContainer itself actually calls with (left/right/tab/shift+tab).
+			matchesKey: (data, keyId) => matchesKey(data, keyId as Parameters<typeof matchesKey>[1]),
 		});
 
 		// measure must be explicit: Envelope's own default is ASCII-only (raw
@@ -822,13 +829,18 @@ function renderUnifiedPanel(
 				// Tab/Shift-Tab always sweep between menus -- nothing needs a literal
 				// Tab character for itself (Packages'/Config's own former Tab bindings
 				// moved to v once Tab was claimed globally; see the mnemonics.test.ts
-				// conflict check for why that reassignment was necessary).
-				if (data === "\t" || data === "\x1b[Z") {
+				// conflict check for why that reassignment was necessary). Real
+				// matchesKey(), not a hardcoded "\x1b[Z" literal, because Shift-Tab has
+				// no single universal encoding: legacy terminals send CSI Z, but the
+				// Kitty keyboard protocol and xterm's modifyOtherKeys mode both send a
+				// different sequence for the same keypress -- a literal check silently
+				// misses whichever ones it doesn't happen to be pinned to.
+				if (matchesKey(data, "tab") || matchesKey(data, "shift+tab")) {
 					tabbedContainer.handleInput(data);
 					tui.requestRender();
 					return;
 				}
-				if ((data === "\x1b[C" || data === "\x1b[D") && !(activeTab.capturesHorizontalArrows?.() ?? false)) {
+				if ((matchesKey(data, "right") || matchesKey(data, "left")) && !(activeTab.capturesHorizontalArrows?.() ?? false)) {
 					tabbedContainer.handleInput(data); // owns Left/Right cycling itself
 					tui.requestRender();
 					return;

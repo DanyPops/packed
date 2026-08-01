@@ -1,6 +1,6 @@
 {
   "name": "@danypops/pi-packed",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "description": "Pi package tools, commands, profiles, and TUI for the Packed daemon",
   "type": "module",
   "keywords": ["pi-package"],

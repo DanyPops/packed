@@ -31,12 +31,16 @@ export function dialogTheme(theme: Theme): DialogTheme {
  * overlay, replacing what used to be four separately-opened screens. */
 export function tabBarTheme(theme: Theme): TabBarTheme {
 	return {
+		// Unfocused: foreground color, no background. Focused: inverted --
+		// a background color and no explicit foreground, so it reads as a
+		// real highlighted/selected tab rather than just a differently
+		// colored label.
 		tab: (s) => theme.fg("muted", s),
-		activeTab: (s) => theme.bold(theme.fg("accent", s)),
+		activeTab: (s) => theme.bold(theme.bg("selectedBg", s)),
 		// Every tab's first letter is a jump mnemonic (p/f/c/s) -- a distinct
 		// warning-colored bold, so it reads as "press this letter" on both the
-		// active and inactive tabs alike, not just whichever accent color
-		// activeTab already uses for the whole label.
+		// active and inactive tabs alike, not just whichever style tab/activeTab
+		// already applies to the whole label.
 		mnemonic: (s) => theme.bold(theme.fg("warning", s)),
 	};
 }

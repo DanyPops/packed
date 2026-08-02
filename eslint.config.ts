@@ -28,7 +28,7 @@ export default tseslint.config(
 			"import-x/resolver": { typescript: true },
 		},
 		rules: {
-			"import-x/no-cycle": ["error", { maxDepth: 3, ignoreExternal: true }],
+			"import-x/no-cycle": ["error", { ignoreExternal: true }],
 			// regex (not group globs), anchored with $: a bare glob like "../index" also matches an
 			// unrelated "../index/build-index.ts" (ESLint's own `ignore`-package matcher treats an
 			// `index`-named directory as fully matched, including its contents) -- this repo has a

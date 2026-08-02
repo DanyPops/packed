@@ -124,6 +124,7 @@ export class HttpRegistry implements Registry {
 			keywords?: string[];
 			pi?: Record<string, unknown>;
 			peerDependencies?: Record<string, string>;
+			scripts?: Record<string, string>;
 			dist?: { unpackedSize?: number; integrity?: string; attestations?: { url?: string; provenance?: unknown } };
 		};
 		const manifestFields = v.pi ? Object.keys(v.pi).filter((key) => ["extensions", "skills", "prompts", "themes"].includes(key)) : [];
@@ -142,6 +143,7 @@ export class HttpRegistry implements Registry {
 				.map((value) => value.slice(0, 64)),
 			pi: boundedPiManifest(v.pi),
 			peerDependencies: boundedDependencies(v.peerDependencies),
+			scripts: boundedDependencies(v.scripts),
 			readmeAvailable: false,
 			unpackedSize: v.dist?.unpackedSize,
 			packageEvidence:

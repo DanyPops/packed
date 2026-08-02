@@ -135,6 +135,8 @@ function firstRun(info: PkgInfo): AdoptionDimension {
 	return dimension(met, 3, evidence, actions);
 }
 
+const LIFECYCLE_SCRIPT_NAMES = new Set(["preinstall", "install", "postinstall", "prepublish", "preuninstall", "postuninstall", "prepare"]);
+
 function trust(info: PkgInfo): AdoptionDimension {
 	const evidence: string[] = [];
 	const actions: string[] = [];
@@ -167,6 +169,13 @@ function trust(info: PkgInfo): AdoptionDimension {
 		met++;
 		evidence.push(`${info.packageEvidence.shape} Pi shape verified from tarball contents`);
 	} else actions.push("verify the exact tarball's Pi shape with packed pack");
+	const declaredLifecycleScripts = Object.keys(info.scripts ?? {}).filter((name) => LIFECYCLE_SCRIPT_NAMES.has(name));
+	if (declaredLifecycleScripts.length > 0) {
+		// Presence alone is evidence, not a trust failure -- lifecycle scripts
+		// execute on install (a top supply-chain attack vector), so this is
+		// surfaced for a human to judge rather than counted against met/total.
+		evidence.push(`declares lifecycle script(s) that execute on install: ${declaredLifecycleScripts.join(", ")}`);
+	}
 	actions.push("run packed check --smoke when bounded extension startup evidence is needed");
 	return dimension(met, 7, evidence, actions);
 }
@@ -381,6 +390,7 @@ export async function assessLocalAdoption(
 		bugs: stringField(pkg.bugs),
 		peerDependencies:
 			pkg.peerDependencies && typeof pkg.peerDependencies === "object" ? (pkg.peerDependencies as Record<string, string>) : undefined,
+		scripts: pkg.scripts && typeof pkg.scripts === "object" ? (pkg.scripts as Record<string, string>) : undefined,
 		pi: pkg.pi && typeof pkg.pi === "object" ? (pkg.pi as Record<string, unknown>) : undefined,
 		readme: readmeName ? readText(join(root, readmeName)) : undefined,
 		readmeAvailable: true,

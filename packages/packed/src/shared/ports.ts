@@ -46,6 +46,10 @@ export interface PkgInfo {
 	license?: string;
 	keywords?: string[];
 	pi?: Record<string, unknown>;
+	/** Declared npm lifecycle scripts (preinstall/install/postinstall/etc.) --
+	 * these execute on install, a top supply-chain attack vector. Presence is
+	 * surfaced as trust-dimension evidence, never treated as a failure. */
+	scripts?: Record<string, string>;
 	modified?: string;
 	unpackedSize?: number;
 	readme?: string;

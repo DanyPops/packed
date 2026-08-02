@@ -170,6 +170,42 @@ describe("adoption readiness evidence", () => {
 	});
 });
 
+describe("trust: lifecycle-install-script detection", () => {
+	it("flags declared lifecycle scripts as evidence, without failing the dimension", () => {
+		const report = assessRegistryAdoption({
+			name: "pi-demo",
+			version: "1.0.0",
+			license: "MIT",
+			repository: "https://github.com/example/pi-demo",
+			scripts: { postinstall: "node ./setup.js", test: "bun test" },
+		});
+		expect(report.dimensions.trust.evidence.join(" ")).toContain("postinstall");
+		expect(report.dimensions.trust.evidence.join(" ")).not.toContain("test:");
+	});
+
+	it("reports no lifecycle-script finding when none are declared", () => {
+		const report = assessRegistryAdoption({
+			name: "pi-demo",
+			version: "1.0.0",
+			license: "MIT",
+			repository: "https://github.com/example/pi-demo",
+			scripts: { test: "bun test", build: "bun build" },
+		});
+		expect(report.dimensions.trust.evidence.join(" ")).not.toContain("lifecycle script");
+	});
+
+	it("assessLocalAdoption reads scripts from the checkout's own package.json", async () => {
+		const root = fixture({
+			name: "pi-demo",
+			version: "1.0.0",
+			scripts: { preinstall: "echo hi" },
+		});
+		const pack = await new NpmPackVerifier(successfulPack).verify(root);
+		const report = await assessLocalAdoption(root, pack);
+		expect(report.dimensions.trust.evidence.join(" ")).toContain("preinstall");
+	});
+});
+
 describe("freshness (npm publish-date proxy for commit recency)", () => {
 	it("is unknown when neither a real commit date nor a publish date is available for the candidate", () => {
 		const report = assessRegistryAdoption({ name: "pi-demo", version: "1.0.0" }, undefined, "2026-07-25T12:47:12.883Z");

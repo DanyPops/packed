@@ -17,7 +17,13 @@ describe("pi-packed package boundary", () => {
 			name: "@danypops/pi-packed",
 			bin: { packed: "service/src/cli/cli.ts" },
 			pi: { extensions: ["extension/src/index.ts"] },
-			dependencies: { "@danypops/packed": "workspace:*" },
+			// A real semver range, not "workspace:*" -- this repo's publish workflow runs
+			// `npm publish`, which has no notion of Bun's workspace protocol and ships it
+			// as a literal, unresolvable string to real npm consumers (confirmed live:
+			// pi-packed@0.19.10 published this way and was uninstallable outside the
+			// monorepo). `bun install` still resolves this range to the local workspace
+			// package during monorepo development, same as before the Pi-core split.
+			dependencies: { "@danypops/packed": "^0.6.0" },
 		});
 		for (const file of sourceFiles(join(root, "extension"))) {
 			const source = readFileSync(file, "utf8");

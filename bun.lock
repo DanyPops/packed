@@ -25,7 +25,7 @@
     },
     "packages/packed": {
       "name": "@danypops/packed",
-      "version": "0.5.2",
+      "version": "0.6.0",
     },
     "packages/pi-packed": {
       "name": "@danypops/pi-packed",
@@ -37,7 +37,6 @@
         "@danypops/packed": "workspace:*",
         "@danypops/pi-extension-harness": "^0.2.0",
         "@danypops/vehicle-client": "^0.2.0",
-        "@danypops/vehicle-client-pi": "^0.1.5",
         "@danypops/vehicle-core": "^0.6.1",
         "@danypops/vehicle-server": "^0.7.0",
         "jiti": "2.6.1",
@@ -46,6 +45,7 @@
         "semver": "^7.8.5",
       },
       "devDependencies": {
+        "@danypops/vehicle-client-pi": "^0.1.5",
         "@types/semver": "^7.7.1",
       },
       "peerDependencies": {

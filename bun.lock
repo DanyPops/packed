@@ -26,10 +26,6 @@
     "packages/packed": {
       "name": "@danypops/packed",
       "version": "0.5.2",
-      "dependencies": {
-        "@danypops/vehicle-core": "^0.6.1",
-        "@danypops/vehicle-server": "^0.7.0",
-      },
     },
     "packages/pi-packed": {
       "name": "@danypops/pi-packed",

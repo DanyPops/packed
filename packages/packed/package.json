@@ -4,16 +4,17 @@
   "description": "Host-neutral contracts and persistence primitives for agent package composition",
   "type": "module",
   "scripts": {
-    "build": "rm -rf dist && bun build src/public/atomic-json.ts --outdir dist --target node --format esm --minify && bunx tsc -p tsconfig.public.json",
+    "build": "rm -rf dist && bun build src/public/agent-tools.ts src/public/atomic-json.ts --outdir dist --target node --format esm --minify && bunx tsc -p tsconfig.public.json",
     "test": "bun run build && bun test test",
     "typecheck": "bunx tsc --noEmit"
   },
-  "dependencies": {
-    "@danypops/vehicle-core": "^0.6.1",
-    "@danypops/vehicle-server": "^0.7.0"
-  },
+  "dependencies": {},
   "devDependencies": {},
   "exports": {
+    "./agent-tools": {
+      "types": "./dist/agent-tools.d.ts",
+      "import": "./dist/agent-tools.js"
+    },
     "./atomic-json": {
       "types": "./dist/atomic-json.d.ts",
       "import": "./dist/atomic-json.js"

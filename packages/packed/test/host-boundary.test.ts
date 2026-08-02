@@ -15,7 +15,7 @@ describe("Packed host boundary", () => {
 		const dependencies = { ...manifest.dependencies, ...manifest.peerDependencies };
 		expect(manifest.bin).toBeUndefined();
 		for (const name of Object.keys(dependencies)) {
-			expect(name).not.toMatch(/^@earendil-works\/pi-|^@danypops\/pi-|alef/i);
+			expect(name).not.toMatch(/^@earendil-works\/pi-|^@danypops\/(?:pi-|vehicle)|alef/i);
 		}
 	});
 });

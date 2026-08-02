@@ -1,6 +1,10 @@
 # @danypops/packed
 
-Host-neutral contracts and persistence primitives shared by Packed host integrations.
+Host-neutral Agent Tools composition contracts and persistence primitives shared by host integrations.
+
+## Agent Tools
+
+`@danypops/packed/agent-tools` compiles static package and tool descriptors into a deterministic Agent Tools Lock. The lock records exact package identity, integrity, resources, ownership, permissions, limits, compatibility, and enabled tools. Runtime health, credentials, grants, and host materialization remain host-owned.
 
 ## Atomic JSON
 

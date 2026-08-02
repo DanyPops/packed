@@ -366,3 +366,79 @@ describe("packed check", () => {
 		expect(codes(report.diagnostics)).toEqual(["PKG_JSON_INVALID"]);
 	});
 });
+
+describe("dependencyCheck false-positive regressions (packed check)", () => {
+	it("never scans a test file's own fixture strings as if they were real imports of that file", async () => {
+		// A checker's own test suite legitimately contains string literals shaped exactly
+		// like real import statements (fixture data for testing detection itself) -- these
+		// must never be attributed to the test file that merely contains them as text.
+		const root = fixture(
+			{ ...base, files: ["extensions", "test", "README.md", "LICENSE"] },
+			{
+				"extensions/index.ts": "export default function () {}",
+				"test/check.test.ts": 'const fixtureSource = \'import lodash from "lodash";\';\n',
+				"README.md": "# Example",
+				LICENSE: "MIT",
+			},
+		);
+		const report = await checkPackage(root, { generic: false });
+		expect(codes(report.diagnostics)).not.toContain("RUNTIME_DEPENDENCY_MISSING");
+	});
+
+	it("never scans a test-directory file outside a *.test.ts basename either (e.g. a shared test helper)", async () => {
+		const root = fixture(
+			{ ...base, files: ["extensions", "test", "README.md", "LICENSE"] },
+			{
+				"extensions/index.ts": "export default function () {}",
+				"test/helper.ts": 'import leftpad from "leftpad";\n',
+				"README.md": "# Example",
+				LICENSE: "MIT",
+			},
+		);
+		const report = await checkPackage(root, { generic: false });
+		expect(codes(report.diagnostics)).not.toContain("RUNTIME_DEPENDENCY_MISSING");
+	});
+
+	it("never treats a quoted 'from ...' phrase inside a comment as a real import specifier", async () => {
+		const root = fixture(
+			{ ...base, files: ["extensions", "README.md", "LICENSE"] },
+			{
+				"extensions/index.ts":
+					'/**\n * migrated "latest" from "some-package that looks like an import"\n */\nexport default function () {}\n',
+				"README.md": "# Example",
+				LICENSE: "MIT",
+			},
+		);
+		const report = await checkPackage(root, { generic: false });
+		expect(codes(report.diagnostics)).not.toContain("RUNTIME_DEPENDENCY_MISSING");
+	});
+
+	it("still catches a real RUNTIME_DEPENDENCY_MISSING import sitting right next to a misleading comment", async () => {
+		const root = fixture(
+			{ ...base, files: ["extensions", "README.md", "LICENSE"] },
+			{
+				"extensions/index.ts":
+					'// migrated "latest" from "totally not a real package"\nimport real from "real-missing-dep";\nexport default function () { return real; }\n',
+				"README.md": "# Example",
+				LICENSE: "MIT",
+			},
+		);
+		const report = await checkPackage(root, { generic: false });
+		expect(codes(report.diagnostics)).toContain("RUNTIME_DEPENDENCY_MISSING");
+		const diagnostic = report.diagnostics.find((d) => d.code === "RUNTIME_DEPENDENCY_MISSING")!;
+		expect(diagnostic.message).toContain("real-missing-dep");
+	});
+
+	it("never flags a package's own self-import of its own subpath export as a missing runtime dependency", async () => {
+		const root = fixture(
+			{ ...base, name: "@scope/self-ref", files: ["extensions", "README.md", "LICENSE"] },
+			{
+				"extensions/index.ts": 'import { thing } from "@scope/self-ref/client";\nexport default function () { return thing; }\n',
+				"README.md": "# Example",
+				LICENSE: "MIT",
+			},
+		);
+		const report = await checkPackage(root, { generic: false });
+		expect(codes(report.diagnostics)).not.toContain("RUNTIME_DEPENDENCY_MISSING");
+	});
+});

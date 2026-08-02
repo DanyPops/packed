@@ -487,11 +487,40 @@ function cleanupManifestCheck(context: Context): void {
 	}
 }
 
+/** A conventional test file (path under a test/tests/__tests__ directory, or
+ * a .test./.spec. basename) never runs on a consumer's machine at
+ * install/import time -- it has no bearing on what a package's *shipped
+ * runtime* code actually imports, even though npm's own `files` field
+ * (a plain directory-prefix allowlist, e.g. "service") has no way to exclude
+ * it short of a package author remembering to. Real bug this fixes: a test
+ * file's own fixture data can contain string literals shaped exactly like
+ * real import statements (deliberately, to test this very checker's
+ * detection logic) without being real imports of the file that contains them. */
+function isTestFile(path: string): boolean {
+	if (/(?:^|\/)(?:test|tests|__tests__)\//.test(path)) return true;
+	return /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(path);
+}
+
 /** Shipped .js/.ts/.cjs/.mjs files that are actually contained within the
- * package root (never a symlink escape) -- the same file universe every
- * source-scanning check works over. */
+ * package root (never a symlink escape), excluding test files -- the same
+ * file universe every source-scanning check works over. */
 function shippedSourceFiles(context: Context): string[] {
-	return shippedFiles(context).filter((path) => /\.[cm]?[jt]s$/.test(path) && isContainedFile(context.root, path));
+	return shippedFiles(context).filter(
+		(path) => /\.[cm]?[jt]s$/.test(path) && !isTestFile(path) && isContainedFile(context.root, path),
+	);
+}
+
+/**
+ * Strips line and block comments before the import-specifier regex below runs
+ * -- a comment can contain an arbitrary quoted "from ..." substring the regex
+ * would otherwise match as if it were real code (confirmed live against a
+ * JSDoc comment describing a bug fix in prose that happened to contain
+ * exactly that shape). Not a full lexer: a string literal that itself
+ * contains a comment delimiter could still confuse this, a pre-existing
+ * limit of a regex-based scan, not a regression this introduces.
+ */
+function stripComments(source: string): string {
+	return source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, "");
 }
 
 /** Every import/require specifier literal in one file, bounded by
@@ -500,7 +529,7 @@ function shippedSourceFiles(context: Context): string[] {
 function importSpecifiersIn(context: Context, file: string): string[] | undefined {
 	const absolute = join(context.root, file);
 	if (lstatSync(absolute).size > MAX_SOURCE_BYTES) return undefined;
-	const source = readFileSync(absolute, "utf8");
+	const source = stripComments(readFileSync(absolute, "utf8"));
 	return [...source.matchAll(/(?:from\s*|import\s*\(|require\s*\()\s*["']([^"']+)["']/g)].map((match) => match[1]!);
 }
 
@@ -523,6 +552,12 @@ function dependencyCheck(context: Context): void {
 		for (const specifier of importSpecifiersIn(context, file) ?? []) {
 			if (specifier.startsWith(".") || specifier.startsWith("/") || specifier.startsWith("node:") || specifier.startsWith("bun:")) continue;
 			const name = specifier.startsWith("@") ? specifier.split("/").slice(0, 2).join("/") : specifier.split("/")[0]!;
+			// A package importing its own subpath exports (e.g. "@scope/pkg/client")
+			// is not a runtime dependency on itself -- there is no real range to
+			// declare, and node/bun resolve a self-reference via the package's own
+			// name field, not a node_modules entry that a `dependencies` line would
+			// describe.
+			if (name === context.pkg.name) continue;
 			if (CORE_PACKAGES.has(name)) {
 				if (peers[name] !== "*")
 					context.add({

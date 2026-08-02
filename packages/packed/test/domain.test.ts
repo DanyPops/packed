@@ -15,7 +15,7 @@ import {
 	readResolvedVersion,
 	splitNpmSource,
 } from "../src/packages/installed.ts";
-import type { Installer, PkgInfo, Registry, SearchPage, UpdateOutcome, UpdatesSnapshot } from "../src/shared/ports.ts";
+import type { Installer, PkgInfo, Registry, SearchPage, UpdateOutcome, UpdatesSnapshot } from "../src/packages/package.ts";
 
 function writePiHome(settings: unknown, nodeModules: Record<string, string> = {}): string {
 	const dir = mkdtempSync(join(tmpdir(), "packed-pihome-"));

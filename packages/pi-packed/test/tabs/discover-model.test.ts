@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { shouldSearch } from "../extension/src/discover-model.ts";
+import { shouldSearch } from "../../extension/src/tabs/discover-model.ts";
 
 describe("shouldSearch (/packed find's dual-purpose Enter key)", () => {
 	it("searches on the first Enter, before anything has been searched", () => {

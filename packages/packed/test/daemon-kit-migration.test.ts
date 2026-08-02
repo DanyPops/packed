@@ -7,8 +7,8 @@ import { readDaemonHandle } from "@danypops/vehicle-server/paths";
 import { connectPackageDaemon } from "../src/daemon/client.ts";
 import { startPackedDaemon } from "../src/daemon/daemon.ts";
 import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/daemon/service.ts";
+import type { Installer, Registry } from "../src/packages/package.ts";
 import { migrateLegacyPackedState, resolvePackedPaths } from "../src/shared/paths.ts";
-import type { Installer, Registry } from "../src/shared/ports.ts";
 
 const roots: string[] = [];
 afterEach(() => {

@@ -5,8 +5,8 @@ import { join } from "node:path";
 import type { Server } from "bun";
 import { DaemonRegistry } from "../src/daemon/client.ts";
 import { createApp } from "../src/daemon/service.ts";
+import type { Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/packages/package.ts";
 import { HttpRegistry } from "../src/registry/registry.ts";
-import type { Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/shared/ports.ts";
 
 /**
  * Mitigates the SOLID audit's one real finding: `resolveRegistry()` swaps

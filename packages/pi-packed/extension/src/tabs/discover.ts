@@ -13,11 +13,11 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { rawKeyHint } from "@earendil-works/pi-coding-agent";
 import { Input, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { Component } from "malevich-tui-components";
+import type { Natives, PackageSummary } from "../packed.js";
+import { InstallServiceError } from "../packed.js";
+import type { TabHost } from "../tab-host.js";
+import { approvePackageOperation } from "../tools.js";
 import { shouldSearch } from "./discover-model.js";
-import type { Natives, PackageSummary } from "./packed.js";
-import { InstallServiceError } from "./packed.js";
-import type { TabHost } from "./tab-host.js";
-import { approvePackageOperation } from "./tools.js";
 
 const SEARCH_LIMIT = 20;
 

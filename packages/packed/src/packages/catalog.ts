@@ -6,8 +6,8 @@
 
 import { PI_PACKAGE_KEYWORD } from "../shared/constants.ts";
 import { createLogger } from "../shared/log.ts";
-import type { Registry } from "../shared/ports.ts";
 import { dbPath, getSyncMeta, openDb, replaceAll } from "./db.ts";
+import type { Registry } from "./package.ts";
 
 const log = createLogger("catalog");
 

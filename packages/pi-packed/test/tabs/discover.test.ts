@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { applyInstall } from "../extension/src/discover.ts";
-import type { Natives, PackageSummary } from "../extension/src/packed.ts";
-import { InstallServiceError } from "../extension/src/packed.ts";
+import type { Natives, PackageSummary } from "../../extension/src/packed.ts";
+import { InstallServiceError } from "../../extension/src/packed.ts";
+import { applyInstall } from "../../extension/src/tabs/discover.ts";
 
 const result: PackageSummary = { name: "pi-lsp", version: "1.0.0", description: "LSP support" };
 

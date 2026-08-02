@@ -6,8 +6,8 @@ import { Type } from "typebox";
 import { Compile } from "typebox/compile";
 import type { Diagnostic } from "../adoption/check.ts";
 import { npmPackageName, readResolvedIntegrity, readResolvedVersion } from "../packages/installed.ts";
+import type { Installer, Registry } from "../packages/package.ts";
 import { writeJsonAtomic } from "../shared/atomic-json.ts";
-import type { Installer, Registry } from "../shared/ports.ts";
 
 export const SETUP_MANIFEST_FILE = "pi-setup.json";
 export const SETUP_SCHEMA_PATH = "./schema/pi-setup-v1.schema.json";

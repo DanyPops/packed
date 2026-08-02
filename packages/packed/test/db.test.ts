@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { syncCatalog } from "../src/packages/catalog.ts";
 import { catalogList, dbPath, getSyncMeta, openDb, replaceAll, searchLocal } from "../src/packages/db.ts";
+import type { Pkg, PkgInfo, Registry, SearchPage } from "../src/packages/package.ts";
 import { HttpRegistry } from "../src/registry/registry.ts";
-import type { Pkg, PkgInfo, Registry, SearchPage } from "../src/shared/ports.ts";
 
 const PKGS = [
 	{ name: "pi-lsp", version: "0.18.0", description: "LSP tools for pi" },

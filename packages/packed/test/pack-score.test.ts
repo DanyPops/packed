@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { createGithubLastCommitAt, type FetchGithubLastCommitAt } from "../src/adoption/commit-freshness.ts";
 import { formatPackReport, NpmPackVerifier, type PackCommand } from "../src/adoption/pack.ts";
 import { assessLocalAdoption, assessRegistryAdoption, scoreTarget } from "../src/adoption/score.ts";
+import type { PkgInfo, Registry, SearchPage } from "../src/packages/package.ts";
 import { runBounded } from "../src/publish/publish.ts";
-import type { PkgInfo, Registry, SearchPage } from "../src/shared/ports.ts";
 
 class FakeRegistry implements Registry {
 	constructor(

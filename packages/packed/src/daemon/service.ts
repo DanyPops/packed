@@ -16,6 +16,8 @@ import { buildIndex, indexPath, type PackageIndex, readIndex, writeIndex } from 
 import { syncCatalog } from "../packages/catalog.ts";
 import { catalogList, dbPath, getSyncMeta, latestVersion, openDb, searchLocal } from "../packages/db.ts";
 import { defaultPiHome, readInstalledPackages, readInstalledPackagesAcrossScopes } from "../packages/installed.ts";
+import type { InstalledPkg, Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome, UpdatesSnapshot } from "../packages/package.ts";
+import { buildSearchQuery, clampLimit } from "../packages/package.ts";
 import {
 	listPackageResources,
 	type PackageResources,
@@ -38,8 +40,6 @@ import { type SetupApplyResult, type SetupExportReport, SetupManager, type Setup
 import { TTLCache } from "../shared/cache.ts";
 import { SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT } from "../shared/constants.ts";
 import { createLogger } from "../shared/log.ts";
-import type { InstalledPkg, Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome, UpdatesSnapshot } from "../shared/ports.ts";
-import { buildSearchQuery, clampLimit } from "../shared/ports.ts";
 import { VERSION } from "../shared/version.ts";
 import { formatCleanupSummary, runCleanup } from "./cleanup.ts";
 import { type DaemonServiceInstaller, RealDaemonServiceInstaller } from "./daemon-service.ts";

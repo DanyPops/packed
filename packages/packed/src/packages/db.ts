@@ -51,7 +51,7 @@ function inTransaction<T>(db: Db, fn: () => T): T {
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { DB_FILE } from "../shared/constants.ts";
-import type { Pkg } from "../shared/ports.ts";
+import type { Pkg } from "./package.ts";
 
 export interface SyncMeta {
 	source: string;

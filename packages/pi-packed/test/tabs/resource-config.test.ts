@@ -1,7 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import type { Natives, PackageResources } from "../extension/src/packed.ts";
-import { applyResourceToggle, type FlatItem, filterItems, flatten, handleResourceConfigCommand } from "../extension/src/resource-config.ts";
+import type { Natives, PackageResources } from "../../extension/src/packed.ts";
+import {
+	applyResourceToggle,
+	type FlatItem,
+	filterItems,
+	flatten,
+	handleResourceConfigCommand,
+} from "../../extension/src/tabs/resource-config.ts";
 
 function group(overrides: Partial<PackageResources> = {}): PackageResources {
 	return { source: "npm:pi-demo", name: "pi-demo", scope: "global", extensions: [], skills: [], prompts: [], themes: [], ...overrides };

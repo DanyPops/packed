@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { AuthenticatedRpcClient } from "@danypops/vehicle-client/rpc-client";
 import { formatCleanupSummary, readCleanupManifest, runCleanup } from "../src/daemon/cleanup.ts";
 import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/daemon/service.ts";
-import type { Installer, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/shared/ports.ts";
+import type { Installer, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/packages/package.ts";
 
 const roots: string[] = [];
 afterEach(() => {

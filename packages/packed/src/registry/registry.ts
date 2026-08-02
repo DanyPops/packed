@@ -3,6 +3,7 @@
  * Lean mapping = Facade over npm's verbose package documents.
  */
 
+import type { DownloadObservations, Pkg, PkgInfo, Registry, SearchPage } from "../packages/package.ts";
 import {
 	NPM_REGISTRY_BASE,
 	PAGE_DELAY_MS,
@@ -12,7 +13,6 @@ import {
 	SEARCH_PAGE_SIZE,
 } from "../shared/constants.ts";
 import { createLogger } from "../shared/log.ts";
-import type { DownloadObservations, Pkg, PkgInfo, Registry, SearchPage } from "../shared/ports.ts";
 
 const log = createLogger("registry");
 

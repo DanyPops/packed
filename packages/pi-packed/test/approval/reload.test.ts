@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { confirmReload, type ReloadConfirmContext, reloadWarning } from "../extension/src/reload.ts";
+import { confirmReload, type ReloadConfirmContext, reloadWarning } from "../../extension/src/approval/reload.ts";
 
 describe("reloadWarning (shared pre-confirmation wording)", () => {
 	it("warns remove as a definite reload, install/update as a likely one", () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { PkgInfo, Registry, SearchPage } from "../src/packages/package.ts";
 import {
 	browserOpenCommand,
 	npmWebUrl,
@@ -13,7 +14,6 @@ import {
 	type TrustStatusCommand,
 	type VersionCommand,
 } from "../src/publish/publish.ts";
-import type { PkgInfo, Registry, SearchPage } from "../src/shared/ports.ts";
 
 class RegistryFixture implements Registry {
 	constructor(private readonly existing = true) {}

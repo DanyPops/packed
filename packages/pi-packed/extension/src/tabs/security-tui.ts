@@ -15,8 +15,8 @@ import type { Component } from "malevich-tui-components";
 
 type MutationApproval = SecuritySettings["mutationApproval"];
 
-import type { Natives } from "./packed.ts";
-import type { TabHost } from "./tab-host.ts";
+import type { Natives } from "../packed.ts";
+import type { TabHost } from "../tab-host.ts";
 
 const OPTIONS: Array<{ value: MutationApproval; label: string }> = [
 	{ value: "always", label: "Always require mutation approval (recommended)" },

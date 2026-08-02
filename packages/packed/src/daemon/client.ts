@@ -8,6 +8,7 @@ import type { DoctorReport } from "../adoption/doctor.ts";
 import type { PackReport } from "../adoption/pack.ts";
 import type { AdoptionReport } from "../adoption/score.ts";
 import type { PackageIndex } from "../index/build-index.ts";
+import type { InstalledPkg, Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateEntry, UpdateOutcome } from "../packages/package.ts";
 import type { PackageResources, ResourceField } from "../packages/resources.ts";
 import type { PiVersionReport } from "../pi/pi-version.ts";
 import { HttpRegistry } from "../registry/registry.ts";
@@ -20,7 +21,6 @@ import {
 	REGISTRY_FETCH_TIMEOUT_MS,
 } from "../shared/constants.ts";
 import { type PackedPaths, resolvePackedPaths } from "../shared/paths.ts";
-import type { InstalledPkg, Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateEntry, UpdateOutcome } from "../shared/ports.ts";
 import type { OperationInputs, OperationName, OperationOutputs } from "./service.ts";
 
 export type FetchTransport = (request: Request) => Promise<Response>;

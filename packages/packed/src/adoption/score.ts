@@ -1,8 +1,8 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import type { PkgInfo, Registry } from "../packages/package.ts";
 import { resolveCurrentPiVersion } from "../pi/pi-version.ts";
 import { satisfiesRange } from "../publish/publish.ts";
-import type { PkgInfo, Registry } from "../shared/ports.ts";
 import { type FetchGithubLastCommitAt, githubLastCommitAt, lastLocalCommitAt } from "./commit-freshness.ts";
 import { NpmPackVerifier, type PackReport } from "./pack.ts";
 

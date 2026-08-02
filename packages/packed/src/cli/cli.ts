@@ -14,6 +14,14 @@ import { syncCatalog } from "../packages/catalog.ts";
 import { catalogList, dbPath, getSyncMeta, latestVersion, openDb, searchLocal } from "../packages/db.ts";
 import { defaultPiBin, NAME_RE } from "../packages/install.ts";
 import { npmPackageName, readInstalledPackages, readInstalledPackagesAcrossScopes } from "../packages/installed.ts";
+import type { Installer, Pkg, Registry, UpdateEntry } from "../packages/package.ts";
+/**
+ * cli.ts — the CLI entry point; drives the same shared ports (registry, installer, security) the HTTP service also drives.
+ * cliRun is pure: ({code, out}) in, no I/O — the entry point prints.
+ * Command table follows the go-tool/Cobra convention; flags may appear
+ * anywhere (agents put them anywhere).
+ */
+import { buildSearchQuery, clampLimit } from "../packages/package.ts";
 import {
 	listPackageResources,
 	type PackageResources,
@@ -51,14 +59,6 @@ import {
 	type SetupUpdateReport,
 } from "../setup/setup.ts";
 import { resolvePackedPaths } from "../shared/paths.ts";
-import type { Installer, Pkg, Registry, UpdateEntry } from "../shared/ports.ts";
-/**
- * cli.ts — the CLI entry point; drives the same shared ports (registry, installer, security) the HTTP service also drives.
- * cliRun is pure: ({code, out}) in, no I/O — the entry point prints.
- * Command table follows the go-tool/Cobra convention; flags may appear
- * anywhere (agents put them anywhere).
- */
-import { buildSearchQuery, clampLimit } from "../shared/ports.ts";
 
 /** A generated unit must never trust a bare "pi" resolving under systemd's
  * own restricted PATH just because it resolves in the shell that generated

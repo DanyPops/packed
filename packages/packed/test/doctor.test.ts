@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { AuthenticatedRpcClient } from "@danypops/vehicle-client/rpc-client";
 import { runDoctor } from "../src/adoption/doctor.ts";
 import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/daemon/service.ts";
-import type { Installer, PkgInfo, Registry, SearchPage } from "../src/shared/ports.ts";
+import type { Installer, PkgInfo, Registry, SearchPage } from "../src/packages/package.ts";
 
 const roots: string[] = [];
 afterEach(() => {

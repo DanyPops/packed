@@ -12,8 +12,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { formatUpdateNotice } from "./model.js";
 import { createNatives } from "./packed.js";
 import { registerProfiles } from "./profile.js";
-import { handleResourceConfigCommand } from "./resource-config.js";
 import { handleSetupCommand } from "./setup-command.js";
+import { handleResourceConfigCommand } from "./tabs/resource-config.js";
 import { registerTools } from "./tools.js";
 import { showPackedPanel } from "./tui.js";
 

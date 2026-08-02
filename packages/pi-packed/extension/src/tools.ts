@@ -1,9 +1,9 @@
 /** Agent-facing package tools over the authenticated daemon. */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { type PackageOperation, packagePermissionDecision } from "./approval/permission.js";
+import { reloadWarning } from "./approval/reload.js";
 import { InstallServiceError, type Natives, PI_COMMAND_NAME } from "./packed.js";
-import { type PackageOperation, packagePermissionDecision } from "./permission.js";
-import { reloadWarning } from "./reload.js";
 import {
 	createInfoDetails,
 	createModelContent,

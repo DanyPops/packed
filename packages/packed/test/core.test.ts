@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { Server } from "bun";
+import { buildSearchQuery, clampLimit } from "../src/packages/package.ts";
 import { HttpRegistry } from "../src/registry/registry.ts";
 import { TTLCache } from "../src/shared/cache.ts";
-import { buildSearchQuery, clampLimit } from "../src/shared/ports.ts";
 import { envMs } from "../src/shared/state.ts";
 
 describe("buildSearchQuery", () => {

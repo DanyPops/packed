@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { AuthenticatedRpcClient } from "@danypops/vehicle-client/rpc-client";
 import type { Server } from "bun";
 import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/daemon/service.ts";
+import type { Installer, PkgInfo, Registry, SearchPage } from "../src/packages/package.ts";
 import {
 	checkPiVersion,
 	createFetchLatestPiRelease,
@@ -15,7 +16,6 @@ import {
 	runPiUpdateSelf,
 } from "../src/pi/pi-version.ts";
 import type { VersionCommand } from "../src/publish/publish.ts";
-import type { Installer, PkgInfo, Registry, SearchPage } from "../src/shared/ports.ts";
 
 class NoopRegistry implements Registry {
 	async search(): Promise<SearchPage> {

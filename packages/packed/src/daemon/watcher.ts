@@ -11,7 +11,7 @@ import { createLogger } from "../shared/log.ts";
 
 const log = createLogger("watcher");
 
-import type { InstalledPkg, UpdateEntry, UpdatesSnapshot } from "../shared/ports.ts";
+import type { InstalledPkg, UpdateEntry, UpdatesSnapshot } from "../packages/package.ts";
 
 function updatesPath(dir: string): string {
 	return join(dir, UPDATES_FILE);

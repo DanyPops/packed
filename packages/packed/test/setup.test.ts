@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Installer, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/packages/package.ts";
 import {
 	bundledEcosystemManifestPath,
 	decodeSetupManifest,
@@ -9,7 +10,6 @@ import {
 	SetupManager,
 	type SetupManifest,
 } from "../src/setup/setup.ts";
-import type { Installer, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/shared/ports.ts";
 
 class RegistryFixture implements Registry {
 	async search(): Promise<SearchPage> {

@@ -58,15 +58,15 @@ import {
 	Table,
 	type TextMeasure,
 } from "malevich-tui-components";
-import { createFindTab } from "./discover.js";
+import { confirmReload } from "./approval/reload.js";
 import { dialogTheme, menuTheme, tabBarTheme } from "./menu-theme.js";
 import type { Row, ViewMode } from "./model.js";
 import { filterRows, mergeRows, nextMode, visibleRows } from "./model.js";
 import type { Natives, PackageResources } from "./packed.js";
-import { confirmReload } from "./reload.js";
-import { applyResourceToggle, ConfigTab } from "./resource-config.js";
-import { SettingsTab } from "./security-tui.js";
 import type { TabHost } from "./tab-host.js";
+import { createFindTab } from "./tabs/discover.js";
+import { applyResourceToggle, ConfigTab } from "./tabs/resource-config.js";
+import { SettingsTab } from "./tabs/security-tui.js";
 import { approvePackageOperation } from "./tools.js";
 
 export type PackedTabKey = "packages" | "find" | "config" | "settings";

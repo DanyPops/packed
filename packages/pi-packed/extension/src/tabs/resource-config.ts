@@ -17,10 +17,10 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { rawKeyHint } from "@earendil-works/pi-coding-agent";
 import { Input, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { Component } from "malevich-tui-components";
-import type { Natives, PackageResources, ResourceField } from "./packed.js";
-import { packagePermissionDecision } from "./permission.js";
-import { confirmReload } from "./reload.js";
-import type { TabHost } from "./tab-host.js";
+import { packagePermissionDecision } from "../approval/permission.js";
+import { confirmReload } from "../approval/reload.js";
+import type { Natives, PackageResources, ResourceField } from "../packed.js";
+import type { TabHost } from "../tab-host.js";
 
 type Scope = "global" | "project";
 const RESOURCE_FIELDS = ["extensions", "skills", "prompts", "themes"] as const satisfies readonly ResourceField[];

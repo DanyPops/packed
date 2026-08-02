@@ -14,8 +14,8 @@
  * without a manual `systemctl restart`.
  */
 import { fileURLToPath } from "node:url";
+import type { Registry } from "../packages/package.ts";
 import { type InteractiveRunResult, runInherited } from "../publish/publish.ts";
-import type { Registry } from "../shared/ports.ts";
 import { VERSION } from "../shared/version.ts";
 
 export const PACKED_PACKAGE_NAME = "@danypops/packed";

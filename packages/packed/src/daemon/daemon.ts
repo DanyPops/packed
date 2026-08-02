@@ -12,6 +12,7 @@ import { catalogStatus, syncCatalog } from "../packages/catalog.ts";
 import { latestVersion, openDb } from "../packages/db.ts";
 import { ExecInstaller } from "../packages/install.ts";
 import { defaultPiHome, readInstalledPackages } from "../packages/installed.ts";
+import type { Installer, Registry } from "../packages/package.ts";
 import { HttpRegistry } from "../registry/registry.ts";
 import {
 	CATALOG_INTERVAL_DEFAULT_MS,
@@ -23,7 +24,6 @@ import {
 } from "../shared/constants.ts";
 import { createLogger } from "../shared/log.ts";
 import { legacyPackedStateDirectory, migrateLegacyPackedState, type PackedPaths, resolvePackedPaths } from "../shared/paths.ts";
-import type { Installer, Registry } from "../shared/ports.ts";
 import { envMs } from "../shared/state.ts";
 import { createApp } from "./service.ts";
 import { checkUpdates, saveUpdates } from "./watcher.ts";

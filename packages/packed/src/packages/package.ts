@@ -1,7 +1,7 @@
 /**
- * ports.ts — shared interfaces (ports) and lean domain types that decouple
- * callers (the HTTP service, the CLI, the watcher, tests) from concrete
- * implementations (registry/registry.ts talks to npm; packages/install.ts
+ * package.ts — the Pkg entity and its two driven ports (Registry, Installer)
+ * that decouple callers (the HTTP service, the CLI, the watcher, tests) from
+ * concrete implementations (registry/registry.ts talks to npm; install.ts
  * shells out to pi).
  */
 
@@ -127,7 +127,7 @@ export interface UpdatesSnapshot {
 }
 
 /** Scope every query to pi packages unless the caller already qualified it. */
-import { PI_PACKAGE_KEYWORD } from "./constants.ts";
+import { PI_PACKAGE_KEYWORD } from "../shared/constants.ts";
 
 export function buildSearchQuery(q: string): string {
 	const t = q.trim();

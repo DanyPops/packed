@@ -19,11 +19,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type AdoptionReport, assessRegistryAdoption, PI_COMMAND_NAME } from "../adoption/score.ts";
 import { catalogList, dbPath, openDb } from "../packages/db.ts";
+import type { Registry } from "../packages/package.ts";
 import { resolveCurrentPiVersion } from "../pi/pi-version.ts";
 import { writeJsonAtomic } from "../shared/atomic-json.ts";
 import { INDEX_FILE, PAGE_DELAY_MS } from "../shared/constants.ts";
 import { createLogger } from "../shared/log.ts";
-import type { Registry } from "../shared/ports.ts";
 
 const log = createLogger("index");
 

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { initTheme } from "@earendil-works/pi-coding-agent";
-import type { Natives } from "../extension/src/packed.ts";
-import { createSettingsTab } from "../extension/src/security-tui.ts";
-import type { TabHost } from "../extension/src/tab-host.ts";
+import type { Natives } from "../../extension/src/packed.ts";
+import type { TabHost } from "../../extension/src/tab-host.ts";
+import { createSettingsTab } from "../../extension/src/tabs/security-tui.ts";
 
 // SettingsTab's own header line uses rawKeyHint, which reads pi-coding-agent's
 // global theme singleton directly -- a real Pi session always initializes

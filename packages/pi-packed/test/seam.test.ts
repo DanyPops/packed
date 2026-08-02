@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
-import type { SetupApplyResult, SetupPlan } from "@danypops/packed/protocol";
+import type { SetupApplyResult, SetupPlan } from "@danypops/pi-packed/protocol";
 import { verifyLoadableUnderPi } from "@danypops/vehicle-client-pi/pi-load-harness";
 import { filterRows, formatUpdateNotice, mergeRows, nextMode, visibleRows } from "../extension/src/model.ts";
 import { createNatives, type PackageDaemonPort, type PackageInfo } from "../extension/src/packed.ts";
@@ -244,7 +244,7 @@ describe("packed extension seam", () => {
 		expect(source).not.toContain("openDb");
 		expect(source).not.toContain("db.ts");
 		expect(source).toContain("ensurePackedClient");
-		expect(source).toContain('from "@danypops/packed/client"');
+		expect(source).toContain('from "@danypops/pi-packed/client"');
 	});
 
 	it("loads the daemon client through every Pi extension loader path", async () => {

@@ -1,42 +1,19 @@
 {
   "name": "@danypops/packed",
   "version": "0.5.2",
-  "description": "Standalone package lifecycle, validation, catalog, setup, and daemon service for Pi packages",
+  "description": "Host-neutral contracts and persistence primitives for agent package composition",
   "type": "module",
-  "bin": {
-    "packed": "src/cli/cli.ts"
-  },
   "scripts": {
-    "build": "rm -rf dist && bun build src/public/client.ts src/public/protocol.ts src/public/atomic-json.ts --outdir dist --target node --format esm --minify && bunx tsc -p tsconfig.public.json",
+    "build": "rm -rf dist && bun build src/public/atomic-json.ts --outdir dist --target node --format esm --minify && bunx tsc -p tsconfig.public.json",
     "test": "bun run build && bun test test",
-    "typecheck": "bunx tsc --noEmit",
-    "cli": "bun src/cli/cli.ts",
-    "serve": "bun src/cli/cli.ts serve"
+    "typecheck": "bunx tsc --noEmit"
   },
   "dependencies": {
-    "@danypops/pi-extension-harness": "^0.2.0",
-    "@danypops/vehicle-server": "^0.7.0",
     "@danypops/vehicle-core": "^0.6.1",
-    "@danypops/vehicle-client": "^0.1.1",
-    "@earendil-works/pi-coding-agent": "^0.82.0",
-    "@earendil-works/pi-tui": "^0.82.0",
-    "jiti": "2.6.1",
-    "publint": "0.3.22",
-    "semver": "^7.8.5",
-    "typebox": "^1.3.6"
+    "@danypops/vehicle-server": "^0.7.0"
   },
-  "devDependencies": {
-    "@types/semver": "^7.7.1"
-  },
+  "devDependencies": {},
   "exports": {
-    "./client": {
-      "types": "./dist/client.d.ts",
-      "import": "./dist/client.js"
-    },
-    "./protocol": {
-      "types": "./dist/protocol.d.ts",
-      "import": "./dist/protocol.js"
-    },
     "./atomic-json": {
       "types": "./dist/atomic-json.d.ts",
       "import": "./dist/atomic-json.js"
@@ -47,15 +24,6 @@
     "url": "git+https://github.com/DanyPops/packed.git",
     "directory": "packages/packed"
   },
-  "keywords": [
-    "pi",
-    "package-manager"
-  ],
-  "files": [
-    "src",
-    "dist",
-    "schema",
-    "setup",
-    "README.md"
-  ]
+  "keywords": ["agent-tools", "package-manager"],
+  "files": ["src", "dist", "README.md"]
 }

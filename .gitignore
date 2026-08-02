@@ -3,4 +3,5 @@ node_modules/
 .npmrc
 
 /packages/packed/dist/
+/packages/pi-packed/dist/
 

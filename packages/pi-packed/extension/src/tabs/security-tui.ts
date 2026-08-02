@@ -8,7 +8,7 @@
  * different TUI" complaint the other three tabs had.
  */
 
-import type { SecuritySettings } from "@danypops/packed/protocol";
+import type { SecuritySettings } from "@danypops/pi-packed/protocol";
 import { rawKeyHint } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { Component } from "malevich-tui-components";

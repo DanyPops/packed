@@ -1,4 +1,4 @@
-import type { SecuritySettings } from "@danypops/packed/protocol";
+import type { SecuritySettings } from "@danypops/pi-packed/protocol";
 
 export type PackageOperation = "install" | "update" | "remove" | "toggle";
 

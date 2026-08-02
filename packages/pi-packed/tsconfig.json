@@ -2,8 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ESNext", "DOM"],
-    "types": ["node"],
+    "types": ["bun-types", "node"],
     "noEmit": true
   },
-  "include": ["extension/**/*.ts"]
+  "include": ["extension/**/*.ts", "service/src/**/*.ts", "service/test/**/*.ts", "test/**/*.ts"]
 }

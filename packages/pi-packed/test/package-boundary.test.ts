@@ -11,14 +11,14 @@ function sourceFiles(directory: string): string[] {
 }
 
 describe("pi-packed package boundary", () => {
-	it("is an independent Pi package depending only on public Packed exports", () => {
-		const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+	it("owns the Pi host and consumes Packed's shared public export", () => {
+		const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as Record<string, unknown>;
 		expect(manifest).toMatchObject({
 			name: "@danypops/pi-packed",
+			bin: { packed: "service/src/cli/cli.ts" },
 			pi: { extensions: ["extension/src/index.ts"] },
-			dependencies: { "@danypops/packed": "^0.5.0" },
+			dependencies: { "@danypops/packed": "workspace:*" },
 		});
-		expect(manifest.bin).toBeUndefined();
 		for (const file of sourceFiles(join(root, "extension"))) {
 			const source = readFileSync(file, "utf8");
 			expect(source).not.toMatch(/from\s+["']\.\.\/\.\./);

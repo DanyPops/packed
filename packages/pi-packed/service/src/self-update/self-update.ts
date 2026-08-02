@@ -18,7 +18,7 @@ import type { Registry } from "../packages/package.ts";
 import { type InteractiveRunResult, runInherited } from "../publish/publish.ts";
 import { VERSION } from "../shared/version.ts";
 
-export const PACKED_PACKAGE_NAME = "@danypops/packed";
+export const PACKED_PACKAGE_NAME = "@danypops/pi-packed";
 
 export type SelfInstallMethod = { kind: "npm-global" } | { kind: "bun-global" } | { kind: "local-checkout"; path: string };
 
@@ -26,7 +26,7 @@ export type SelfInstallMethod = { kind: "npm-global" } | { kind: "bun-global" } 
  * install layout is `$BUN_INSTALL/install/global/node_modules/<pkg>/...`
  * (confirmed live against a real `bun add -g` install -- distinct from a
  * plain npm-global tree, which has no `install/global` segment at all), an
- * ordinary node_modules/@danypops/packed tree (npm-managed), or anywhere
+ * ordinary node_modules/@danypops/pi-packed tree (npm-managed), or anywhere
  * else (a plain checkout). Bun-global is checked first since its path also
  * contains the broader npm-global substring. */
 export function detectSelfInstallMethod(cliUrl: string = import.meta.url): SelfInstallMethod {
@@ -48,11 +48,11 @@ export interface SelfUpdateReport {
 export interface SelfUpdateDeps {
 	registry: Pick<Registry, "info">;
 	installMethod?: SelfInstallMethod;
-	/** Defaults to `npm install --global @danypops/packed@latest` via
+	/** Defaults to `npm install --global @danypops/pi-packed@latest` via
 	 * runInherited -- real npm output, no timeout, matching
 	 * runPiUpdateSelf's exact pattern for pi's own self-update. */
 	runNpmInstall?: (args: string[]) => Promise<InteractiveRunResult>;
-	/** Defaults to `bun add --global @danypops/packed@latest` via
+	/** Defaults to `bun add --global @danypops/pi-packed@latest` via
 	 * runInherited -- Bun's own documented way to force-update a global
 	 * install (re-adding with an explicit version); `bun update` has no
 	 * --global flag at all. */

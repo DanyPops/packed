@@ -95,7 +95,7 @@ export interface ServiceSpecSummary {
 	descriptorPath: string;
 }
 
-/** Mirrors packages/packed/src/pi/pi-version.ts's CURRENT_PI_PACKAGE_NAME
+/** Mirrors service/src/pi/pi-version.ts's CURRENT_PI_PACKAGE_NAME
  * literal -- not a shared import, since the public boundary deliberately
  * stays free of internal runtime-specific modules. Keep the two in sync by hand. */
 export const PI_COMMAND_NAME = "@earendil-works/pi-coding-agent";

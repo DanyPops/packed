@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "declarationMap": true,
+    "declarationDir": "../dist",
+    "rootDir": "src/public"
+  },
+  "include": ["src/public/client.ts", "src/public/protocol.ts"]
+}

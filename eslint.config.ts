@@ -9,6 +9,8 @@ import tseslint from "typescript-eslint";
 
 const SOURCE = [
 	"packages/*/src/**/*.ts",
+	"packages/*/service/src/**/*.ts",
+	"packages/*/service/test/**/*.ts",
 	"packages/*/extension/**/*.ts",
 	"packages/*/test/**/*.ts",
 	"packages/*/schema/**/*.ts",
@@ -41,7 +43,7 @@ export default tseslint.config(
 	},
 
 	{
-		files: ["packages/*/src/**/*.ts", "packages/*/extension/**/*.ts"],
+		files: ["packages/*/src/**/*.ts", "packages/*/service/src/**/*.ts", "packages/*/extension/**/*.ts"],
 		languageOptions: {
 			parser: tseslint.parser,
 			parserOptions: {

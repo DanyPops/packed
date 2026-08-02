@@ -17,7 +17,7 @@
  * twice) if the retried call actually reached the daemon the first time.
  */
 
-import { ensurePackedClient, InstallServiceError, type PackedExtensionClient } from "@danypops/packed/client";
+import { ensurePackedClient, InstallServiceError, type PackedExtensionClient } from "@danypops/pi-packed/client";
 import {
 	type InstalledPackage,
 	type PackageInfo,
@@ -32,7 +32,7 @@ import {
 	type SetupPlan,
 	type UpdateEntry,
 	type UpdateOutcome,
-} from "@danypops/packed/protocol";
+} from "@danypops/pi-packed/protocol";
 import { createRetryingClient } from "@danypops/vehicle-client/daemon-client";
 
 export type { PackageInfo, PackageResources, PackageSummary, PiStatus, ResourceField, UpdateEntry, UpdateOutcome };

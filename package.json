@@ -6,8 +6,9 @@
     "packages/*"
   ],
   "scripts": {
-    "test": "bun run --cwd packages/packed build && bun test packages/packed/test packages/pi-packed/test",
-    "typecheck": "bun run --cwd packages/packed build && bunx tsc --noEmit && bunx tsc -p packages/packed/tsconfig.json --noEmit && bunx tsc -p packages/packed/tsconfig.consumer.json && bunx tsc -p packages/pi-packed/tsconfig.json --noEmit",
+    "build": "bun run --cwd packages/packed build && bun run --cwd packages/pi-packed build",
+    "test": "bun run build && bun test packages/packed/test packages/pi-packed/service/test packages/pi-packed/test",
+    "typecheck": "bun run build && bunx tsc --noEmit && bunx tsc -p packages/packed/tsconfig.json --noEmit && bunx tsc -p packages/packed/tsconfig.consumer.json && bunx tsc -p packages/pi-packed/tsconfig.json --noEmit && bunx tsc -p packages/pi-packed/service/tsconfig.consumer.json", 
     "prepare": "git config core.hooksPath .githooks",
     "format": "biome format --write .",
     "lint": "biome check --write . && eslint packages --max-warnings 0",
@@ -17,6 +18,7 @@
     "@biomejs/biome": "^2.5.6",
     "@danypops/daemon-kit": "^0.4.0",
     "@danypops/packed": "workspace:*",
+    "@danypops/pi-packed": "workspace:*",
     "@earendil-works/pi-coding-agent": "^0.82.1",
     "@earendil-works/pi-tui": "^0.82.1",
     "@types/node": "^22.0.0",

@@ -1,4 +1,4 @@
-import type { PackageSummary as Pkg, PackageInfo as PkgInfo } from "@danypops/packed/protocol";
+import type { PackageSummary as Pkg, PackageInfo as PkgInfo } from "@danypops/pi-packed/protocol";
 import type { AgentToolResult, Theme } from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth } from "@earendil-works/pi-tui";
 import {

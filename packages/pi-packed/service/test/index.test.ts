@@ -103,7 +103,6 @@ describe("buildIndex", () => {
 	it("never calls GitHub, even for a candidate declaring a github.com repository -- freshness always falls back to the npm publish-date proxy", async () => {
 		const realFetch = globalThis.fetch;
 		fetchedUrls = [];
-		// @ts-expect-error -- test-only global fetch wrap to observe every outbound host, restored in finally
 		globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
 			fetchedUrls.push(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
 			return realFetch(input, init);

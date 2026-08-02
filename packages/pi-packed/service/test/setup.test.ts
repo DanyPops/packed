@@ -99,11 +99,12 @@ const manifest: SetupManifest = {
 
 describe("Pi setup manifest walking skeleton", () => {
 	it("ships the versioned JSON Schema in the npm package", () => {
-		const root = new URL("..", import.meta.url);
-		const schema = JSON.parse(readFileSync(new URL("schema/pi-setup-v1.schema.json", root), "utf8"));
-		const packageJson = JSON.parse(readFileSync(new URL("package.json", root), "utf8"));
+		const serviceRoot = new URL("..", import.meta.url);
+		const packageRoot = new URL("../..", import.meta.url);
+		const schema = JSON.parse(readFileSync(new URL("schema/pi-setup-v1.schema.json", serviceRoot), "utf8"));
+		const packageJson = JSON.parse(readFileSync(new URL("package.json", packageRoot), "utf8"));
 		expect(schema.properties.schemaVersion.const).toBe(1);
-		expect(packageJson.files).toContain("schema");
+		expect(packageJson.files).toContain("service");
 	});
 
 	it("ships a curated, schema-valid @danypops ecosystem starter manifest, resolvable without a network fetch", () => {
@@ -120,8 +121,8 @@ describe("Pi setup manifest walking skeleton", () => {
 		const names = manifest.packages.map((pkg) => (pkg.kind === "npm" ? pkg.source : ""));
 		expect(names).toContain("npm:@danypops/pi-packed");
 		expect(new Set(names).size).toBe(names.length);
-		const packageJson = JSON.parse(readFileSync(new URL("package.json", new URL("..", import.meta.url)), "utf8"));
-		expect(packageJson.files).toContain("setup");
+		const packageJson = JSON.parse(readFileSync(new URL("package.json", new URL("../..", import.meta.url)), "utf8"));
+		expect(packageJson.files).toContain("service");
 	});
 
 	it("plans real operations against the bundled ecosystem manifest through the exact same SetupManager path any other manifest uses", async () => {

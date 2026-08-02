@@ -127,8 +127,8 @@ function deps(over: Partial<CliDeps> = {}): CliDeps {
 
 describe("CLI", () => {
 	it("publishes an executable packed binary", () => {
-		const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { bin?: Record<string, string> };
-		expect(manifest.bin).toEqual({ packed: "src/cli/cli.ts" });
+		const manifest = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { bin?: Record<string, string> };
+		expect(manifest.bin).toEqual({ packed: "service/src/cli/cli.ts" });
 		expect(readFileSync(new URL("../src/cli/cli.ts", import.meta.url), "utf8").startsWith("#!/usr/bin/env bun\n")).toBe(true);
 	});
 
@@ -161,7 +161,7 @@ describe("CLI", () => {
 				},
 			},
 		});
-		const root = new URL("..", import.meta.url).pathname;
+		const root = new URL("fixtures/install-validation/no-manifest-package", import.meta.url).pathname;
 		const result = await cliRun(["check", root, "--json"], d);
 		expect(result.code).toBe(1);
 		expect(JSON.parse(result.out).diagnostics.some((item: { code: string }) => item.code === "PI_NO_RESOURCES")).toBe(true);
@@ -683,7 +683,7 @@ describe("CLI", () => {
 						previousVersion: "0.1.1",
 						updated: false,
 						restarted: false,
-						message: "npm install --global @danypops/packed@latest failed (exit 1)",
+						message: "npm install --global @danypops/pi-packed@latest failed (exit 1)",
 					};
 				},
 			},
@@ -1231,9 +1231,9 @@ describe("daemon client", () => {
 		expect(typeof built.generatedAt).toBe("string");
 		expect(await client.index()).toEqual(built); // now persisted, readable back through the same RPC
 		expect(await client.updates()).toEqual([]);
-		const checkRoot = new URL("..", import.meta.url).pathname;
+		const checkRoot = new URL("../..", import.meta.url).pathname;
 		expect((await client.check(checkRoot)).root).toBe(checkRoot.replace(/\/$/, ""));
-		expect((await client.check(checkRoot, true)).smoke?.extensions).toEqual([]);
+		expect((await client.check(checkRoot, true)).smoke?.extensions.length).toBeGreaterThan(0);
 		expect((await client.pack(checkRoot)).shape.verified).toBe(true);
 		expect((await client.score("pi-lsp")).target).toBe("pi-lsp");
 		expect((await client.setupExport(checkRoot)).wrote).toBe(true);

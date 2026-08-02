@@ -202,7 +202,7 @@ export function renderStageWorkflow(input: WorkflowInput): string {
 		// "latest", not VERSION: the version currently being staged cannot exist
 		// on npm yet, and one already-published packed release exists by the
 		// time this workflow can be generated at all (setup requires it).
-		`      - run: bunx --bun @danypops/packed@latest check ${input.packageDir ?? "."}`,
+		`      - run: bunx --bun @danypops/pi-packed@latest check ${input.packageDir ?? "."}`,
 		`      - run: npm install --global npm@${TRUST_NPM_VERSION}`,
 		"      - run: npm --version",
 		`      - run: npm stage publish --access public --provenance --ignore-scripts${publishDir}`,

@@ -237,7 +237,7 @@ describe("standalone staged publishing", () => {
 		const workflow = readFileSync(report.workflowPath, "utf8");
 		expect(workflow).toContain("bun run --cwd packages/ext test");
 		expect(workflow).not.toContain("bun run test\n");
-		expect(workflow).toContain("bunx --bun @danypops/packed@latest check packages/ext");
+		expect(workflow).toContain("bunx --bun @danypops/pi-packed@latest check packages/ext");
 		expect(workflow).toContain('- "ext-v*"');
 		expect(workflow).toContain("npm stage publish --access public --provenance --ignore-scripts\n        working-directory: packages/ext");
 	});

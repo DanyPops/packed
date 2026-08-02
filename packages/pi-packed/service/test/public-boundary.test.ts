@@ -13,7 +13,7 @@ const publicPlan: PublicSetupPlan = {} as CoreSetupPlan;
 const publicApply: PublicSetupApplyResult = {} as CoreSetupApplyResult;
 void [publicPlan, publicApply];
 
-const root = new URL("..", import.meta.url).pathname;
+const root = new URL("../..", import.meta.url).pathname;
 const extensionOperations: ExtensionOperationName[] = [
 	"package.search",
 	"package.info",
@@ -49,6 +49,6 @@ describe("compiled public boundary", () => {
 		const publicFiles = ["client.js", "client.d.ts", "protocol.d.ts"]
 			.map((name) => readFileSync(join(root, "dist", name), "utf8"))
 			.join("\n");
-		expect(publicFiles).not.toMatch(/\bBun\b|bun:sqlite|\.\.\/(?:service|daemon|db|check)/);
+		expect(publicFiles).not.toMatch(/\bBun\b|bun:sqlite|\.\.\/(?:daemon|db|check)/);
 	});
 });

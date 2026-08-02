@@ -71,6 +71,11 @@ jobs:
         run: |
           version=$(node -p "require('./node_modules/@danypops/packed/package.json').version")
           npm view "@danypops/packed@$version" version
+      # pi-packed self-references its own subpath exports (@danypops/pi-packed/client,
+      # @danypops/pi-packed/protocol) since the Pi-integration/core split -- its own
+      # dist/ must exist before its typecheck can resolve them, same reason packed's
+      # own build runs above.
+      - run: bun run --cwd packages/pi-packed build
       - run: bun run --cwd packages/pi-packed typecheck
       - run: bun run --cwd packages/pi-packed test
       - run: bunx --bun @danypops/packed@latest check packages/pi-packed

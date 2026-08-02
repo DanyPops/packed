@@ -7,7 +7,9 @@
  * answers the same question proactively, before pi ever runs.
  */
 import { join } from "node:path";
+import { createNodeServiceInstallDeps } from "@danypops/vehicle-server/service";
 import { listPackageResources, type PackageResources, resolveInstalledDir } from "../packages/resources.ts";
+import { checkServiceUnitPaths, type ServiceUnitDiagnostic } from "./service-doctor.ts";
 import { runExtensionSmoke, type SmokeOptions, type SmokeRegistrations } from "./smoke.ts";
 
 const REGISTRATION_KINDS = ["tools", "commands", "shortcuts", "flags"] as const;
@@ -50,6 +52,8 @@ export interface DoctorReport {
 	extensions: DoctorExtensionResult[];
 	scanned: number;
 	truncated: boolean;
+	/** A daemon-backed package's systemd --user unit referencing a path that no longer exists on disk -- see service-doctor.ts. Empty (not omitted) on a platform without systemd --user coverage. */
+	serviceUnits: ServiceUnitDiagnostic[];
 }
 
 interface ScanJob {
@@ -112,7 +116,16 @@ export async function runDoctor(piHome: string, projectRoot?: string, options: S
 	}
 	conflicts.sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
 
-	return { ok: conflicts.length === 0 && !anyNotOk, conflicts, extensions, scanned: bounded.length, truncated };
+	const serviceReport = checkServiceUnitPaths(piHome, projectRoot, createNodeServiceInstallDeps());
+
+	return {
+		ok: conflicts.length === 0 && !anyNotOk && serviceReport.ok,
+		conflicts,
+		extensions,
+		scanned: bounded.length,
+		truncated,
+		serviceUnits: serviceReport.diagnostics,
+	};
 }
 
 function formatClaimant(claim: DoctorClaim): string {
@@ -129,6 +142,9 @@ export function formatDoctorReport(report: DoctorReport, json: boolean): string 
 	for (const extension of report.extensions) {
 		if (extension.status === "ok") continue;
 		out += `\n${extension.status.toUpperCase()} ${formatClaimant({ name: extension.name, source: extension.source, scope: extension.scope, extension: extension.extension })}${extension.message ? `: ${extension.message}` : ""}\n`;
+	}
+	for (const diagnostic of report.serviceUnits) {
+		out += `\n${diagnostic.severity.toUpperCase()} ${diagnostic.code} ${diagnostic.package} (${diagnostic.unitName}.service): ${diagnostic.message}\n`;
 	}
 	if (report.truncated) out += "\nOutput truncated: more enabled extensions exist than this run's bound.\n";
 	return out;

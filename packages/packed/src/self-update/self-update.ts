@@ -20,13 +20,18 @@ import { VERSION } from "../shared/version.ts";
 
 export const PACKED_PACKAGE_NAME = "@danypops/packed";
 
-export type SelfInstallMethod = { kind: "npm-global" } | { kind: "local-checkout"; path: string };
+export type SelfInstallMethod = { kind: "npm-global" } | { kind: "bun-global" } | { kind: "local-checkout"; path: string };
 
-/** cli.ts's own resolved real path tells us how it's running: inside a
- * node_modules/@danypops/packed tree (npm-managed) or anywhere else (a
- * plain checkout). */
+/** cli.ts's own resolved real path tells us how it's running: Bun's global
+ * install layout is `$BUN_INSTALL/install/global/node_modules/<pkg>/...`
+ * (confirmed live against a real `bun add -g` install -- distinct from a
+ * plain npm-global tree, which has no `install/global` segment at all), an
+ * ordinary node_modules/@danypops/packed tree (npm-managed), or anywhere
+ * else (a plain checkout). Bun-global is checked first since its path also
+ * contains the broader npm-global substring. */
 export function detectSelfInstallMethod(cliUrl: string = import.meta.url): SelfInstallMethod {
 	const path = fileURLToPath(cliUrl);
+	if (path.includes(`/install/global/node_modules/${PACKED_PACKAGE_NAME}/`)) return { kind: "bun-global" };
 	if (path.includes(`node_modules/${PACKED_PACKAGE_NAME}/`)) return { kind: "npm-global" };
 	return { kind: "local-checkout", path };
 }
@@ -47,6 +52,11 @@ export interface SelfUpdateDeps {
 	 * runInherited -- real npm output, no timeout, matching
 	 * runPiUpdateSelf's exact pattern for pi's own self-update. */
 	runNpmInstall?: (args: string[]) => Promise<InteractiveRunResult>;
+	/** Defaults to `bun add --global @danypops/packed@latest` via
+	 * runInherited -- Bun's own documented way to force-update a global
+	 * install (re-adding with an explicit version); `bun update` has no
+	 * --global flag at all. */
+	runBunInstall?: (args: string[]) => Promise<InteractiveRunResult>;
 	/** Undefined when the current platform has no supported restart
 	 * mechanism (only Linux/systemd today, matching `packed service`'s
 	 * own Linux-only scope) -- never guessed at. */
@@ -67,22 +77,39 @@ export async function runSelfUpdate(deps: SelfUpdateDeps): Promise<SelfUpdateRep
 		try {
 			latestVersion = (await deps.registry.info(PACKED_PACKAGE_NAME)).version;
 		} catch {
-			/* best-effort; npm install --global resolves latest itself either way */
+			/* best-effort; the package manager's own install resolves latest either way */
 		}
-		const runNpmInstall = deps.runNpmInstall ?? ((args) => runInherited(["npm", ...args]));
-		const install = await runNpmInstall(["install", "--global", `${PACKED_PACKAGE_NAME}@latest`]);
-		if (!install.ok) {
-			return {
-				ok: false,
-				previousVersion,
-				latestVersion,
-				updated: false,
-				restarted: false,
-				message: `npm install --global ${PACKED_PACKAGE_NAME}@latest failed (exit ${install.code})`,
-			};
+		if (method.kind === "bun-global") {
+			const runBunInstall = deps.runBunInstall ?? ((args) => runInherited(["bun", ...args]));
+			const install = await runBunInstall(["add", "--global", `${PACKED_PACKAGE_NAME}@latest`]);
+			if (!install.ok) {
+				return {
+					ok: false,
+					previousVersion,
+					latestVersion,
+					updated: false,
+					restarted: false,
+					message: `bun add --global ${PACKED_PACKAGE_NAME}@latest failed (exit ${install.code})`,
+				};
+			}
+			updated = true;
+			updateNote = "updated via bun";
+		} else {
+			const runNpmInstall = deps.runNpmInstall ?? ((args) => runInherited(["npm", ...args]));
+			const install = await runNpmInstall(["install", "--global", `${PACKED_PACKAGE_NAME}@latest`]);
+			if (!install.ok) {
+				return {
+					ok: false,
+					previousVersion,
+					latestVersion,
+					updated: false,
+					restarted: false,
+					message: `npm install --global ${PACKED_PACKAGE_NAME}@latest failed (exit ${install.code})`,
+				};
+			}
+			updated = true;
+			updateNote = "updated via npm";
 		}
-		updated = true;
-		updateNote = "updated via npm";
 	}
 
 	const isServiceInstalled = deps.isServiceInstalled ?? (() => false);

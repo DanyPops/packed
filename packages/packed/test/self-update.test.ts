@@ -20,6 +20,16 @@ describe("detectSelfInstallMethod", () => {
 		expect(method).toEqual({ kind: "npm-global" });
 	});
 
+	it("recognizes a Bun-global install by its install/global/node_modules path", () => {
+		const method = detectSelfInstallMethod(`file:///home/dev/.cache/.bun/install/global/node_modules/${PACKED_PACKAGE_NAME}/src/cli.ts`);
+		expect(method).toEqual({ kind: "bun-global" });
+	});
+
+	it("prefers bun-global over the broader npm-global check, since a bun-global path also contains node_modules/<pkg>/", () => {
+		const method = detectSelfInstallMethod(`file:///home/dev/.bun/install/global/node_modules/${PACKED_PACKAGE_NAME}/src/cli.ts`);
+		expect(method.kind).toBe("bun-global");
+	});
+
 	it("recognizes anything else as a local checkout, carrying the real resolved path", () => {
 		const method = detectSelfInstallMethod("file:///home/dev/Projects/packed/packages/packed/src/cli.ts");
 		expect(method.kind).toBe("local-checkout");
@@ -177,6 +187,71 @@ describe("runSelfUpdate", () => {
 			updated: true,
 			restarted: true,
 			message: "updated via npm; restarted the pi-packed service",
+		});
+	});
+
+	it("runs bun add --global for a bun-global install, never touching npm, and reports the version transition", async () => {
+		let bunArgs: string[] | undefined;
+		let npmCalled = false;
+		const report = await runSelfUpdate(
+			deps({
+				installMethod: { kind: "bun-global" },
+				runBunInstall: async (a) => {
+					bunArgs = a;
+					return ok();
+				},
+				runNpmInstall: async () => {
+					npmCalled = true;
+					return ok();
+				},
+				isServiceInstalled: () => false,
+			}),
+		);
+		expect(bunArgs).toEqual(["add", "--global", `${PACKED_PACKAGE_NAME}@latest`]);
+		expect(npmCalled).toBe(false);
+		expect(report.updated).toBe(true);
+		expect(report.previousVersion).toBe(VERSION);
+		expect(report.latestVersion).toBe("9.9.9");
+		expect(report.message).toContain("updated via bun");
+	});
+
+	it("fails, never restarting, when bun add itself fails", async () => {
+		let restartCalled = false;
+		const report = await runSelfUpdate(
+			deps({
+				installMethod: { kind: "bun-global" },
+				runBunInstall: async () => failed(1),
+				isServiceInstalled: () => true,
+				restartService: async () => {
+					restartCalled = true;
+					return ok();
+				},
+			}),
+		);
+		expect(report.ok).toBe(false);
+		expect(report.updated).toBe(false);
+		expect(report.restarted).toBe(false);
+		expect(restartCalled).toBe(false);
+		expect(report.message).toContain("bun add --global");
+		expect(report.message).toContain("failed (exit 1)");
+	});
+
+	it("restarts the service after a successful bun-global update, same as npm-global", async () => {
+		const report = await runSelfUpdate(
+			deps({
+				installMethod: { kind: "bun-global" },
+				runBunInstall: async () => ok(),
+				isServiceInstalled: () => true,
+				restartService: async () => ok(),
+			}),
+		);
+		expect(report).toEqual({
+			ok: true,
+			previousVersion: VERSION,
+			latestVersion: "9.9.9",
+			updated: true,
+			restarted: true,
+			message: "updated via bun; restarted the pi-packed service",
 		});
 	});
 });

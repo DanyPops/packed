@@ -81,7 +81,7 @@ describe("ensureClient (packed daemon auto-spawn-or-wait decision)", () => {
 				retryAttempts: 2,
 				retryDelayMs: 0,
 			}),
-		).rejects.toThrow(/supervised service is installed/);
+		).rejects.toThrow(/managed service is installed/);
 	});
 
 	it("fails with a plain timeout message, and did spawn, when no service is installed and nothing ever becomes reachable", async () => {

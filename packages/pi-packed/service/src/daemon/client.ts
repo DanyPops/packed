@@ -25,6 +25,7 @@ import type { OperationInputs, OperationName, OperationOutputs } from "./service
 
 export type FetchTransport = (request: Request) => Promise<Response>;
 type RpcClient = AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>;
+type ServiceSummary = { name: string; binPath: string };
 
 export interface PackageDaemonPort {
 	search(query: string, limit: number, offline?: boolean): Promise<{ query: string; total: number; results: SearchPage["results"] }>;
@@ -46,14 +47,8 @@ export interface PackageDaemonPort {
 	security(): Promise<SecuritySettings>;
 	setMutationApproval(value: MutationApproval, approved?: boolean): Promise<SecuritySettings>;
 	install(source: string, approved?: boolean): Promise<string>;
-	installService(
-		source: string,
-		approved?: boolean,
-	): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }>;
-	restartService(
-		source: string,
-		approved?: boolean,
-	): Promise<{ output: string; restarted?: boolean; spec?: { name: string; binPath: string; descriptorPath: string } }>;
+	installService(source: string, approved?: boolean): Promise<{ output: string; spec?: ServiceSummary }>;
+	restartService(source: string, approved?: boolean): Promise<{ output: string; restarted?: boolean; spec?: ServiceSummary }>;
 	remove(name: string, approved?: boolean): Promise<string>;
 	update(source: string, approved?: boolean): Promise<UpdateOutcome>;
 	piStatus(): Promise<PiVersionReport>;
@@ -230,10 +225,7 @@ export class PackageDaemonClient implements PackageDaemonPort {
 		return result.output;
 	}
 
-	async installService(
-		source: string,
-		approved = false,
-	): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }> {
+	async installService(source: string, approved = false): Promise<{ output: string; spec?: ServiceSummary }> {
 		const result = await this.call("package.install_service", { source, approved });
 		if (!result.ok)
 			throw new PackageDaemonError(
@@ -248,7 +240,7 @@ export class PackageDaemonClient implements PackageDaemonPort {
 	async restartService(
 		source: string,
 		approved = false,
-	): Promise<{ output: string; restarted?: boolean; spec?: { name: string; binPath: string; descriptorPath: string } }> {
+	): Promise<{ output: string; restarted?: boolean; spec?: ServiceSummary }> {
 		const result = await this.call("package.restart_service", { source, approved });
 		if (!result.ok)
 			throw new PackageDaemonError(
@@ -319,14 +311,8 @@ export class DaemonBackedInstaller implements Installer {
 }
 
 export interface DaemonServiceInstallerPort {
-	install(
-		source: string,
-		approved?: boolean,
-	): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }>;
-	restart(
-		source: string,
-		approved?: boolean,
-	): Promise<{ output: string; restarted?: boolean; spec?: { name: string; binPath: string; descriptorPath: string } }>;
+	install(source: string, approved?: boolean): Promise<{ output: string; spec?: ServiceSummary }>;
+	restart(source: string, approved?: boolean): Promise<{ output: string; restarted?: boolean; spec?: ServiceSummary }>;
 }
 
 export class DaemonBackedDaemonServiceInstaller implements DaemonServiceInstallerPort {
@@ -334,13 +320,10 @@ export class DaemonBackedDaemonServiceInstaller implements DaemonServiceInstalle
 	async restart(
 		source: string,
 		approved?: boolean,
-	): Promise<{ output: string; restarted?: boolean; spec?: { name: string; binPath: string; descriptorPath: string } }> {
+	): Promise<{ output: string; restarted?: boolean; spec?: ServiceSummary }> {
 		return (await connectPackageDaemon(this.paths)).restartService(source, approved);
 	}
-	async install(
-		source: string,
-		approved?: boolean,
-	): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }> {
+	async install(source: string, approved?: boolean): Promise<{ output: string; spec?: ServiceSummary }> {
 		return (await connectPackageDaemon(this.paths)).installService(source, approved);
 	}
 }

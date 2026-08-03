@@ -10,6 +10,17 @@
   "pi": {
     "extensions": ["extension/src/index.ts"]
   },
+  "packed": {
+    "daemonService": {
+      "name": "pi-packed",
+      "displayName": "Packed package service",
+      "binPath": "service/src/cli/cli.ts",
+      "args": ["serve"],
+      "handleFilename": "handle.json",
+      "restartOnFailure": true,
+      "restartSec": 2
+    }
+  },
   "scripts": {
     "build": "rm -rf dist && bun build service/src/public/client.ts service/src/public/protocol.ts --outdir dist --target node --format esm --minify && bunx tsc -p service/tsconfig.public.json",
     "test": "bun run build && bun test service/test test",
@@ -20,7 +31,7 @@
     "@danypops/pi-extension-harness": "^0.2.0",
     "@danypops/vehicle-client": "^0.2.0",
     "@danypops/vehicle-core": "^0.6.1",
-    "@danypops/vehicle-server": "^0.7.0",
+    "@danypops/vehicle-server": "^0.14.1",
     "jiti": "2.6.1",
     "malevich-tui-components": "^0.16.1",
     "publint": "0.3.22",

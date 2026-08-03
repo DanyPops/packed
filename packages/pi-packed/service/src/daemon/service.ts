@@ -138,7 +138,7 @@ interface UpdateMutationResponse extends MutationResponse, Partial<Omit<UpdateOu
 interface InstallServiceResponse {
 	ok: boolean;
 	output: string;
-	spec?: Pick<ServiceSpec, "name" | "binPath" | "descriptorPath">;
+	spec?: Pick<ServiceSpec, "name" | "binPath">;
 	notADaemon?: boolean;
 }
 interface RestartServiceResponse extends InstallServiceResponse {
@@ -227,8 +227,8 @@ function err(status: number, msg: string, details: Record<string, unknown> = {})
 	return jsonResponse({ error: msg, ...details }, { status });
 }
 
-function pickSpec(spec: ServiceSpec): Pick<ServiceSpec, "name" | "binPath" | "descriptorPath"> {
-	return { name: spec.name, binPath: spec.binPath, descriptorPath: spec.descriptorPath };
+function pickSpec(spec: ServiceSpec): Pick<ServiceSpec, "name" | "binPath"> {
+	return { name: spec.name, binPath: spec.binPath };
 }
 
 export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Response> } {
@@ -331,11 +331,21 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			// pi.cleanup is read and applied before delegating to pi remove --
 			// once pi remove finishes, an npm-sourced package's own directory
 			// (and its manifest) may already be gone.
-			const installedDir = resolveInstalledDir(deps.piHome ?? defaultPiHome(), `npm:${name}`);
+			const piHome = deps.piHome ?? defaultPiHome();
+			const installedDir = resolveInstalledDir(piHome, `npm:${name}`);
+			let serviceRemoved = false;
+			if (installedDir) {
+				const service = daemonServiceInstaller.remove(piHome, `npm:${name}`);
+				if (!service.ok && !service.notADaemon) return json({ ok: false, name, output: service.reason });
+				if (service.ok) {
+					if (!service.result.installed) return json({ ok: false, name, output: service.result.reason });
+					serviceRemoved = true;
+				}
+			}
 			const cleanup = installedDir ? runCleanup(installedDir) : [];
 			try {
 				const output = await deps.inst.remove(`npm:${name}`, { approved });
-				return json({ ok: true, name, output: output + formatCleanupSummary(cleanup) });
+				return json({ ok: true, name, output: output + formatCleanupSummary(cleanup), serviceRemoved });
 			} catch (e) {
 				const message = e instanceof Error ? e.message : String(e);
 				return json({ ok: false, name, output: message + formatCleanupSummary(cleanup) });
@@ -359,7 +369,19 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			if (denied) return denied;
 			try {
 				const output = await deps.inst.install(source, { approved });
-				return json({ ok: true, source, output });
+				if (!source.startsWith("npm:")) return json({ ok: true, source, output });
+				const service = daemonServiceInstaller.install(piHomeForServiceInstall, source);
+				if (!service.ok) {
+					if (service.notADaemon) return json({ ok: true, source, output });
+					return json({ ok: false, source, output: `${output}\n${service.reason}` });
+				}
+				if (!service.result.installed) return json({ ok: false, source, output: `${output}\n${service.result.reason}` });
+				return json({
+					ok: true,
+					source,
+					output: `${output}\ninstalled persistent Vehicle ${service.spec.name}`,
+					service: pickSpec(service.spec),
+				});
 			} catch (e) {
 				return json({ ok: false, source, output: e instanceof Error ? e.message : String(e) });
 			}
@@ -426,7 +448,13 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			if (denied) return denied;
 			try {
 				const outcome = await deps.inst.update(source, { approved });
-				return json({ ok: true, source, ...outcome });
+				if (!source.startsWith("npm:") || outcome.alreadyUpToDate) return json({ ok: true, source, ...outcome });
+				const service = daemonServiceInstaller.restart(piHomeForServiceInstall, source);
+				if (!service.ok) {
+					if (service.notADaemon) return json({ ok: true, source, ...outcome });
+					return json({ ok: false, source, ...outcome, output: `${outcome.output}\n${service.reason}` });
+				}
+				return json({ ok: true, source, ...outcome, serviceReconciled: service.restarted });
 			} catch (error) {
 				return json({ ok: false, source, output: error instanceof Error ? error.message : String(error), reloadRequired: false });
 			}

@@ -83,7 +83,7 @@ usage:
   packed search <query> [--offline] [--json]   search npm (or the local mirror with --offline)
   packed info <name> [--json]                  package details
   packed updates [--project <path>] [--json]   updates per the local mirror; --project also checks that project's own .pi/settings.json pins
-  packed update <source> [--approve] [--no-service] [--json]  update one configured package through Pi; restarts its registered persistent service (if any) to pick up the new code, unless --no-service
+  packed update <source> [--approve] [--json]  update one configured package through Pi and reconcile its registered Vehicle
   packed update --self [--approve] [--json]    update Packed itself (npm-global installs only) and restart its supervised service
   packed mirror [--json]                       sync upstream into the local SQLite index
   packed installed [--json]                    installed pi packages
@@ -100,8 +100,8 @@ usage:
   packed setup update [manifest] [--json]       deliberately refresh immutable package resolutions
   packed setup plan [manifest] [--prune] [--json] show an additive or exact setup diff without mutation
   packed setup apply [manifest] [--prune] [--approve] [--json] apply an approved setup plan
-  packed install <source> [--approve] [--no-service] [--json] pi install npm:|git:|https://… via daemon; auto-registers a detected npm: Vehicle daemon as a service unless --no-service
-  packed install-service <source> --approve [--json] register a package's own daemon as a persistent login/boot service (also useful standalone, e.g. re-registering after --no-service)
+  packed install <source> [--approve] [--json] pi install npm:|git:|https://… via daemon and reconcile any declared Vehicle
+  packed install-service <source> --approve [--json] reconcile a package's declared Vehicle
   packed restart-service <source> --approve [--json] restart a package's already-registered persistent service standalone (packed update already does this automatically)
   packed remove <name> [--approve] [--json]    remove by bare npm name via daemon
   packed security [always|never] [--approve] [--json] read or set mutation approval policy
@@ -138,14 +138,11 @@ export interface CliDeps {
 		apply(manifestPath: string, options?: { prune?: boolean }): Promise<SetupApplyResult>;
 	};
 	daemonService?: {
-		install(
-			source: string,
-			approved?: boolean,
-		): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }>;
+		install(source: string, approved?: boolean): Promise<{ output: string; spec?: { name: string; binPath: string } }>;
 		restart(
 			source: string,
 			approved?: boolean,
-		): Promise<{ output: string; restarted?: boolean; spec?: { name: string; binPath: string; descriptorPath: string } }>;
+		): Promise<{ output: string; restarted?: boolean; spec?: { name: string; binPath: string } }>;
 	};
 	piVersion?: { check(): Promise<PiVersionReport> };
 	selfUpdater?: { run(): Promise<SelfUpdateReport> };
@@ -166,7 +163,6 @@ interface Flags {
 	force: boolean;
 	prune: boolean;
 	machineLocal: boolean;
-	noService: boolean;
 	ecosystem: boolean;
 	self: boolean;
 	project?: string;
@@ -183,7 +179,6 @@ function parseFlags(rest: string[]): { flags: Flags; pos: string[] } {
 		force: false,
 		prune: false,
 		machineLocal: false,
-		noService: false,
 		ecosystem: false,
 		self: false,
 	};
@@ -198,7 +193,6 @@ function parseFlags(rest: string[]): { flags: Flags; pos: string[] } {
 		else if (a === "--force") flags.force = true;
 		else if (a === "--prune") flags.prune = true;
 		else if (a === "--machine-local") flags.machineLocal = true;
-		else if (a === "--no-service") flags.noService = true;
 		else if (a === "--ecosystem") flags.ecosystem = true;
 		else if (a === "--self") flags.self = true;
 		else if (a === "--limit" && i + 1 < rest.length) flags.limit = Number(rest[++i]) || SEARCH_DEFAULT_LIMIT;
@@ -570,36 +564,14 @@ const commands: Record<string, { usage: string; run: Command }> = {
 	},
 
 	install: {
-		usage: "packed install npm:<pkg>[@ver] | git:<host>/<owner>/<repo>[@ref] | https://… [--no-service] [--json]",
+		usage: "packed install npm:<pkg>[@ver] | git:<host>/<owner>/<repo>[@ref] | https://… [--json]",
 		async run(_rest, d, flags, pos) {
 			const source = pos[0] ?? "";
 			if (!SOURCE_RE.test(source)) return usageErr(`usage: ${commands.install!.usage}\n`);
 			try {
 				const output = await d.inst.install(source, { approved: flags.approved });
-				// A package's own persistent-service registration piggybacks on the same
-				// approval already granted for install -- both are the same "code-execution"
-				// mutation tier, so this isn't a new consent surface. Silent for the
-				// overwhelmingly common case (most Pi packages aren't daemons at all);
-				// --no-service skips the attempt entirely, and a genuine failure (detected
-				// a daemon but couldn't register it) is reported without failing the
-				// install itself, which already succeeded.
-				let serviceInstall: { detected: true; ok: boolean; output: string } | undefined;
-				if (!flags.noService && source.startsWith("npm:") && d.daemonService) {
-					try {
-						const svc = await d.daemonService.install(source, flags.approved);
-						serviceInstall = { detected: true, ok: true, output: svc.output };
-					} catch (e) {
-						if (!(e instanceof Error) || !(e as { notADaemon?: boolean }).notADaemon) {
-							serviceInstall = { detected: true, ok: false, output: e instanceof Error ? e.message : String(e) };
-						}
-					}
-				}
-				if (flags.json) return ok(`${JSON.stringify({ ok: true, source, output, ...(serviceInstall ? { serviceInstall } : {}) })}\n`);
-				let human = `${output}\n`;
-				if (serviceInstall?.ok) human += `${serviceInstall.output}\n`;
-				else if (serviceInstall && !serviceInstall.ok)
-					human += `note: detected a persistent-service daemon but could not register it: ${serviceInstall.output}\n`;
-				return ok(human);
+				if (flags.json) return ok(`${JSON.stringify({ ok: true, source, output })}\n`);
+				return ok(`${output}\n`);
 			} catch (e) {
 				const error = e instanceof Error ? e.message : String(e);
 				return flags.json ? fail(`${JSON.stringify({ ok: false, source, error })}\n`) : fail(`${error}\n`);
@@ -685,27 +657,10 @@ const commands: Record<string, { usage: string; run: Command }> = {
 						: `is already up to date${version ? ` at ${version}` : ""}`;
 					return ok(`${source} ${reason}\n`);
 				}
-				// Mirrors install's own auto-registration composition: same approval tier, silent for
-				// the common non-daemon case, a failure reported without failing the update itself.
-				let serviceRestart: { detected: true; ok: boolean; output: string } | undefined;
-				if (!flags.noService && source.startsWith("npm:") && d.daemonService) {
-					try {
-						const svc = await d.daemonService.restart(source, flags.approved);
-						serviceRestart = { detected: true, ok: true, output: svc.output };
-					} catch (e) {
-						if (!(e instanceof Error) || !(e as { notADaemon?: boolean }).notADaemon) {
-							serviceRestart = { detected: true, ok: false, output: e instanceof Error ? e.message : String(e) };
-						}
-					}
-				}
-				if (flags.json) return ok(`${JSON.stringify({ ok: true, source, ...outcome, ...(serviceRestart ? { serviceRestart } : {}) })}\n`);
+				if (flags.json) return ok(`${JSON.stringify({ ok: true, source, ...outcome })}\n`);
 				const transition =
 					outcome.previousVersion && outcome.currentVersion ? ` (${outcome.previousVersion} → ${outcome.currentVersion})` : "";
-				let human = `${outcome.output}${transition}\n`;
-				if (serviceRestart?.ok) human += `${serviceRestart.output}\n`;
-				else if (serviceRestart && !serviceRestart.ok)
-					human += `note: could not restart its persistent service: ${serviceRestart.output}\n`;
-				return ok(`${human}Reload Pi with /reload to activate the updated package.\n`);
+				return ok(`${outcome.output}${transition}\nReload Pi with /reload to activate the updated package.\n`);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				return flags.json
@@ -755,10 +710,7 @@ const commands: Record<string, { usage: string; run: Command }> = {
 	},
 };
 
-/** systemd user unit, delegating to vehicle-server's shared generateSystemdUnit -- idle self-exit
- * is disabled (PI_PACKED_IDLE_SECS=0) since systemd's own Restart=always takes over lifecycle. This
- * only ever prints (see the `service` command above); nothing here calls installUserService, so
- * descriptorPath is never actually read/written -- required by ServiceSpec's shape regardless. */
+/** Renders the legacy diagnostic unit without installing it; Armada owns service-manager mutation. */
 export function renderUnit(execPath: string, cliPath: string, piBin?: string): string {
 	// systemd does not read shell rc files: PI_BIN must be explicit so the
 	// daemon's install/remove execs can find the pi binary.
@@ -767,10 +719,11 @@ export function renderUnit(execPath: string, cliPath: string, piBin?: string): s
 	return generateSystemdUnit({
 		name: "pi-packed",
 		displayName: "pi-packed package service (Pi agent)",
+		version: VERSION,
 		binPath: execPath,
 		args: [cliPath, "serve"],
 		env,
-		descriptorPath: resolvePackedPaths().serviceDescriptor,
+		handlePath: resolvePackedPaths().handle,
 		// Packed's own client (connectPackageDaemon) never auto-spawns -- "start packed.service"
 		// or this unit's own systemd supervision is its only recovery path.
 		restartOnFailure: true,

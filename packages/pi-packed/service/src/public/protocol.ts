@@ -92,7 +92,6 @@ export type PackageResources = { source: string; name: string; scope: "global" |
 export interface ServiceSpecSummary {
 	name: string;
 	binPath: string;
-	descriptorPath: string;
 }
 
 /** Mirrors service/src/pi/pi-version.ts's CURRENT_PI_PACKAGE_NAME

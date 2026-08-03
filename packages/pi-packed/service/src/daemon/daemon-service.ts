@@ -26,13 +26,13 @@
  * on disk instead of asking for one more declaration.
  */
 import { readFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { resolveDaemonPaths } from "@danypops/vehicle-server/paths";
 import {
 	createNodeServiceInstallDeps,
 	installUserService,
 	isServiceInstalled,
-	type ServiceInstallDeps,
+	uninstallUserService,
 	type ServiceInstallResult,
 	type ServiceSpec,
 } from "@danypops/vehicle-server/service";
@@ -42,9 +42,14 @@ export interface DaemonServiceManifest {
 	/** Relative to the installed package's own root directory. */
 	binPath: string;
 	args?: string[];
-	/** Defaults to the bare npm package name (scope stripped). Used for the state-directory/unit name, matching each package's own service-install convention (e.g. web-spider.service). */
+	/** Defaults to the bare npm package name (scope stripped). */
 	name?: string;
 	displayName?: string;
+	/** Runtime handle filename inside the Vehicle's XDG runtime directory. */
+	handleFilename?: string;
+	workingDirectory?: string;
+	restartOnFailure?: boolean;
+	restartSec?: number;
 }
 
 export type ResolveDaemonServiceResult =
@@ -63,10 +68,16 @@ interface ResolvedDaemonEntrypoint {
 	args?: string[];
 	name: string;
 	displayName?: string;
+	handleFilename?: string;
+	workingDirectory?: string;
+	restartOnFailure?: boolean;
+	restartSec?: number;
+	version: string;
 }
 
 interface InstalledPackageJson {
 	name?: string;
+	version?: string;
 	bin?: string | Record<string, string>;
 	dependencies?: Record<string, string>;
 	packed?: { daemonService?: DaemonServiceManifest };
@@ -122,8 +133,8 @@ export function detectVehicleDaemonService(
 	if (!own) return undefined;
 
 	const ownBin = firstBinPath(own);
-	if (ownBin && dependsOnVehicle(own)) {
-		return { binPath: join(packageDir, ownBin), args: ["serve"], name: unscopedName(own.name ?? fallbackName) };
+	if (ownBin && dependsOnVehicle(own) && own.version) {
+		return { binPath: join(packageDir, ownBin), args: ["serve"], name: unscopedName(own.name ?? fallbackName), version: own.version };
 	}
 
 	for (const depName of Object.keys(own.dependencies ?? {})) {
@@ -135,8 +146,8 @@ export function detectVehicleDaemonService(
 			const dep = readPackageJson(depDir);
 			if (!dep) continue;
 			const depBin = firstBinPath(dep);
-			if (depBin && dependsOnVehicle(dep)) {
-				return { binPath: join(depDir, depBin), args: ["serve"], name: unscopedName(dep.name ?? depName) };
+			if (depBin && dependsOnVehicle(dep) && dep.version) {
+				return { binPath: join(depDir, depBin), args: ["serve"], name: unscopedName(dep.name ?? depName), version: dep.version };
 			}
 		}
 	}
@@ -146,20 +157,21 @@ export function detectVehicleDaemonService(
 function buildSpec(entry: ResolvedDaemonEntrypoint): ServiceSpec {
 	const paths = resolveDaemonPaths({
 		stateDirectoryName: entry.name,
-		// Only serviceDescriptor is used below; these three exist purely to
-		// satisfy resolveDaemonPaths()'s shared shape for a package this
-		// module never opens the db/token/handle of.
 		databaseFilename: "unused.db",
 		tokenFilename: "unused-token",
-		handleFilename: "unused-handle.json",
+		handleFilename: entry.handleFilename ?? "handle.json",
 		systemdUnitName: `${entry.name}.service`,
 	});
 	return {
 		name: entry.name,
 		displayName: entry.displayName,
+		version: entry.version,
 		binPath: entry.binPath,
 		args: entry.args,
-		descriptorPath: paths.serviceDescriptor,
+		handlePath: paths.handle,
+		workingDirectory: entry.workingDirectory,
+		...(entry.restartOnFailure === undefined ? {} : { restartOnFailure: entry.restartOnFailure }),
+		...(entry.restartSec === undefined ? {} : { restartSec: entry.restartSec }),
 	};
 }
 
@@ -187,6 +199,11 @@ export function resolveDaemonServiceSpec(piHome: string, source: string): Resolv
 				args: manifest.args,
 				name: manifest.name ?? unscopedName(packageName),
 				displayName: manifest.displayName,
+				handleFilename: manifest.handleFilename,
+				workingDirectory: manifest.workingDirectory,
+				restartOnFailure: manifest.restartOnFailure,
+				restartSec: manifest.restartSec,
+				version: pkg.version ?? "0.0.0",
 			}),
 		};
 	}
@@ -203,6 +220,10 @@ export function resolveDaemonServiceSpec(piHome: string, source: string): Resolv
 
 export interface DaemonServiceInstaller {
 	install(
+		piHome: string,
+		source: string,
+	): { ok: true; result: ServiceInstallResult; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean };
+	remove(
 		piHome: string,
 		source: string,
 	): { ok: true; result: ServiceInstallResult; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean };
@@ -223,6 +244,16 @@ export class RealDaemonServiceInstaller implements DaemonServiceInstaller {
 		return { ok: true, result, spec: resolved.spec };
 	}
 
+	remove(
+		piHome: string,
+		source: string,
+	): { ok: true; result: ServiceInstallResult; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean } {
+		const resolved = resolveDaemonServiceSpec(piHome, source);
+		if (!resolved.ok) return resolved;
+		const result = uninstallUserService(resolved.spec.name, createNodeServiceInstallDeps());
+		return { ok: true, result, spec: resolved.spec };
+	}
+
 	restart(
 		piHome: string,
 		source: string,
@@ -230,20 +261,15 @@ export class RealDaemonServiceInstaller implements DaemonServiceInstaller {
 		const resolved = resolveDaemonServiceSpec(piHome, source);
 		if (!resolved.ok) return resolved;
 		const deps = createNodeServiceInstallDeps();
-		if (!isServiceInstalled(resolved.spec, deps)) {
+		if (!isServiceInstalled(resolved.spec.name, deps)) {
 			return { ok: true, restarted: false, reason: `no persistent service is registered for ${resolved.spec.name}`, spec: resolved.spec };
 		}
-		const result = restartUserService(resolved.spec, deps);
-		return { ok: true, restarted: result.restarted, reason: result.reason, spec: resolved.spec };
+		const result = installUserService(resolved.spec, deps);
+		return {
+			ok: true,
+			restarted: result.installed,
+			...(result.installed ? {} : { reason: result.reason }),
+			spec: resolved.spec,
+		};
 	}
-}
-
-/** Linux/systemd only, matching installUserService's platform coverage order -- macOS/Windows report unsupported rather than guessing at launchctl/reg.exe restart equivalents this module doesn't implement. */
-export function restartUserService(spec: ServiceSpec, deps: ServiceInstallDeps): { restarted: boolean; reason?: string } {
-	const platform = deps.platform ?? process.platform;
-	if (platform !== "linux")
-		return { restarted: false, reason: `restart is not supported on platform "${platform}" yet -- restart ${spec.name} manually` };
-	const result = deps.runCommand("systemctl", ["--user", "restart", basename(spec.descriptorPath)]);
-	if (!result.ok) return { restarted: false, reason: `systemctl --user restart failed: ${result.output}` };
-	return { restarted: true };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ServiceSpec } from "@danypops/vehicle-server/service";
@@ -62,21 +62,38 @@ class FakeDaemonServiceInstaller implements DaemonServiceInstaller {
 	gotPiHome = "";
 	gotSource = "";
 	resolveFailure: string | undefined;
+	notADaemon = false;
 	installFailure: string | undefined;
+	removeGotPiHome = "";
+	removeGotSource = "";
 	restartGotPiHome = "";
 	restartGotSource = "";
 	restartResolveFailure: string | undefined;
+	restartNotADaemon = false;
 	restartReason: string | undefined;
 	restarted = true;
-	spec: ServiceSpec = { name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/tmp/probe.service" };
+	spec: ServiceSpec = {
+		name: "probe",
+		version: "1.0.0",
+		binPath: "/opt/probe/cli.js",
+		handlePath: "/tmp/probe.handle.json",
+	};
 	install(
 		piHome: string,
 		source: string,
 	): { ok: true; result: { installed: true } | { installed: false; reason: string }; spec: ServiceSpec } | { ok: false; reason: string } {
 		this.gotPiHome = piHome;
 		this.gotSource = source;
-		if (this.resolveFailure) return { ok: false, reason: this.resolveFailure };
+		if (this.resolveFailure) return { ok: false, reason: this.resolveFailure, ...(this.notADaemon ? { notADaemon: true } : {}) };
 		if (this.installFailure) return { ok: true, result: { installed: false, reason: this.installFailure }, spec: this.spec };
+		return { ok: true, result: { installed: true }, spec: this.spec };
+	}
+	remove(
+		piHome: string,
+		source: string,
+	): { ok: true; result: { installed: true }; spec: ServiceSpec } {
+		this.removeGotPiHome = piHome;
+		this.removeGotSource = source;
 		return { ok: true, result: { installed: true }, spec: this.spec };
 	}
 	restart(
@@ -85,7 +102,8 @@ class FakeDaemonServiceInstaller implements DaemonServiceInstaller {
 	): { ok: true; restarted: boolean; reason?: string; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean } {
 		this.restartGotPiHome = piHome;
 		this.restartGotSource = source;
-		if (this.restartResolveFailure) return { ok: false, reason: this.restartResolveFailure };
+		if (this.restartResolveFailure)
+			return { ok: false, reason: this.restartResolveFailure, ...(this.restartNotADaemon ? { notADaemon: true } : {}) };
 		return { ok: true, restarted: this.restarted, reason: this.restartReason, spec: this.spec };
 	}
 }
@@ -224,7 +242,10 @@ describe("service app", () => {
 
 	it("POST /install accepts valid sources, reports failures in-band", async () => {
 		const inst = new FakeInstaller();
-		const app = createApp(deps({ inst }));
+		const service = new FakeDaemonServiceInstaller();
+		service.resolveFailure = "not a Vehicle";
+		service.notADaemon = true;
+		const app = createApp(deps({ inst, daemonServiceInstaller: service }));
 		for (const source of ["npm:foo", "npm:@scope/pkg@1.2.3", "git:github.com/u/r@v1", "https://github.com/u/r"]) {
 			const res = await app.fetch(
 				new Request("http://x/install", {
@@ -250,6 +271,23 @@ describe("service app", () => {
 		const body = (await res.json()) as any;
 		expect(body.ok).toBe(false);
 		expect(body.output).toContain("npm ERR! 404");
+	});
+
+	it("POST /install configures an npm package's persistent Vehicle under the same approval", async () => {
+		const svc = new FakeDaemonServiceInstaller();
+		const piHome = mkdtempSync(join(tmpdir(), "packed-install-vehicle-"));
+		const app = createApp(deps({ daemonServiceInstaller: svc, piHome }));
+		const response = await app.fetch(
+			new Request("http://x/install", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ source: "npm:probe", approved: true }),
+			}),
+		);
+		expect(response.status).toBe(200);
+		expect(await response.json()).toMatchObject({ ok: true, service: { name: "probe", binPath: "/opt/probe/cli.js" } });
+		expect(svc.gotPiHome).toBe(piHome);
+		expect(svc.gotSource).toBe("npm:probe");
 	});
 
 	it("POST /install-service rejects invalid sources and requires approval, matching /install's own guard", async () => {
@@ -307,7 +345,7 @@ describe("service app", () => {
 		const body = (await res.json()) as any;
 		expect(body.ok).toBe(true);
 		expect(body.output).toContain("probe");
-		expect(body.spec).toEqual({ name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/tmp/probe.service" });
+		expect(body.spec).toEqual({ name: "probe", binPath: "/opt/probe/cli.js" });
 		expect(svc.gotPiHome).toBe(piHome);
 		expect(svc.gotSource).toBe("npm:web-spider-daemon");
 	});
@@ -340,7 +378,7 @@ describe("service app", () => {
 		const body = (await installFailure.json()) as any;
 		expect(body.ok).toBe(false);
 		expect(body.output).toContain("no supported Linux init system");
-		expect(body.spec).toEqual({ name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/tmp/probe.service" });
+		expect(body.spec).toEqual({ name: "probe", binPath: "/opt/probe/cli.js" });
 	});
 
 	it("POST /restart-service rejects invalid sources and requires approval, matching /install-service's own guard", async () => {
@@ -385,7 +423,7 @@ describe("service app", () => {
 		const body = (await res.json()) as any;
 		expect(body.ok).toBe(true);
 		expect(body.restarted).toBe(true);
-		expect(body.spec).toEqual({ name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/tmp/probe.service" });
+		expect(body.spec).toEqual({ name: "probe", binPath: "/opt/probe/cli.js" });
 		expect(svc.restartGotPiHome).toBe(piHome);
 		expect(svc.restartGotSource).toBe("npm:web-spider-daemon");
 	});
@@ -424,7 +462,10 @@ describe("service app", () => {
 
 	it("POST /update validates, authorizes, and delegates one Pi package source", async () => {
 		const inst = new FakeInstaller();
-		const app = createApp(deps({ inst }));
+		const service = new FakeDaemonServiceInstaller();
+		service.restartResolveFailure = "not a Vehicle";
+		service.restartNotADaemon = true;
+		const app = createApp(deps({ inst, daemonServiceInstaller: service }));
 		const denied = await app.fetch(
 			new Request("http://x/update", {
 				method: "POST",
@@ -450,6 +491,22 @@ describe("service app", () => {
 			pinned: false,
 		});
 		expect(inst.updated).toBe("npm:pi-lsp");
+	});
+
+	it("POST /update reconciles an installed Vehicle after a real package change", async () => {
+		const svc = new FakeDaemonServiceInstaller();
+		const piHome = mkdtempSync(join(tmpdir(), "packed-update-vehicle-"));
+		const app = createApp(deps({ daemonServiceInstaller: svc, piHome }));
+		const response = await app.fetch(
+			new Request("http://x/update", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ source: "npm:probe", approved: true }),
+			}),
+		);
+		expect(await response.json()).toMatchObject({ ok: true, serviceReconciled: true });
+		expect(svc.restartGotPiHome).toBe(piHome);
+		expect(svc.restartGotSource).toBe("npm:probe");
 	});
 
 	it("POST /update reports an honest no-op instead of trusting pi's always-0-exit-code text", async () => {
@@ -525,6 +582,28 @@ describe("service app", () => {
 		);
 		expect(res.status).toBe(200);
 		expect(inst.removed).toBe("npm:pi-lsp");
+	});
+
+	it("POST /remove removes declared Vehicle state before deleting the package", async () => {
+		const piHome = mkdtempSync(join(tmpdir(), "packed-remove-vehicle-"));
+		const packageDir = join(piHome, "npm", "node_modules", "probe");
+		mkdirSync(packageDir, { recursive: true });
+		writeFileSync(
+			join(packageDir, "package.json"),
+			JSON.stringify({ name: "probe", version: "1.0.0", packed: { daemonService: { binPath: "cli.js" } } }),
+		);
+		const svc = new FakeDaemonServiceInstaller();
+		const app = createApp(deps({ piHome, daemonServiceInstaller: svc }));
+		const response = await app.fetch(
+			new Request("http://x/remove", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ name: "probe", approved: true }),
+			}),
+		);
+		expect((await response.json()) as unknown).toMatchObject({ ok: true, serviceRemoved: true });
+		expect(svc.removeGotPiHome).toBe(piHome);
+		expect(svc.removeGotSource).toBe("npm:probe");
 	});
 
 	it("GET /catalog serves the SQLite mirror", async () => {

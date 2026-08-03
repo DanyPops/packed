@@ -2,8 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ServiceInstallDeps } from "@danypops/vehicle-server/service";
-import { detectVehicleDaemonService, resolveDaemonServiceSpec, restartUserService } from "../src/daemon/daemon-service.ts";
+import { detectVehicleDaemonService, resolveDaemonServiceSpec } from "../src/daemon/daemon-service.ts";
 
 function fakePiHome(): string {
 	return mkdtempSync(join(tmpdir(), "packed-daemon-service-"));
@@ -26,7 +25,12 @@ function writeRawPackage(dir: string, pkg: Record<string, unknown>): void {
 describe("resolveDaemonServiceSpec", () => {
 	it("builds a ServiceSpec from a package's packed.daemonService manifest", () => {
 		const piHome = fakePiHome();
-		writePackage(piHome, "@danypops/web-spider-daemon", { binPath: "dist/cli.js", args: ["serve"] });
+		writePackage(piHome, "@danypops/web-spider-daemon", {
+			binPath: "dist/cli.js",
+			args: ["serve"],
+			restartOnFailure: true,
+			restartSec: 2,
+		});
 
 		const result = resolveDaemonServiceSpec(piHome, "npm:@danypops/web-spider-daemon");
 		expect(result).toEqual({
@@ -34,9 +38,13 @@ describe("resolveDaemonServiceSpec", () => {
 			spec: {
 				name: "web-spider-daemon",
 				displayName: undefined,
+				version: "1.0.0",
 				binPath: join(piHome, "npm", "node_modules", "@danypops/web-spider-daemon", "dist/cli.js"),
 				args: ["serve"],
-				descriptorPath: expect.stringContaining("web-spider-daemon") as unknown as string,
+				handlePath: expect.stringContaining("web-spider-daemon") as unknown as string,
+				workingDirectory: undefined,
+				restartOnFailure: true,
+				restartSec: 2,
 			},
 		});
 	});
@@ -92,9 +100,11 @@ describe("resolveDaemonServiceSpec", () => {
 			spec: {
 				name: "papyrus",
 				displayName: undefined,
+				version: "1.0.0",
 				binPath: join(dir, "src/cli.ts"),
 				args: ["serve"],
-				descriptorPath: expect.stringContaining("papyrus") as unknown as string,
+				handlePath: expect.stringContaining("papyrus") as unknown as string,
+				workingDirectory: undefined,
 			},
 		});
 	});
@@ -186,53 +196,5 @@ describe("resolveDaemonServiceSpec", () => {
 		expect(detectVehicleDaemonService(dir, "some-cli")).toBeUndefined();
 		const result = resolveDaemonServiceSpec(piHome, "npm:some-cli");
 		expect(result.ok).toBe(false);
-	});
-});
-
-function fakeInstallDeps(over: Partial<ServiceInstallDeps> = {}): ServiceInstallDeps {
-	return {
-		platform: "linux",
-		writeFile: () => {},
-		readFile: () => null,
-		removeFile: () => {},
-		fileExists: () => false,
-		mkdirp: () => {},
-		runCommand: () => ({ ok: true, output: "" }),
-		which: () => true,
-		...over,
-	};
-}
-
-describe("restartUserService", () => {
-	const spec = { name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/home/user/.config/systemd/user/probe.service" };
-
-	it("restarts via systemctl --user restart, using the descriptor's basename as the unit name", () => {
-		const calls: Array<{ command: string; args: string[] }> = [];
-		const deps = fakeInstallDeps({
-			runCommand: (command, args) => {
-				calls.push({ command, args });
-				return { ok: true, output: "" };
-			},
-		});
-
-		const result = restartUserService(spec, deps);
-		expect(result).toEqual({ restarted: true });
-		expect(calls).toEqual([{ command: "systemctl", args: ["--user", "restart", "probe.service"] }]);
-	});
-
-	it("reports a real systemctl failure without throwing", () => {
-		const deps = fakeInstallDeps({ runCommand: () => ({ ok: false, output: "Unit probe.service not loaded" }) });
-
-		const result = restartUserService(spec, deps);
-		expect(result.restarted).toBe(false);
-		expect(result.reason).toContain("Unit probe.service not loaded");
-	});
-
-	it("refuses on a platform with no supported restart mechanism, rather than guessing at one", () => {
-		const deps = fakeInstallDeps({ platform: "darwin" });
-
-		const result = restartUserService(spec, deps);
-		expect(result.restarted).toBe(false);
-		expect(result.reason).toContain('platform "darwin"');
 	});
 });

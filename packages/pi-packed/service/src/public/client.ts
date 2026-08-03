@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AuthenticatedRpcClient } from "@danypops/vehicle-client/rpc-client";
 import { readDaemonHandle, resolveDaemonPaths } from "@danypops/vehicle-server/paths";
-import { isServiceInstalled as vehicleIsServiceInstalled } from "@danypops/vehicle-server/service";
+import { createNodeServiceInstallDeps, isServiceInstalled as vehicleIsServiceInstalled } from "@danypops/vehicle-server/service";
 import type {
 	ExtensionOperationInputs,
 	ExtensionOperationName,
@@ -89,21 +89,9 @@ export function resolvePackedClientPaths(options: PackedPathOptions = {}): Packe
 	return { token: paths.token, handle: paths.handle, serviceDescriptor: paths.serviceDescriptor };
 }
 
-/** Real, file-existence-only check on Linux/macOS (Windows checks a
- * registry Run key instead) -- cheap, synchronous, no subprocess. */
-function isPackedServiceInstalled(serviceDescriptor: string): boolean {
-	return vehicleIsServiceInstalled(
-		{ name: SERVICE_NAME, binPath: "", descriptorPath: serviceDescriptor },
-		{
-			fileExists: existsSync,
-			writeFile: () => {},
-			readFile: () => null,
-			removeFile: () => {},
-			mkdirp: () => {},
-			runCommand: () => ({ ok: false, output: "" }),
-			which: () => false,
-		},
-	);
+/** Checks Armada's authoritative desired fleet rather than native descriptor files. */
+function isPackedServiceInstalled(): boolean {
+	return vehicleIsServiceInstalled(SERVICE_NAME, createNodeServiceInstallDeps());
 }
 
 export type FetchTransport = (request: Request) => Promise<Response>;
@@ -251,7 +239,7 @@ export async function ensureClient(deps: EnsureClientDeps): Promise<PackedClient
 	const waitedSeconds = (attempts * delayMs) / 1000;
 	throw new Error(
 		serviceInstalled
-			? `Packed daemon did not become ready within ${waitedSeconds} seconds, but a supervised service is installed -- check it directly (e.g. systemctl --user status pi-packed.service) rather than auto-spawning a second one`
+			? `Packed daemon did not become ready within ${waitedSeconds} seconds, but a managed service is installed -- run packed doctor rather than auto-spawning a second one`
 			: `Packed daemon did not become ready within ${waitedSeconds} seconds`,
 	);
 }
@@ -259,7 +247,7 @@ export async function ensureClient(deps: EnsureClientDeps): Promise<PackedClient
 export async function ensurePackedClient(paths = resolvePackedClientPaths(), transport: FetchTransport = fetch): Promise<PackedClient> {
 	return ensureClient({
 		connect: () => connectPackedClient(paths, transport),
-		isServiceInstalled: () => isPackedServiceInstalled(paths.serviceDescriptor),
+		isServiceInstalled: () => isPackedServiceInstalled(),
 		spawn: () => {
 			const override = process.env.PI_PACKED_BIN;
 			const command = override ?? process.env.PI_PACKED_BUN ?? "bun";

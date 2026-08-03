@@ -79,29 +79,33 @@ class FakeDaemonServiceInstaller {
 	restartGotSource = "";
 	restartApproved = false;
 	restartFail = false;
-	async install(
-		source: string,
-		approved?: boolean,
-	): Promise<{ output: string; spec?: { name: string; binPath: string; descriptorPath: string } }> {
+	async install(source: string, approved?: boolean) {
 		this.gotSource = source;
 		this.approved = approved === true;
 		if (this.fail) throw new Error("install-service failed");
 		return {
 			output: `installed a persistent service for ${source}`,
-			spec: { name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/tmp/probe.service" },
+			spec: {
+				name: "probe",
+				version: "1.0.0",
+				binPath: "/opt/probe/cli.js",
+				handlePath: "/tmp/probe.handle.json",
+			},
 		};
 	}
-	async restart(
-		source: string,
-		approved?: boolean,
-	): Promise<{ output: string; restarted?: boolean; spec?: { name: string; binPath: string; descriptorPath: string } }> {
+	async restart(source: string, approved?: boolean) {
 		this.restartGotSource = source;
 		this.restartApproved = approved === true;
 		if (this.restartFail) throw new Error("restart-service failed");
 		return {
 			output: `restarted the persistent service for ${source}`,
 			restarted: true,
-			spec: { name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/tmp/probe.service" },
+			spec: {
+				name: "probe",
+				version: "1.0.0",
+				binPath: "/opt/probe/cli.js",
+				handlePath: "/tmp/probe.handle.json",
+			},
 		};
 	}
 }
@@ -454,67 +458,15 @@ describe("CLI", () => {
 	it("install runs with stable human and JSON output", async () => {
 		const d = deps();
 		expect((await cliRun(["install", "npm:foo"], d)).code).toBe(1);
-		// --no-service scopes this test to the base install output; service
-		// auto-registration composition has its own dedicated tests below.
-		const human = await cliRun(["install", "npm:foo", "--approve", "--no-service"], d);
+		const human = await cliRun(["install", "npm:foo", "--approve"], d);
 		expect(human.code).toBe(0);
 		expect(human.out).toContain("Installed npm:foo");
 		expect((d.inst as FakeInstaller).approved).toBe(true);
-		const json = await cliRun(["install", "npm:foo", "--approve", "--no-service", "--json"], d);
+		const json = await cliRun(["install", "npm:foo", "--approve", "--json"], d);
 		expect(json.code).toBe(0);
 		expect(JSON.parse(json.out)).toEqual({ ok: true, source: "npm:foo", output: "Installed npm:foo" });
 	});
 
-	it("install auto-registers a detected daemon service under the same approval, silently for a non-daemon package", async () => {
-		const d = deps();
-		const human = await cliRun(["install", "npm:foo", "--approve"], d);
-		expect(human.code).toBe(0);
-		expect(human.out).toContain("Installed npm:foo");
-		expect(human.out).toContain("installed a persistent service for npm:foo");
-		expect((d.daemonService as FakeDaemonServiceInstaller).approved).toBe(true);
-		const json = await cliRun(["install", "npm:foo", "--approve", "--json"], d);
-		expect(json.code).toBe(0);
-		expect(JSON.parse(json.out)).toEqual({
-			ok: true,
-			source: "npm:foo",
-			output: "Installed npm:foo",
-			serviceInstall: { detected: true, ok: true, output: "installed a persistent service for npm:foo" },
-		});
-
-		// notADaemon: the overwhelmingly common case (an ordinary, non-daemon package) stays silent.
-		const notADaemon = deps();
-		(notADaemon.daemonService as FakeDaemonServiceInstaller).install = async () => {
-			throw Object.assign(
-				new Error("foo does not declare a packed.daemonService manifest and no Vehicle-shaped daemon dependency was detected"),
-				{ notADaemon: true },
-			);
-		};
-		const silent = await cliRun(["install", "npm:foo", "--approve", "--json"], notADaemon);
-		expect(JSON.parse(silent.out)).toEqual({ ok: true, source: "npm:foo", output: "Installed npm:foo" });
-
-		// A genuine failure (a daemon was detected but registration itself failed) is reported
-		// without failing the install, which already succeeded.
-		const realFailure = deps();
-		(realFailure.daemonService as FakeDaemonServiceInstaller).fail = true;
-		const failed = await cliRun(["install", "npm:foo", "--approve", "--json"], realFailure);
-		expect(failed.code).toBe(0);
-		expect(JSON.parse(failed.out)).toEqual({
-			ok: true,
-			source: "npm:foo",
-			output: "Installed npm:foo",
-			serviceInstall: { detected: true, ok: false, output: "install-service failed" },
-		});
-
-		// --no-service skips the attempt entirely -- the daemonService fake is never called.
-		const skipped = deps();
-		await cliRun(["install", "npm:foo", "--approve", "--no-service"], skipped);
-		expect((skipped.daemonService as FakeDaemonServiceInstaller).gotSource).toBe("");
-
-		// A non-npm source never attempts service detection -- daemon-service resolution only supports npm: today.
-		const gitSource = deps();
-		await cliRun(["install", "git:github.com/u/r@v1", "--approve"], gitSource);
-		expect((gitSource.daemonService as FakeDaemonServiceInstaller).gotSource).toBe("");
-	});
 
 	it("install-service validates source", async () => {
 		const d = deps();
@@ -536,7 +488,12 @@ describe("CLI", () => {
 			ok: true,
 			source: "npm:foo",
 			output: "installed a persistent service for npm:foo",
-			spec: { name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/tmp/probe.service" },
+			spec: {
+				name: "probe",
+				version: "1.0.0",
+				binPath: "/opt/probe/cli.js",
+				handlePath: "/tmp/probe.handle.json",
+			},
 		});
 	});
 
@@ -558,30 +515,10 @@ describe("CLI", () => {
 	it("update delegates one configured source with stable output and approval", async () => {
 		const d = deps();
 		expect((await cliRun(["update", "npm:foo"], d)).code).toBe(1);
-		// --no-service scopes this test to the base update output; service restart
-		// composition has its own dedicated test below, mirroring install's own split.
-		const human = await cliRun(["update", "npm:foo", "--approve", "--no-service"], d);
+		const human = await cliRun(["update", "npm:foo", "--approve"], d);
 		expect(human.out).toContain("Updated npm:foo");
 		expect((d.inst as FakeInstaller).updated).toBe("npm:foo");
 		expect((d.inst as FakeInstaller).approved).toBe(true);
-		const json = await cliRun(["update", "npm:foo", "--approve", "--no-service", "--json"], d);
-		expect(JSON.parse(json.out)).toEqual({
-			ok: true,
-			source: "npm:foo",
-			output: "Updated npm:foo",
-			reloadRequired: true,
-			alreadyUpToDate: false,
-			pinned: false,
-		});
-	});
-
-	it("update restarts a registered daemon service after a real change, silently for a non-daemon package", async () => {
-		const d = deps();
-		const human = await cliRun(["update", "npm:foo", "--approve"], d);
-		expect(human.code).toBe(0);
-		expect(human.out).toContain("Updated npm:foo");
-		expect(human.out).toContain("restarted the persistent service for npm:foo");
-		expect((d.daemonService as FakeDaemonServiceInstaller).restartApproved).toBe(true);
 		const json = await cliRun(["update", "npm:foo", "--approve", "--json"], d);
 		expect(JSON.parse(json.out)).toEqual({
 			ok: true,
@@ -590,46 +527,9 @@ describe("CLI", () => {
 			reloadRequired: true,
 			alreadyUpToDate: false,
 			pinned: false,
-			serviceRestart: { detected: true, ok: true, output: "restarted the persistent service for npm:foo" },
 		});
-
-		// notADaemon: the overwhelmingly common case (an ordinary, non-daemon package) stays silent.
-		const notADaemon = deps();
-		(notADaemon.daemonService as FakeDaemonServiceInstaller).restart = async () => {
-			throw Object.assign(
-				new Error("foo does not declare a packed.daemonService manifest and no Vehicle-shaped daemon dependency was detected"),
-				{ notADaemon: true },
-			);
-		};
-		const silent = await cliRun(["update", "npm:foo", "--approve", "--json"], notADaemon);
-		expect(JSON.parse(silent.out)).toEqual({
-			ok: true,
-			source: "npm:foo",
-			output: "Updated npm:foo",
-			reloadRequired: true,
-			alreadyUpToDate: false,
-			pinned: false,
-		});
-
-		// A genuine failure (a daemon was detected but restarting it failed) is reported
-		// without failing the update, which already succeeded.
-		const realFailure = deps();
-		(realFailure.daemonService as FakeDaemonServiceInstaller).restartFail = true;
-		const failed = await cliRun(["update", "npm:foo", "--approve", "--json"], realFailure);
-		expect(failed.code).toBe(0);
-		const failedBody = JSON.parse(failed.out);
-		expect(failedBody.serviceRestart).toEqual({ detected: true, ok: false, output: "restart-service failed" });
-
-		// --no-service skips the attempt entirely -- the daemonService fake is never called.
-		const skipped = deps();
-		await cliRun(["update", "npm:foo", "--approve", "--no-service"], skipped);
-		expect((skipped.daemonService as FakeDaemonServiceInstaller).restartGotSource).toBe("");
-
-		// A non-npm source never attempts service detection -- daemon-service resolution only supports npm: today.
-		const gitSource = deps({ inst: new FakeInstaller() });
-		await cliRun(["update", "git:github.com/u/r@v1", "--approve"], gitSource);
-		expect((gitSource.daemonService as FakeDaemonServiceInstaller).restartGotSource).toBe("");
 	});
+
 
 	it("update --self requires approval under the guarded default, same as every other mutation", async () => {
 		const d = deps({
@@ -851,14 +751,27 @@ describe("CLI", () => {
 			},
 			async installService(source) {
 				calls.push(`installService:${source}`);
-				return { output: source, spec: { name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/tmp/probe.service" } };
+				return {
+					output: source,
+					spec: {
+						name: "probe",
+						version: "1.0.0",
+						binPath: "/opt/probe/cli.js",
+						handlePath: "/tmp/probe.handle.json",
+					},
+				};
 			},
 			async restartService(source) {
 				calls.push(`restartService:${source}`);
 				return {
 					output: source,
 					restarted: true,
-					spec: { name: "probe", binPath: "/opt/probe/cli.js", descriptorPath: "/tmp/probe.service" },
+					spec: {
+						name: "probe",
+						version: "1.0.0",
+						binPath: "/opt/probe/cli.js",
+						handlePath: "/tmp/probe.handle.json",
+					},
 				};
 			},
 			async remove(name) {
@@ -1050,7 +963,7 @@ describe("CLI", () => {
 			const d = deps({ piHome });
 
 			const clean = await cliRun(["doctor", "--json"], d);
-			expect(clean.code).toBe(0);
+			expect(clean.code, clean.out).toBe(0);
 			expect(JSON.parse(clean.out)).toMatchObject({ ok: true, conflicts: [] });
 
 			const withProject = await cliRun(["doctor", "--project", projectRoot, "--json"], d);
@@ -1108,12 +1021,17 @@ describe("daemon client", () => {
 				install: () => ({
 					ok: true,
 					result: { installed: true },
-					spec: { name: "pi-lsp", binPath: "/opt/pi-lsp/cli.js", descriptorPath: "/tmp/pi-lsp.service" },
+					spec: { name: "pi-lsp", version: "1.0.0", binPath: "/opt/pi-lsp/cli.js", handlePath: "/tmp/pi-lsp.handle.json" },
+				}),
+				remove: () => ({
+					ok: true,
+					result: { installed: true },
+					spec: { name: "pi-lsp", version: "1.0.0", binPath: "/opt/pi-lsp/cli.js", handlePath: "/tmp/pi-lsp.handle.json" },
 				}),
 				restart: () => ({
 					ok: true,
 					restarted: true,
-					spec: { name: "pi-lsp", binPath: "/opt/pi-lsp/cli.js", descriptorPath: "/tmp/pi-lsp.service" },
+					spec: { name: "pi-lsp", version: "1.0.0", binPath: "/opt/pi-lsp/cli.js", handlePath: "/tmp/pi-lsp.handle.json" },
 				}),
 			},
 			token: daemonToken,
@@ -1244,11 +1162,11 @@ describe("daemon client", () => {
 		expect((await client.setupApply(`${checkRoot}/pi-setup.json`, true)).ok).toBe(true);
 		expect(await client.security()).toEqual({ mutationApproval: "always" });
 		await expect(client.install("npm:pi-lsp")).rejects.toThrow("approval required");
-		expect(await client.install("npm:pi-lsp", true)).toBe("Installed npm:pi-lsp");
+		expect(await client.install("npm:pi-lsp", true)).toBe("Installed npm:pi-lsp\ninstalled persistent Vehicle pi-lsp");
 		await expect(client.installService("npm:pi-lsp")).rejects.toThrow("approval required");
 		expect(await client.installService("npm:pi-lsp", true)).toEqual({
 			output: "installed a persistent service for pi-lsp",
-			spec: { name: "pi-lsp", binPath: "/opt/pi-lsp/cli.js", descriptorPath: "/tmp/pi-lsp.service" },
+			spec: { name: "pi-lsp", binPath: "/opt/pi-lsp/cli.js" },
 		});
 		expect(await client.remove("pi-lsp", true)).toBe("Removed npm:pi-lsp");
 		expect(await client.piStatus()).toEqual({ current: "0.82.1", latest: "0.83.0", upToDate: false });
@@ -1261,7 +1179,9 @@ describe("daemon client", () => {
 			currentVersion: undefined,
 		});
 		const installer = new PackageDaemonInstaller(client);
-		expect(await installer.install("npm:pi-lsp@1.0.0", { approved: true })).toBe("Installed npm:pi-lsp@1.0.0");
+		expect(await installer.install("npm:pi-lsp@1.0.0", { approved: true })).toBe(
+			"Installed npm:pi-lsp@1.0.0\ninstalled persistent Vehicle pi-lsp",
+		);
 		expect(await installer.remove("npm:pi-lsp", { approved: true })).toBe("Removed npm:pi-lsp");
 		expect((await installer.update("npm:pi-lsp", { approved: true })).output).toBe("Updated npm:pi-lsp");
 		expect(await client.setMutationApproval("never", true)).toEqual({ mutationApproval: "never" });

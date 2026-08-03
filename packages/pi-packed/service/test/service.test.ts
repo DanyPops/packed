@@ -78,28 +78,25 @@ class FakeDaemonServiceInstaller implements DaemonServiceInstaller {
 		binPath: "/opt/probe/cli.js",
 		handlePath: "/tmp/probe.handle.json",
 	};
-	install(
+	async install(
 		piHome: string,
 		source: string,
-	): { ok: true; result: { installed: true } | { installed: false; reason: string }; spec: ServiceSpec } | { ok: false; reason: string } {
+	): Promise<{ ok: true; result: { installed: true } | { installed: false; reason: string }; spec: ServiceSpec } | { ok: false; reason: string }> {
 		this.gotPiHome = piHome;
 		this.gotSource = source;
 		if (this.resolveFailure) return { ok: false, reason: this.resolveFailure, ...(this.notADaemon ? { notADaemon: true } : {}) };
 		if (this.installFailure) return { ok: true, result: { installed: false, reason: this.installFailure }, spec: this.spec };
 		return { ok: true, result: { installed: true }, spec: this.spec };
 	}
-	remove(
-		piHome: string,
-		source: string,
-	): { ok: true; result: { installed: true }; spec: ServiceSpec } {
+	async remove(piHome: string, source: string): Promise<{ ok: true; result: { installed: true }; spec: ServiceSpec }> {
 		this.removeGotPiHome = piHome;
 		this.removeGotSource = source;
 		return { ok: true, result: { installed: true }, spec: this.spec };
 	}
-	restart(
+	async restart(
 		piHome: string,
 		source: string,
-	): { ok: true; restarted: boolean; reason?: string; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean } {
+	): Promise<{ ok: true; restarted: boolean; reason?: string; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean }> {
 		this.restartGotPiHome = piHome;
 		this.restartGotSource = source;
 		if (this.restartResolveFailure)

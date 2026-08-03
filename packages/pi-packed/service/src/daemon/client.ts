@@ -49,6 +49,7 @@ export interface PackageDaemonPort {
 	install(source: string, approved?: boolean): Promise<string>;
 	installService(source: string, approved?: boolean): Promise<{ output: string; spec?: ServiceSummary }>;
 	restartService(source: string, approved?: boolean): Promise<{ output: string; restarted?: boolean; spec?: ServiceSummary }>;
+	reconcileServices(approved?: boolean, projectRoot?: string): Promise<OperationOutputs["package.reconcile_services"]>;
 	remove(name: string, approved?: boolean): Promise<string>;
 	update(source: string, approved?: boolean): Promise<UpdateOutcome>;
 	piStatus(): Promise<PiVersionReport>;
@@ -252,6 +253,12 @@ export class PackageDaemonClient implements PackageDaemonPort {
 		return { output: result.output, restarted: result.restarted, spec: result.spec };
 	}
 
+	async reconcileServices(approved = false, projectRoot?: string): Promise<OperationOutputs["package.reconcile_services"]> {
+		const result = await this.call("package.reconcile_services", { approved, projectRoot });
+		if (!result.ok) throw new PackageDaemonError(result.output || "failed to reconcile Vehicle services", "package.reconcile_services");
+		return result;
+	}
+
 	async remove(name: string, approved = false): Promise<string> {
 		const result = await this.call("package.remove", { name, approved });
 		if (!result.ok) throw new PackageDaemonError(result.output || `failed to remove ${name}`, "package.remove");
@@ -313,6 +320,7 @@ export class DaemonBackedInstaller implements Installer {
 export interface DaemonServiceInstallerPort {
 	install(source: string, approved?: boolean): Promise<{ output: string; spec?: ServiceSummary }>;
 	restart(source: string, approved?: boolean): Promise<{ output: string; restarted?: boolean; spec?: ServiceSummary }>;
+	reconcileAll(approved?: boolean, projectRoot?: string): Promise<OperationOutputs["package.reconcile_services"]>;
 }
 
 export class DaemonBackedDaemonServiceInstaller implements DaemonServiceInstallerPort {
@@ -325,6 +333,9 @@ export class DaemonBackedDaemonServiceInstaller implements DaemonServiceInstalle
 	}
 	async install(source: string, approved?: boolean): Promise<{ output: string; spec?: ServiceSummary }> {
 		return (await connectPackageDaemon(this.paths)).installService(source, approved);
+	}
+	async reconcileAll(approved?: boolean, projectRoot?: string): Promise<OperationOutputs["package.reconcile_services"]> {
+		return (await connectPackageDaemon(this.paths)).reconcileServices(approved, projectRoot);
 	}
 }
 

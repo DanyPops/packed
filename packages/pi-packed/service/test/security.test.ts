@@ -26,6 +26,7 @@ describe("package permission policy", () => {
 			"install",
 			"install_service",
 			"restart_service",
+			"reconcile_services",
 			"setup.apply",
 			"update",
 			"update.self",

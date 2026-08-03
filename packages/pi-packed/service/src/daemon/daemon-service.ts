@@ -27,16 +27,16 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { createVehicleRegistrar, type VehicleRegistrar } from "@danypops/armada";
 import { resolveDaemonPaths } from "@danypops/vehicle-server/paths";
 import {
-	createNodeServiceInstallDeps,
-	installUserService,
-	isServiceInstalled,
-	uninstallUserService,
+	isVehicleServiceRegistered,
+	registerVehicleService,
 	type ServiceInstallResult,
 	type ServiceSpec,
+	unregisterVehicleService,
 } from "@danypops/vehicle-server/service";
-import { npmPackageName } from "../packages/installed.ts";
+import { npmPackageName, readInstalledPackagesAcrossScopes } from "../packages/installed.ts";
 
 export interface DaemonServiceManifest {
 	/** Relative to the installed package's own root directory. */
@@ -218,53 +218,117 @@ export function resolveDaemonServiceSpec(piHome: string, source: string): Resolv
 	};
 }
 
+export interface ReconcileAllResult {
+	reconciled: Array<{ packageName: string; vehicleName: string; installed: boolean; reason?: string }>;
+	skipped: number;
+	failed: Array<{ packageName: string; reason: string }>;
+}
+
+/** Matches readPackageDeclarations' own bound -- a reconcile-all sweep never processes an unbounded package list. */
+const MAX_RECONCILE_PACKAGES = 500;
+
+/**
+ * Sweeps every installed Packed package (global scope, plus a project's own
+ * pins when projectRoot is given), resolves each to a Vehicle-shaped daemon
+ * exactly as install()/restart() already do per-package, and upserts +
+ * reconciles it through Armada. This is what makes Armada authoritative for
+ * every Vehicle Packed knows about, not just the one source a single
+ * install/update call happened to touch -- it also self-heals a Vehicle
+ * whose daemon package version bumped as someone else's transitive
+ * dependency, and a Vehicle a prior Packed version never registered at all.
+ * Idempotent and safe to call unconditionally: a non-daemon package costs
+ * one or two file reads (see resolveDaemonServiceSpec) and never reaches
+ * Armada. Two packages that resolve to the same Vehicle (a Pi extension and
+ * its own daemon dependency, both separately Packed-tracked) reconcile it
+ * once, not twice.
+ */
+export async function reconcileAllDaemonServices(
+	piHome: string,
+	projectRoot: string | undefined,
+	installer: Pick<DaemonServiceInstaller, "install">,
+): Promise<ReconcileAllResult> {
+	const packages = readInstalledPackagesAcrossScopes(piHome, projectRoot).slice(0, MAX_RECONCILE_PACKAGES);
+	const reconciled: ReconcileAllResult["reconciled"] = [];
+	const failed: ReconcileAllResult["failed"] = [];
+	const seen = new Set<string>();
+	let skipped = 0;
+	for (const pkg of packages) {
+		const resolved = await installer.install(piHome, `npm:${pkg.name}`);
+		if (!resolved.ok) {
+			if (resolved.notADaemon) {
+				skipped++;
+				continue;
+			}
+			failed.push({ packageName: pkg.name, reason: resolved.reason });
+			continue;
+		}
+		if (seen.has(resolved.spec.name)) continue;
+		seen.add(resolved.spec.name);
+		reconciled.push({
+			packageName: pkg.name,
+			vehicleName: resolved.spec.name,
+			installed: resolved.result.installed,
+			...(resolved.result.installed ? {} : { reason: resolved.result.reason }),
+		});
+	}
+	return { reconciled, skipped, failed };
+}
+
 export interface DaemonServiceInstaller {
 	install(
 		piHome: string,
 		source: string,
-	): { ok: true; result: ServiceInstallResult; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean };
+	): Promise<{ ok: true; result: ServiceInstallResult; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean }>;
 	remove(
 		piHome: string,
 		source: string,
-	): { ok: true; result: ServiceInstallResult; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean };
+	): Promise<{ ok: true; result: ServiceInstallResult; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean }>;
 	restart(
 		piHome: string,
 		source: string,
-	): { ok: true; restarted: boolean; reason?: string; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean };
+	): Promise<{ ok: true; restarted: boolean; reason?: string; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean }>;
 }
 
+/**
+ * Calls Armada's own VehicleRegistrar directly (in-process), rather than
+ * shelling out to its CLI as a subprocess -- the same registration logic
+ * `@danypops/armada` exposes to any other library consumer, not a Packed-
+ * specific reimplementation. One registrar per instance so its manifest
+ * path/native controller are resolved once, not on every call.
+ */
 export class RealDaemonServiceInstaller implements DaemonServiceInstaller {
-	install(
+	constructor(private readonly registrar: VehicleRegistrar = createVehicleRegistrar()) {}
+
+	async install(
 		piHome: string,
 		source: string,
-	): { ok: true; result: ServiceInstallResult; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean } {
+	): Promise<{ ok: true; result: ServiceInstallResult; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean }> {
 		const resolved = resolveDaemonServiceSpec(piHome, source);
 		if (!resolved.ok) return resolved;
-		const result = installUserService(resolved.spec, createNodeServiceInstallDeps());
+		const result = await registerVehicleService(resolved.spec, this.registrar);
 		return { ok: true, result, spec: resolved.spec };
 	}
 
-	remove(
+	async remove(
 		piHome: string,
 		source: string,
-	): { ok: true; result: ServiceInstallResult; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean } {
+	): Promise<{ ok: true; result: ServiceInstallResult; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean }> {
 		const resolved = resolveDaemonServiceSpec(piHome, source);
 		if (!resolved.ok) return resolved;
-		const result = uninstallUserService(resolved.spec.name, createNodeServiceInstallDeps());
+		const result = await unregisterVehicleService(resolved.spec.name, this.registrar);
 		return { ok: true, result, spec: resolved.spec };
 	}
 
-	restart(
+	async restart(
 		piHome: string,
 		source: string,
-	): { ok: true; restarted: boolean; reason?: string; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean } {
+	): Promise<{ ok: true; restarted: boolean; reason?: string; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean }> {
 		const resolved = resolveDaemonServiceSpec(piHome, source);
 		if (!resolved.ok) return resolved;
-		const deps = createNodeServiceInstallDeps();
-		if (!isServiceInstalled(resolved.spec.name, deps)) {
+		if (!(await isVehicleServiceRegistered(resolved.spec.name, this.registrar))) {
 			return { ok: true, restarted: false, reason: `no persistent service is registered for ${resolved.spec.name}`, spec: resolved.spec };
 		}
-		const result = installUserService(resolved.spec, deps);
+		const result = await registerVehicleService(resolved.spec, this.registrar);
 		return {
 			ok: true,
 			restarted: result.installed,

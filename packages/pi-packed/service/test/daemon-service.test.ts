@@ -2,7 +2,8 @@ import { describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { detectVehicleDaemonService, resolveDaemonServiceSpec } from "../src/daemon/daemon-service.ts";
+import type { VehicleRegistrar, VehicleRegistrationOutcome } from "@danypops/armada";
+import { detectVehicleDaemonService, RealDaemonServiceInstaller, resolveDaemonServiceSpec } from "../src/daemon/daemon-service.ts";
 
 function fakePiHome(): string {
 	return mkdtempSync(join(tmpdir(), "packed-daemon-service-"));
@@ -196,5 +197,95 @@ describe("resolveDaemonServiceSpec", () => {
 		expect(detectVehicleDaemonService(dir, "some-cli")).toBeUndefined();
 		const result = resolveDaemonServiceSpec(piHome, "npm:some-cli");
 		expect(result.ok).toBe(false);
+	});
+});
+
+class FakeVehicleRegistrar implements VehicleRegistrar {
+	registered = new Map<string, unknown>();
+	outcome: VehicleRegistrationOutcome = { ok: true, manifestHash: "hash" as never, applied: [], diagnostics: [] };
+	async register(vehicle: unknown): Promise<VehicleRegistrationOutcome> {
+		if (this.outcome.ok) this.registered.set((vehicle as { name: string }).name, vehicle);
+		return this.outcome;
+	}
+	async unregister(name: string): Promise<VehicleRegistrationOutcome> {
+		if (this.outcome.ok) this.registered.delete(name);
+		return this.outcome;
+	}
+	async isRegistered(name: string): Promise<boolean> {
+		return this.registered.has(name);
+	}
+}
+
+describe("RealDaemonServiceInstaller -- Armada registration through the in-process registrar", () => {
+	it("install() resolves the package's Vehicle spec and registers it through Armada directly", async () => {
+		const piHome = fakePiHome();
+		writePackage(piHome, "@danypops/web-spider-daemon", { binPath: "dist/cli.js", args: ["serve"] });
+		const registrar = new FakeVehicleRegistrar();
+		const installer = new RealDaemonServiceInstaller(registrar);
+
+		const outcome = await installer.install(piHome, "npm:@danypops/web-spider-daemon");
+
+		expect(outcome).toMatchObject({ ok: true, result: { installed: true }, spec: { name: "web-spider-daemon" } });
+		expect(registrar.registered.has("web-spider-daemon")).toBe(true);
+	});
+
+	it("install() reports a non-daemon package without ever touching the registrar", async () => {
+		const piHome = fakePiHome();
+		writePackage(piHome, "some-pkg", undefined);
+		const registrar = new FakeVehicleRegistrar();
+		const installer = new RealDaemonServiceInstaller(registrar);
+
+		const outcome = await installer.install(piHome, "npm:some-pkg");
+
+		expect(outcome).toMatchObject({ ok: false, notADaemon: true });
+		expect(registrar.registered.size).toBe(0);
+	});
+
+	it("remove() unregisters the resolved Vehicle through Armada directly", async () => {
+		const piHome = fakePiHome();
+		writePackage(piHome, "@danypops/web-spider-daemon", { binPath: "dist/cli.js", args: ["serve"] });
+		const registrar = new FakeVehicleRegistrar();
+		const installer = new RealDaemonServiceInstaller(registrar);
+		await installer.install(piHome, "npm:@danypops/web-spider-daemon");
+
+		const outcome = await installer.remove(piHome, "npm:@danypops/web-spider-daemon");
+
+		expect(outcome).toMatchObject({ ok: true, result: { installed: true } });
+		expect(registrar.registered.has("web-spider-daemon")).toBe(false);
+	});
+
+	it("restart() is a no-op, in-band, when Armada has no registration for this Vehicle yet", async () => {
+		const piHome = fakePiHome();
+		writePackage(piHome, "@danypops/web-spider-daemon", { binPath: "dist/cli.js", args: ["serve"] });
+		const registrar = new FakeVehicleRegistrar();
+		const installer = new RealDaemonServiceInstaller(registrar);
+
+		const outcome = await installer.restart(piHome, "npm:@danypops/web-spider-daemon");
+
+		expect(outcome).toMatchObject({ ok: true, restarted: false });
+	});
+
+	it("restart() re-registers (picking up a fresh on-disk version) once already registered", async () => {
+		const piHome = fakePiHome();
+		writePackage(piHome, "@danypops/web-spider-daemon", { binPath: "dist/cli.js", args: ["serve"] });
+		const registrar = new FakeVehicleRegistrar();
+		const installer = new RealDaemonServiceInstaller(registrar);
+		await installer.install(piHome, "npm:@danypops/web-spider-daemon");
+
+		const outcome = await installer.restart(piHome, "npm:@danypops/web-spider-daemon");
+
+		expect(outcome).toMatchObject({ ok: true, restarted: true });
+	});
+
+	it("surfaces a failed Armada registration's diagnostics in-band, never as a thrown error", async () => {
+		const piHome = fakePiHome();
+		writePackage(piHome, "@danypops/web-spider-daemon", { binPath: "dist/cli.js", args: ["serve"] });
+		const registrar = new FakeVehicleRegistrar();
+		registrar.outcome = { ok: false, diagnostics: [{ code: "X", severity: "error", path: "/", message: "native failure" }] };
+		const installer = new RealDaemonServiceInstaller(registrar);
+
+		const outcome = await installer.install(piHome, "npm:@danypops/web-spider-daemon");
+
+		expect(outcome).toMatchObject({ ok: true, result: { installed: false, reason: "native failure" } });
 	});
 });

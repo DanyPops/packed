@@ -7,6 +7,7 @@ import {
 	startDaemon,
 } from "@danypops/vehicle-server/daemon";
 import { ensureAuthToken } from "@danypops/vehicle-server/paths";
+import { type DaemonServiceInstaller, RealDaemonServiceInstaller, reconcileAllDaemonServices } from "./daemon-service.ts";
 import { generateIndex, indexPath, indexStatus } from "../index/build-index.ts";
 import { catalogStatus, syncCatalog } from "../packages/catalog.ts";
 import { latestVersion, openDb } from "../packages/db.ts";
@@ -19,6 +20,7 @@ import {
 	ENV,
 	IDLE_BUDGET_DEFAULT_MS,
 	INDEX_INTERVAL_DEFAULT_MS,
+	RECONCILE_INTERVAL_DEFAULT_MS,
 	WATCH_INTERVAL_DEFAULT_MS,
 	WATCHDOG_TICK_MS,
 } from "../shared/constants.ts";
@@ -35,12 +37,13 @@ export interface StartPackedDaemonOptions {
 	reg?: Registry;
 	inst?: Installer;
 	piHome?: string;
+	daemonServiceInstaller?: DaemonServiceInstaller;
 	maintenanceTasks?: MaintenanceTask[];
 	idleBudgetMs?: number;
 	migrateLegacy?: boolean;
 }
 
-function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOptions {
+export function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOptions {
 	const paths = options.paths ?? resolvePackedPaths();
 	if (options.migrateLegacy ?? options.paths === undefined) migrateLegacyPackedState(paths, legacyPackedStateDirectory());
 	const token = ensureAuthToken(paths.token, "Packed");
@@ -48,6 +51,7 @@ function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOptions {
 	const inst = options.inst ?? new ExecInstaller();
 	const piHome = options.piHome ?? defaultPiHome();
 	const database = openDb(paths.database);
+	const daemonServiceInstaller = options.daemonServiceInstaller ?? new RealDaemonServiceInstaller();
 	const configuredMaintenanceTasks = options.maintenanceTasks ?? [
 		{
 			name: "package-update-check",
@@ -75,6 +79,24 @@ function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOptions {
 				if (indexStatus(indexPath(dataDirectory), ttlMs).stale) await generateIndex(reg, dataDirectory, indexPath(dataDirectory));
 			},
 		},
+		{
+			// Self-heals a Vehicle a running daemon never picked up -- an out-of-band
+			// npm install/update, or a transitive dependency bump that resolveDaemonServiceSpec
+			// would only otherwise re-check the next time /install or /restart-service ran
+			// for that exact package.
+			name: "vehicle-reconcile",
+			intervalMs: envMs(ENV.RECONCILE_SECS, RECONCILE_INTERVAL_DEFAULT_MS),
+			run: async () => {
+				const result = await reconcileAllDaemonServices(piHome, undefined, daemonServiceInstaller);
+				if (result.failed.length > 0) {
+					logger.warn("vehicle-reconcile completed with failures", {
+						reconciled: result.reconciled.length,
+						skipped: result.skipped,
+						failed: result.failed.length,
+					});
+				}
+			},
+		},
 	];
 	const maintenanceTasks = configuredMaintenanceTasks.filter((task) => task.intervalMs > 0);
 
@@ -93,7 +115,7 @@ function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOptions {
 		maintenanceTasks,
 		idleBudgetMs: options.idleBudgetMs ?? envMs(ENV.IDLE_SECS, IDLE_BUDGET_DEFAULT_MS),
 		idleTickMs: WATCHDOG_TICK_MS,
-		buildApp: () => createApp({ reg, inst, token, stateDir: paths.stateDirectory, dataDir: dirname(paths.database), piHome }),
+		buildApp: () => createApp({ reg, inst, token, stateDir: paths.stateDirectory, dataDir: dirname(paths.database), piHome, daemonServiceInstaller }),
 		onShutdown: () => database.close(),
 	};
 }

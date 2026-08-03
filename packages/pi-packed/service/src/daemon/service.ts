@@ -42,7 +42,7 @@ import { SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT } from "../shared/constants.ts";
 import { createLogger } from "../shared/log.ts";
 import { VERSION } from "../shared/version.ts";
 import { formatCleanupSummary, runCleanup } from "./cleanup.ts";
-import { type DaemonServiceInstaller, RealDaemonServiceInstaller } from "./daemon-service.ts";
+import { type DaemonServiceInstaller, type ReconcileAllResult, reconcileAllDaemonServices, RealDaemonServiceInstaller } from "./daemon-service.ts";
 import { checkUpdates, loadUpdates } from "./watcher.ts";
 
 const log = createLogger("service");
@@ -90,6 +90,7 @@ export type OperationName =
 	| "package.install"
 	| "package.install_service"
 	| "package.restart_service"
+	| "package.reconcile_services"
 	| "package.remove"
 	| "package.update"
 	| "resources.list"
@@ -120,6 +121,7 @@ export interface OperationInputs {
 	"package.install": { source: string; approved?: boolean };
 	"package.install_service": { source: string; approved?: boolean };
 	"package.restart_service": { source: string; approved?: boolean };
+	"package.reconcile_services": { approved?: boolean; projectRoot?: string };
 	"package.remove": { name: string; approved?: boolean };
 	"package.update": { source: string; approved?: boolean };
 	"resources.list": { projectRoot?: string };
@@ -144,6 +146,7 @@ interface InstallServiceResponse {
 interface RestartServiceResponse extends InstallServiceResponse {
 	restarted?: boolean;
 }
+interface ReconcileServicesResponse extends MutationResponse, ReconcileAllResult {}
 
 export interface OperationOutputs {
 	"package.search": { query: string; total: number; results: SearchPage["results"]; offline?: boolean };
@@ -166,6 +169,7 @@ export interface OperationOutputs {
 	"package.install": MutationResponse;
 	"package.install_service": InstallServiceResponse;
 	"package.restart_service": RestartServiceResponse;
+	"package.reconcile_services": ReconcileServicesResponse;
 	"package.remove": MutationResponse;
 	"package.update": UpdateMutationResponse;
 	"resources.list": { global: PackageResources[]; project: PackageResources[] };
@@ -197,6 +201,7 @@ export const OPERATION_NAMES: readonly OperationName[] = [
 	"package.install",
 	"package.install_service",
 	"package.restart_service",
+	"package.reconcile_services",
 	"package.remove",
 	"package.update",
 	"resources.list",
@@ -335,7 +340,7 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			const installedDir = resolveInstalledDir(piHome, `npm:${name}`);
 			let serviceRemoved = false;
 			if (installedDir) {
-				const service = daemonServiceInstaller.remove(piHome, `npm:${name}`);
+				const service = await daemonServiceInstaller.remove(piHome, `npm:${name}`);
 				if (!service.ok && !service.notADaemon) return json({ ok: false, name, output: service.reason });
 				if (service.ok) {
 					if (!service.result.installed) return json({ ok: false, name, output: service.result.reason });
@@ -370,7 +375,7 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			try {
 				const output = await deps.inst.install(source, { approved });
 				if (!source.startsWith("npm:")) return json({ ok: true, source, output });
-				const service = daemonServiceInstaller.install(piHomeForServiceInstall, source);
+				const service = await daemonServiceInstaller.install(piHomeForServiceInstall, source);
 				if (!service.ok) {
 					if (service.notADaemon) return json({ ok: true, source, output });
 					return json({ ok: false, source, output: `${output}\n${service.reason}` });
@@ -402,7 +407,7 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			}
 			const denied = authorize("install_service", approved);
 			if (denied) return denied;
-			const resolved = daemonServiceInstaller.install(piHomeForServiceInstall, source);
+			const resolved = await daemonServiceInstaller.install(piHomeForServiceInstall, source);
 			if (!resolved.ok) return json({ ok: false, output: resolved.reason, notADaemon: resolved.notADaemon });
 			if (!resolved.result.installed) return json({ ok: false, output: resolved.result.reason, spec: pickSpec(resolved.spec) });
 			return json({ ok: true, output: `installed a persistent service for ${resolved.spec.name}`, spec: pickSpec(resolved.spec) });
@@ -423,12 +428,29 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			}
 			const denied = authorize("restart_service", approved);
 			if (denied) return denied;
-			const resolved = daemonServiceInstaller.restart(piHomeForServiceInstall, source);
+			const resolved = await daemonServiceInstaller.restart(piHomeForServiceInstall, source);
 			if (!resolved.ok) return json({ ok: false, output: resolved.reason, notADaemon: resolved.notADaemon });
 			const output = resolved.restarted
 				? `restarted the persistent service for ${resolved.spec.name}`
 				: (resolved.reason ?? `no restart needed for ${resolved.spec.name}`);
 			return json({ ok: true, output, restarted: resolved.restarted, spec: pickSpec(resolved.spec) });
+		}
+
+		if (path === "/reconcile-services" && req.method === "POST") {
+			let approved = false;
+			let projectRoot: string | undefined;
+			try {
+				const body = (await req.json()) as { approved?: unknown; projectRoot?: unknown };
+				approved = body.approved === true;
+				projectRoot = typeof body.projectRoot === "string" ? body.projectRoot : undefined;
+			} catch {
+				/* fall through -- approved stays false, projectRoot stays undefined */
+			}
+			const denied = authorize("reconcile_services", approved);
+			if (denied) return denied;
+			const result = await reconcileAllDaemonServices(piHomeForServiceInstall, projectRoot, daemonServiceInstaller);
+			const output = `reconciled ${result.reconciled.length} Vehicle(s), skipped ${result.skipped} non-daemon package(s)${result.failed.length > 0 ? `, ${result.failed.length} failure(s)` : ""}`;
+			return json({ ok: result.failed.length === 0, output, ...result });
 		}
 
 		if (path === "/update" && req.method === "POST") {
@@ -449,7 +471,7 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			try {
 				const outcome = await deps.inst.update(source, { approved });
 				if (!source.startsWith("npm:") || outcome.alreadyUpToDate) return json({ ok: true, source, ...outcome });
-				const service = daemonServiceInstaller.restart(piHomeForServiceInstall, source);
+				const service = await daemonServiceInstaller.restart(piHomeForServiceInstall, source);
 				if (!service.ok) {
 					if (service.notADaemon) return json({ ok: true, source, ...outcome });
 					return json({ ok: false, source, ...outcome, output: `${outcome.output}\n${service.reason}` });
@@ -627,6 +649,10 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 				break;
 			case "package.restart_service":
 				path = "/restart-service";
+				init = { method: "POST", body: JSON.stringify(input) };
+				break;
+			case "package.reconcile_services":
+				path = "/reconcile-services";
 				init = { method: "POST", body: JSON.stringify(input) };
 				break;
 			case "package.remove":

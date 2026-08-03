@@ -52,6 +52,7 @@ export const INDEX_OPERATION_TIMEOUT_MS = 10 * 60_000;
 export const WATCH_INTERVAL_DEFAULT_MS = 30 * 60_000; // updates diff cadence
 export const CATALOG_INTERVAL_DEFAULT_MS = 6 * 3_600_000; // full mirror TTL
 export const INDEX_INTERVAL_DEFAULT_MS = 6 * 3_600_000; // static index regeneration TTL, same cadence as the catalog mirror it reads from
+export const RECONCILE_INTERVAL_DEFAULT_MS = 30 * 60_000; // Vehicle-service drift sweep cadence -- catches an out-of-band npm install/update a running daemon never picked up
 export const IDLE_BUDGET_DEFAULT_MS = 10 * 60_000; // on-demand self-exit
 export const WATCHDOG_TICK_MS = 15_000;
 
@@ -69,5 +70,6 @@ export const ENV = {
 	WATCH_SECS: "PI_PACKED_WATCH_SECS",
 	CATALOG_SECS: "PI_PACKED_CATALOG_SECS",
 	INDEX_SECS: "PI_PACKED_INDEX_SECS",
+	RECONCILE_SECS: "PI_PACKED_RECONCILE_SECS",
 	IDLE_SECS: "PI_PACKED_IDLE_SECS",
 } as const;

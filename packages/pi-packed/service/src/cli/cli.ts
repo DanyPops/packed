@@ -8,6 +8,7 @@ import { formatDoctorReport, runDoctor } from "../adoption/doctor.ts";
 import { formatPackReport, NpmPackVerifier, type PackReport } from "../adoption/pack.ts";
 import { type AdoptionReport, formatAdoptionReport, scoreTarget } from "../adoption/score.ts";
 import type { PackageDaemonPort } from "../daemon/client.ts";
+import type { OperationOutputs } from "../daemon/service.ts";
 import { checkUpdates } from "../daemon/watcher.ts";
 import { generateIndex, indexPath, readIndex } from "../index/build-index.ts";
 import { syncCatalog } from "../packages/catalog.ts";
@@ -103,6 +104,7 @@ usage:
   packed install <source> [--approve] [--json] pi install npm:|git:|https://… via daemon and reconcile any declared Vehicle
   packed install-service <source> --approve [--json] reconcile a package's declared Vehicle
   packed restart-service <source> --approve [--json] restart a package's already-registered persistent service standalone (packed update already does this automatically)
+  packed reconcile-services --approve [--project <path>] [--json] sweep every installed package and self-heal its Vehicle registration (the daemon also runs this on its own interval and at startup)
   packed remove <name> [--approve] [--json]    remove by bare npm name via daemon
   packed security [always|never] [--approve] [--json] read or set mutation approval policy
   packed serve                                 run the long-running daemon
@@ -143,6 +145,7 @@ export interface CliDeps {
 			source: string,
 			approved?: boolean,
 		): Promise<{ output: string; restarted?: boolean; spec?: { name: string; binPath: string } }>;
+		reconcileAll(approved?: boolean, projectRoot?: string): Promise<OperationOutputs["package.reconcile_services"]>;
 	};
 	piVersion?: { check(): Promise<PiVersionReport> };
 	selfUpdater?: { run(): Promise<SelfUpdateReport> };
@@ -230,6 +233,7 @@ const PACKAGE_COMMAND_OPERATIONS: Record<string, PackageOperation | undefined> =
 	install: "install",
 	"install-service": "install_service",
 	"restart-service": "restart_service",
+	"reconcile-services": "reconcile_services",
 	remove: "remove",
 	pi: "pi.status",
 	advisories: "advisories.scan",
@@ -608,6 +612,21 @@ const commands: Record<string, { usage: string; run: Command }> = {
 			} catch (e) {
 				const error = e instanceof Error ? e.message : String(e);
 				return flags.json ? fail(`${JSON.stringify({ ok: false, source, error })}\n`) : fail(`${error}\n`);
+			}
+		},
+	},
+
+	"reconcile-services": {
+		usage:
+			"packed reconcile-services --approve [--project <path>] [--json]  (sweeps every installed package and self-heals its Vehicle registration through Armada)",
+		async run(_rest, d, flags) {
+			if (!d.daemonService) return fail("reconcile-services requires a running packed daemon\n");
+			try {
+				const result = await d.daemonService.reconcileAll(flags.approved, flags.project);
+				return flags.json ? ok(`${JSON.stringify(result)}\n`) : ok(`${result.output}\n`);
+			} catch (e) {
+				const error = e instanceof Error ? e.message : String(e);
+				return flags.json ? fail(`${JSON.stringify({ ok: false, error })}\n`) : fail(`${error}\n`);
 			}
 		},
 	},

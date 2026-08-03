@@ -79,6 +79,9 @@ class FakeDaemonServiceInstaller {
 	restartGotSource = "";
 	restartApproved = false;
 	restartFail = false;
+	reconcileGotApproved: boolean | undefined;
+	reconcileGotProjectRoot: string | undefined;
+	reconcileFail = false;
 	async install(source: string, approved?: boolean) {
 		this.gotSource = source;
 		this.approved = approved === true;
@@ -106,6 +109,18 @@ class FakeDaemonServiceInstaller {
 				binPath: "/opt/probe/cli.js",
 				handlePath: "/tmp/probe.handle.json",
 			},
+		};
+	}
+	async reconcileAll(approved?: boolean, projectRoot?: string) {
+		this.reconcileGotApproved = approved;
+		this.reconcileGotProjectRoot = projectRoot;
+		if (this.reconcileFail) throw new Error("reconcile-services failed");
+		return {
+			ok: true,
+			output: "reconciled 1 Vehicle(s), skipped 0 non-daemon package(s)",
+			reconciled: [{ packageName: "@danypops/probe", vehicleName: "probe", installed: true }],
+			skipped: 0,
+			failed: [],
 		};
 	}
 }
@@ -512,6 +527,45 @@ describe("CLI", () => {
 		expect(out).toContain("requires a running packed daemon");
 	});
 
+	it("reconcile-services requires approval, then sweeps every installed package with stable human and JSON output", async () => {
+		const d = deps();
+		expect((await cliRun(["reconcile-services"], d)).code).toBe(1);
+		const human = await cliRun(["reconcile-services", "--approve"], d);
+		expect(human.code).toBe(0);
+		expect(human.out).toContain("reconciled 1 Vehicle(s)");
+		expect((d.daemonService as FakeDaemonServiceInstaller).reconcileGotApproved).toBe(true);
+		const json = await cliRun(["reconcile-services", "--approve", "--json"], d);
+		expect(json.code).toBe(0);
+		expect(JSON.parse(json.out)).toEqual({
+			ok: true,
+			output: "reconciled 1 Vehicle(s), skipped 0 non-daemon package(s)",
+			reconciled: [{ packageName: "@danypops/probe", vehicleName: "probe", installed: true }],
+			skipped: 0,
+			failed: [],
+		});
+	});
+
+	it("reconcile-services threads --project through to the sweep", async () => {
+		const d = deps();
+		await cliRun(["reconcile-services", "--approve", "--project", "/repo"], d);
+		expect((d.daemonService as FakeDaemonServiceInstaller).reconcileGotProjectRoot).toBe("/repo");
+	});
+
+	it("reconcile-services reports a sweep failure in-band with exit code 1", async () => {
+		const d = deps();
+		(d.daemonService as FakeDaemonServiceInstaller).reconcileFail = true;
+		const { code, out } = await cliRun(["reconcile-services", "--approve"], d);
+		expect(code).toBe(1);
+		expect(out).toContain("reconcile-services failed");
+	});
+
+	it("reconcile-services fails closed without a running daemon", async () => {
+		const d = deps({ daemonService: undefined });
+		const { code, out } = await cliRun(["reconcile-services", "--approve"], d);
+		expect(code).toBe(1);
+		expect(out).toContain("requires a running packed daemon");
+	});
+
 	it("update delegates one configured source with stable output and approval", async () => {
 		const d = deps();
 		expect((await cliRun(["update", "npm:foo"], d)).code).toBe(1);
@@ -777,6 +831,10 @@ describe("CLI", () => {
 			async remove(name) {
 				return name;
 			},
+			async reconcileServices(approved, projectRoot) {
+				calls.push(`reconcileServices:${approved}:${projectRoot}`);
+				return { ok: true, output: "reconciled 0 Vehicle(s), skipped 0 non-daemon package(s)", reconciled: [], skipped: 0, failed: [] };
+			},
 			async update(source) {
 				return { output: source, reloadRequired: false, alreadyUpToDate: true, pinned: false };
 			},
@@ -1018,21 +1076,27 @@ describe("daemon client", () => {
 			reg: new FakeRegistry([{ name: "pi-lsp", version: "0.3.0" }]),
 			inst: daemonInstaller,
 			daemonServiceInstaller: {
-				install: () => ({
-					ok: true,
-					result: { installed: true },
-					spec: { name: "pi-lsp", version: "1.0.0", binPath: "/opt/pi-lsp/cli.js", handlePath: "/tmp/pi-lsp.handle.json" },
-				}),
-				remove: () => ({
-					ok: true,
-					result: { installed: true },
-					spec: { name: "pi-lsp", version: "1.0.0", binPath: "/opt/pi-lsp/cli.js", handlePath: "/tmp/pi-lsp.handle.json" },
-				}),
-				restart: () => ({
-					ok: true,
-					restarted: true,
-					spec: { name: "pi-lsp", version: "1.0.0", binPath: "/opt/pi-lsp/cli.js", handlePath: "/tmp/pi-lsp.handle.json" },
-				}),
+				async install() {
+					return {
+						ok: true,
+						result: { installed: true },
+						spec: { name: "pi-lsp", version: "1.0.0", binPath: "/opt/pi-lsp/cli.js", handlePath: "/tmp/pi-lsp.handle.json" },
+					};
+				},
+				async remove() {
+					return {
+						ok: true,
+						result: { installed: true },
+						spec: { name: "pi-lsp", version: "1.0.0", binPath: "/opt/pi-lsp/cli.js", handlePath: "/tmp/pi-lsp.handle.json" },
+					};
+				},
+				async restart() {
+					return {
+						ok: true,
+						restarted: true,
+						spec: { name: "pi-lsp", version: "1.0.0", binPath: "/opt/pi-lsp/cli.js", handlePath: "/tmp/pi-lsp.handle.json" },
+					};
+				},
 			},
 			token: daemonToken,
 			stateDir: daemonDir,

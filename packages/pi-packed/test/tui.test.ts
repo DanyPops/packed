@@ -641,8 +641,8 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 				return [{ name: "pi-tickets", installed: "0.14.0" }];
 			},
 			async updates() {
-				return [{ name: "pi-tickets", installed: "0.14.0", latest: "0.9.4" }];
-			}, // stale mirror, but that's a separate bug
+				return [{ name: "pi-tickets", installed: "0.14.0", latest: "0.15.0" }];
+			}, // a genuine badge can still race with an updater that reports no change
 			async security() {
 				return { mutationApproval: "never" as const };
 			},

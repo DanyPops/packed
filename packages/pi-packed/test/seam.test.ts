@@ -24,6 +24,13 @@ describe("model (seam)", () => {
 		expect(manager.version).toBe("0.8.2");
 	});
 
+	it("mergeRows ignores a stale update snapshot once the installed version has reached latest", () => {
+		const rows = mergeRows([{ name: "pi-papyrus", installed: "0.45.1" }], [{ name: "pi-papyrus", installed: "0.45.0", latest: "0.45.1" }]);
+
+		expect(rows).toEqual([{ name: "pi-papyrus", version: "0.45.1", hasUpdate: false }]);
+		expect(visibleRows(rows, "updates")).toEqual([]);
+	});
+
 	it("mergeRows sorts by name", () => {
 		const rows = mergeRows(installed, []);
 		expect(rows.map((row) => row.name)).toEqual(["@scope/pkg", "pi-extension-manager", "pi-lsp"]);

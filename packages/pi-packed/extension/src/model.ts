@@ -2,6 +2,7 @@
  * model.ts — pure row logic for the /packed panel. No I/O: vitest drives
  * this directly (the TUI component is a thin shell over these functions).
  */
+import { gt, valid } from "semver";
 import type { InstalledPkg, UpdateEntry } from "./packed.js";
 
 export interface Row {
@@ -17,12 +18,18 @@ export function mergeRows(installed: InstalledPkg[], updates: UpdateEntry[]): Ro
 	const byName = new Map(updates.map((u) => [u.name, u]));
 	return installed
 		.map((p) => {
-			const u = byName.get(p.name);
+			const version = p.pinned ?? p.installed ?? "?";
+			const snapshot = byName.get(p.name);
+			const comparable = valid(version) !== null && valid(snapshot?.latest) !== null;
+			const update =
+				snapshot && (comparable ? gt(snapshot.latest, version) : snapshot.installed === version && snapshot.latest !== version)
+					? snapshot
+					: undefined;
 			return {
 				name: p.name,
-				version: p.pinned ?? p.installed ?? "?",
-				latest: u?.latest,
-				hasUpdate: u !== undefined,
+				version,
+				latest: update?.latest,
+				hasUpdate: update !== undefined,
 			};
 		})
 		.sort((a, b) => a.name.localeCompare(b.name));

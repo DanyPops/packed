@@ -31,23 +31,28 @@ export function dialogTheme(theme: Theme): DialogTheme {
  * overlay, replacing what used to be four separately-opened screens. */
 export function tabBarTheme(theme: Theme): TabBarTheme {
 	return {
-		// Real bug, reported live: theme.inverse() swaps whatever
-		// foreground/background happen to be ambient at that point in the
-		// ANSI stream, not a specific color -- and Envelope wraps a whole
-		// content line (including this tab bar) in one continuous border-color
-		// span with no reset until the line's end, so which tab is active
-		// changed what "ambient" meant (blue when Packages was first on the
-		// line and nothing had reset yet, white once an earlier inactive tab's
-		// own fg reset already cleared it). An explicit theme.bg() always
-		// overwrites rather than swaps, so it's immune to that -- matches
-		// Pi's own core session-selector.js, which highlights its selected
-		// line the same way.
 		tab: (s) => theme.fg("dim", s),
-		activeTab: (s) => theme.bg("selectedBg", s),
+		// Set the semantic text color before reversing it. Reverse video then
+		// makes dark themes use their bright text as the highlight background
+		// and light themes use their dark text, without inheriting Envelope's
+		// ambient border foreground. Every tab position gets the same default
+		// terminal background as its displayed foreground.
+		activeTab: (s) => {
+			const text = theme.fg("text", s);
+			return typeof theme.inverse === "function" ? theme.inverse(text) : text;
+		},
 		// Every tab's first letter is a jump mnemonic (p/f/c/s) -- a distinct
 		// warning-colored bold, so it reads as "press this letter" on both the
 		// active and inactive tabs alike, not just whichever style tab/activeTab
 		// already applies to the whole label.
 		mnemonic: (s) => theme.bold(theme.fg("warning", s)),
 	};
+}
+
+/** Envelope calls style with assembled lines in released Malevich versions.
+ * Color only frame glyphs so styled content cannot reset the closing border
+ * or inherit the border foreground. This remains compatible with Malevich's
+ * segment-styled Envelope implementation. */
+export function panelFrameStyle(theme: Theme): (text: string) => string {
+	return (text) => text.replace(/[╭─╮│╰╯]+/gu, (glyphs) => theme.fg("border", glyphs));
 }

@@ -59,7 +59,7 @@ import {
 	type TextMeasure,
 } from "malevich-tui-components";
 import { confirmReload } from "./approval/reload.js";
-import { dialogTheme, menuTheme, tabBarTheme } from "./menu-theme.js";
+import { dialogTheme, menuTheme, panelFrameStyle, tabBarTheme } from "./menu-theme.js";
 import type { Row, ViewMode } from "./model.js";
 import { filterRows, mergeRows, nextMode, visibleRows } from "./model.js";
 import type { Natives, PackageResources } from "./packed.js";
@@ -849,7 +849,7 @@ function renderUnifiedPanel(
 			const envelope = new Envelope({
 				title: "packed",
 				borderStyle: "rounded",
-				style: (s) => theme.fg("border", s),
+				style: panelFrameStyle(theme),
 				titleStyle: (s) => theme.bold(theme.fg("accent", s)),
 				measure,
 			});

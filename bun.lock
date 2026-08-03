@@ -29,7 +29,7 @@
     },
     "packages/pi-packed": {
       "name": "@danypops/pi-packed",
-      "version": "0.19.12",
+      "version": "0.20.1",
       "bin": {
         "packed": "service/src/cli/cli.ts",
       },
@@ -41,11 +41,12 @@
         "@danypops/vehicle-core": "^0.10.0",
         "@danypops/vehicle-server": "^0.15.0",
         "jiti": "2.6.1",
-        "malevich-tui-components": "^0.16.1",
+        "malevich-tui-components": "^0.20.4",
         "publint": "0.3.22",
         "semver": "^7.8.5",
       },
       "devDependencies": {
+        "@danypops/pi-tui-harness": "^0.0.1",
         "@danypops/vehicle-client-pi": "^0.16.0",
         "@types/semver": "^7.7.1",
       },
@@ -136,6 +137,8 @@
     "@danypops/pi-extension-harness": ["@danypops/pi-extension-harness@0.2.0", "", { "dependencies": { "jiti": "^2.0.0" }, "peerDependencies": { "@earendil-works/pi-coding-agent": "*", "typebox": "*" } }, "sha512-jnyoA6VpQS+OciEPQeRHwvBHKJyaokgA73moSBSvi1DUoCn5sL39P/ooatu8nei/hhJTKkFN2FYlQahvBigznw=="],
 
     "@danypops/pi-packed": ["@danypops/pi-packed@workspace:packages/pi-packed"],
+
+    "@danypops/pi-tui-harness": ["@danypops/pi-tui-harness@0.0.1", "", { "dependencies": { "@xterm/headless": "^6.0.0" }, "peerDependencies": { "@earendil-works/pi-tui": "*" } }, "sha512-k9aaRoh/Q0uNL6TEoeNdXJ6EX1F3THzezhcgESEA/7I40Cu2Vx3GzIgNbHQ69881pkBFSb8uVlP2xJ6a8ZgzbA=="],
 
     "@danypops/vehicle-client": ["@danypops/vehicle-client@0.5.1", "", { "dependencies": { "@danypops/vehicle-core": "^0.10.0", "@danypops/vehicle-server": "^0.13.0" } }, "sha512-PxPh8Rc+6wvOR1ZAvB+tZRLqPGcd40MmZeHe0HpIZ1dI7wBYC7QeyqGZ9AU2CbBD9A5XDLPjbb47YJ90l0dr1w=="],
 
@@ -335,6 +338,8 @@
 
     "@unrs/resolver-binding-win32-x64-msvc": ["@unrs/resolver-binding-win32-x64-msvc@1.12.2", "", { "os": "win32", "cpu": "x64" }, "sha512-nAB74NfSNKknqQ1RrYj6uz8FcXEomu/MATJZxh/x+BArzN2U3JbOYC0APYzUIGhVY3m5hRxA8VPNdPBoG8txlA=="],
 
+    "@xterm/headless": ["@xterm/headless@6.0.0", "", {}, "sha512-5Yj1QINYCyzrZtf8OFIHi47iQtI+0qYFPHmouEfG8dHNxbZ9Tb9YGSuLcsEwj9Z+OL75GJqPyJbyoFer80a2Hw=="],
+
     "acorn": ["acorn@8.18.0", "", { "bin": { "acorn": "bin/acorn" } }, "sha512-lGq+9yr1/GuAWaVYIHRjvvySG5/4VfKIvC8EWxStPdcDh/Ka7FG3twP6v4d5BkravUilhIAsG4Qj83t02LWUPQ=="],
 
     "acorn-jsx": ["acorn-jsx@5.3.2", "", { "peerDependencies": { "acorn": "^6.0.0 || ^7.0.0 || ^8.0.0" } }, "sha512-rq9s+JNhf0IChjtDXxllJ7g41oZk5SlXtp0LHwyA5cejwn7vKmKp4pPri6YEePv2PU65sAsegbXtIinmDFDXgQ=="],
@@ -485,7 +490,7 @@
 
     "lru-cache": ["lru-cache@11.5.2", "", {}, "sha512-4pfM1Ff0x50o0tQwb5ucw/RzNyD0/YJME6IVcStalZuMWxdt3sR3huStTtxz4PUmvZfRguvDejasvQ2kifR11g=="],
 
-    "malevich-tui-components": ["malevich-tui-components@0.16.1", "", {}, "sha512-2P/EWPEYBWnSOqKejmTSejSuNMYL7kgIiL9Gi2cJmmZBJaHEb36YQIcCT4Qvqqj5g85VjPG4b0MCQL4X8kIiOg=="],
+    "malevich-tui-components": ["malevich-tui-components@0.20.4", "", {}, "sha512-qSLuJdE14hHpskhJORDFqtBBEnhue5ay3wK3dFN8FW/lKZELipl871p68xwosNgTLf8oAvKyfICsMkixZE+4cg=="],
 
     "marked": ["marked@18.0.5", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-S6GcvALHg6K4ohtu4E7x0a1AqhAjp6cV8KhLSyN9qVapnzJkusVBxZRcIU9AeYsbe6P1hKDusSbEOzGyyuce6w=="],
 

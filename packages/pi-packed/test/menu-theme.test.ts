@@ -1,13 +1,14 @@
 import { describe, expect, it } from "bun:test";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { tabBarTheme } from "../extension/src/menu-theme.ts";
+import { panelFrameStyle, tabBarTheme } from "../extension/src/menu-theme.ts";
 
 function fakeTheme(): Theme {
 	return {
 		fg: (color: string, s: string) => `FG(${color}):${s}`,
 		bg: (color: string, s: string) => `BG(${color}):${s}`,
 		bold: (s: string) => `BOLD:${s}`,
-		// biome-ignore lint/suspicious/noExplicitAny: only fg/bg/bold are exercised by tabBarTheme
+		inverse: (s: string) => `INVERSE:${s}`,
+		// biome-ignore lint/suspicious/noExplicitAny: only styling methods used by these mappings are needed
 	} as any;
 }
 
@@ -27,10 +28,10 @@ describe("tabBarTheme (the /packed panel's tab bar styling)", () => {
 		expect(result).toBe("FG(dim):Packages");
 	});
 
-	it("focused: applies the theme's own selectedBg color, regardless of position, never reverse-video", () => {
+	it("focused: sets the text color before reverse-video, identically at every position", () => {
 		const theme = tabBarTheme(fakeTheme());
-		expect(theme.activeTab("Packages")).toBe("BG(selectedBg):Packages");
-		expect(theme.activeTab("Find")).toBe("BG(selectedBg):Find"); // identical regardless of which tab
+		expect(theme.activeTab("Packages")).toBe("INVERSE:FG(text):Packages");
+		expect(theme.activeTab("Find")).toBe("INVERSE:FG(text):Find");
 	});
 
 	// tabBarTheme's own mnemonic function always works when called; it's
@@ -39,5 +40,11 @@ describe("tabBarTheme (the /packed panel's tab bar styling)", () => {
 	it("the mnemonic letter is styled distinctly, whenever a caller invokes it", () => {
 		const theme = tabBarTheme(fakeTheme());
 		expect(theme.mnemonic("P")).toContain("FG(warning)");
+	});
+});
+
+describe("panelFrameStyle", () => {
+	it("styles only frame glyphs, leaving content outside the border color span", () => {
+		expect(panelFrameStyle(fakeTheme())("│ content │")).toBe("FG(border):│ content FG(border):│");
 	});
 });

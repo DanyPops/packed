@@ -1,6 +1,6 @@
 {
   "name": "@danypops/pi-packed",
-  "version": "0.19.12",
+  "version": "0.20.0",
   "description": "Pi package lifecycle, validation, daemon, tools, profiles, and TUI",
   "type": "module",
   "bin": {
@@ -30,8 +30,8 @@
     "@danypops/armada": "^0.2.0",
     "@danypops/packed": "^0.6.0",
     "@danypops/pi-extension-harness": "^0.2.0",
-    "@danypops/vehicle-client": "^0.2.0",
-    "@danypops/vehicle-core": "^0.6.1",
+    "@danypops/vehicle-client": "^0.5.1",
+    "@danypops/vehicle-core": "^0.10.0",
     "@danypops/vehicle-server": "^0.15.0",
     "jiti": "2.6.1",
     "malevich-tui-components": "^0.16.1",
@@ -39,7 +39,7 @@
     "semver": "^7.8.5"
   },
   "devDependencies": {
-    "@danypops/vehicle-client-pi": "^0.1.5",
+    "@danypops/vehicle-client-pi": "^0.16.0",
     "@types/semver": "^7.7.1"
   },
   "peerDependencies": {

@@ -5,8 +5,11 @@
  */
 
 import { existsSync as fileExistsSync } from "node:fs";
+import { VehicleRegistry } from "@danypops/vehicle-server";
+import { createVehicleHttpApp } from "@danypops/vehicle-server/http";
 import { errorResponse, healthResponse, jsonResponse, readyResponse, requireBearerToken } from "@danypops/vehicle-server/rpc-http";
 import type { ServiceSpec } from "@danypops/vehicle-server/service";
+import { registerPackedVehicleOperations } from "./vehicle-registration.ts";
 import { type AdvisoryReport, resolveInstalledVersions, scanInstalledPackages } from "../adoption/advisories.ts";
 import { type CheckReport, type PackageChecker, StaticPackageChecker } from "../adoption/check.ts";
 import { type DoctorReport, runDoctor } from "../adoption/doctor.ts";
@@ -244,6 +247,13 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 	const setup = deps.setup ?? new SetupManager(deps.reg, deps.inst, deps.piHome ?? defaultPiHome());
 	const daemonServiceInstaller = deps.daemonServiceInstaller ?? new RealDaemonServiceInstaller();
 	const piHomeForServiceInstall = deps.piHome ?? defaultPiHome();
+
+	// Additive, real Vehicle protocol surface for this daemon's full operation set -- served
+	// at /vehicle/* alongside (not replacing) /api/v1/ops below. Every operation delegates to
+	// the exact same executeOperation() this route's own /api/v1/ops handler calls.
+	const vehicleRegistry = new VehicleRegistry({ name: "packed", version: VERSION, description: "Pi package lifecycle daemon" });
+	registerPackedVehicleOperations(vehicleRegistry, executeOperation);
+	const vehicleApp = createVehicleHttpApp({ registry: vehicleRegistry, token: deps.token });
 
 	function authorize(operation: PackageOperation, approved: boolean): Response | undefined {
 		try {
@@ -680,8 +690,9 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 	return {
 		async fetch(req: Request): Promise<Response> {
 			const t0 = Date.now();
-			if (!requireBearerToken(req, deps.token)) return errorResponse("missing or invalid bearer token", 401);
 			const requestUrl = new URL(req.url);
+			if (requestUrl.pathname.startsWith("/vehicle/")) return vehicleApp.fetch(req);
+			if (!requireBearerToken(req, deps.token)) return errorResponse("missing or invalid bearer token", 401);
 			if (req.method === "GET" && requestUrl.pathname === "/api/v1/ops") return jsonResponse({ operations: OPERATION_NAMES });
 			if (req.method === "POST" && requestUrl.pathname === "/api/v1/ops") {
 				try {

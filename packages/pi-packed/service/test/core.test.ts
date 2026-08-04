@@ -69,6 +69,7 @@ describe("HttpRegistry", () => {
 						license: "MIT",
 						keywords: ["pi-package", "lsp"],
 						pi: { extensions: ["./src/index.ts"] },
+						readme: `# pi-lsp\n\n${"r".repeat(60_000)}`,
 						dist: {
 							unpackedSize: 12345,
 							integrity: "sha512-test",
@@ -103,8 +104,10 @@ describe("HttpRegistry", () => {
 			repository: "git+https://github.com/x/pi-lsp.git",
 			license: "MIT",
 			unpackedSize: 12345,
-			readmeAvailable: false,
+			readmeAvailable: true,
 		});
+		expect(info.readme).toHaveLength(50_000);
+		expect(info.readme).toStartWith("# pi-lsp");
 		expect(info.pi?.extensions).toBeDefined();
 		expect(info.packageEvidence).toMatchObject({ shape: "manifest", verified: false });
 		expect(info.publication).toEqual({

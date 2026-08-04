@@ -15,6 +15,7 @@ import {
 import { createLogger } from "../shared/log.ts";
 
 const log = createLogger("registry");
+const README_MAX_CHARS = 50_000;
 
 /** Upstream etiquette: honor Retry-After on 429, exponential backoff
  * otherwise, give up after RETRY_MAX_ATTEMPTS. */
@@ -125,9 +126,11 @@ export class HttpRegistry implements Registry {
 			pi?: Record<string, unknown>;
 			peerDependencies?: Record<string, string>;
 			scripts?: Record<string, string>;
+			readme?: unknown;
 			dist?: { unpackedSize?: number; integrity?: string; attestations?: { url?: string; provenance?: unknown } };
 		};
 		const manifestFields = v.pi ? Object.keys(v.pi).filter((key) => ["extensions", "skills", "prompts", "themes"].includes(key)) : [];
+		const readme = boundedString(v.readme, README_MAX_CHARS);
 		return {
 			name: boundedString(v.name, 214) ?? boundedString(name, 214)!,
 			version: boundedString(v.version, 128) ?? "",
@@ -144,7 +147,8 @@ export class HttpRegistry implements Registry {
 			pi: boundedPiManifest(v.pi),
 			peerDependencies: boundedDependencies(v.peerDependencies),
 			scripts: boundedDependencies(v.scripts),
-			readmeAvailable: false,
+			readme,
+			readmeAvailable: readme !== undefined && readme.trim().length > 0,
 			unpackedSize: v.dist?.unpackedSize,
 			packageEvidence:
 				manifestFields.length > 0

@@ -26,6 +26,32 @@ function fakeCtx(confirm: boolean, notices: string[], reloads: { count: number }
 }
 
 describe("FindTab entity inspection", () => {
+	it("packs adjacent search-result Cards without spacer rows", async () => {
+		const host = { requestRender() {} } as unknown as TabHost;
+		const tab = new FindTab(
+			{
+				async search() {
+					return {
+						query: "demo",
+						total: 2,
+						results: [
+							{ name: "demo-one", version: "1.0.0", description: "First" },
+							{ name: "demo-two", version: "1.0.0", description: "Second" },
+						],
+					};
+				},
+			} as unknown as Natives,
+			host,
+			{ fg: (_color: string, text: string) => text, bold: (text: string) => text } as Theme,
+		);
+		tab.handleInput("demo");
+		tab.handleInput("\r");
+		await Bun.sleep(0);
+		const lines = tab.render(40);
+		const firstBottom = lines.findIndex((line) => line.startsWith("└"));
+		expect(lines[firstBottom + 1]).toStartWith("┌");
+	});
+
 	it("uses i to inspect the selected search-result Card after search settles", async () => {
 		let inspected: string | undefined;
 		const host = {

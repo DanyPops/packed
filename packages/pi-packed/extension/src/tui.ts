@@ -427,7 +427,7 @@ export class PackagesTab implements Component {
 	private updatingRowName: string | undefined;
 	private readonly spinner = new Spinner();
 	private readonly settled = new Map<string, { ok: boolean; tail: string | undefined }>();
-	private readonly maxVisible = 5;
+	private readonly maxVisible = 4;
 
 	constructor(
 		private readonly natives: Natives,
@@ -535,7 +535,6 @@ export class PackagesTab implements Component {
 				measure: this.measure,
 			});
 			lines.push(...card.render(width));
-			if (start + offset < end - 1) lines.push("");
 		}
 		const hasScroll = start > 0 || end < this.filtered.length;
 		lines.push(theme.fg("dim", `  ${hasScroll ? `${this.selectedIndex + 1}/${this.filtered.length} ` : ""}${this.mode}`));

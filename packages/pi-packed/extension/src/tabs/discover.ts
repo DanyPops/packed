@@ -125,7 +125,6 @@ export class FindTab implements Component {
 				measure: { visibleWidth, truncateToWidth },
 			});
 			lines.push(...card.render(width));
-			if (i < end - 1) lines.push("");
 		}
 		return lines;
 	}

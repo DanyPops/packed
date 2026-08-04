@@ -8,7 +8,7 @@ export function cardTheme(theme: Theme): CardTheme {
 		border: (s) => theme.fg("border", s),
 		selectedBorder: (s) => theme.fg("accent", s),
 		content: (s) => s,
-		selectedContent: (s) => (typeof theme.inverse === "function" ? theme.inverse(theme.fg("text", s)) : theme.fg("accent", s)),
+		selectedContent: (s) => theme.fg("accent", s),
 	};
 }
 

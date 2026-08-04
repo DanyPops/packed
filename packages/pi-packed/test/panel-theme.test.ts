@@ -111,7 +111,7 @@ describe("/packed panel theme rendering through a real VT parser", () => {
 		for (const line of frame) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
 	});
 
-	it("renders installed entities as fully highlighted Cards", async () => {
+	it("uses one accent treatment for the selected Card frame and body", async () => {
 		const frame = await renderPanel("dark", "packages", [{ name: "demo-package", installed: "1.2.3" }]);
 		const terminal = await renderToTerminal(frame, { cols: WIDTH, rows: frame.length });
 		try {
@@ -121,10 +121,21 @@ describe("/packed panel theme rendering through a real VT parser", () => {
 			const right = lines[topRow]!.lastIndexOf("┐");
 			expect(terminal.cellAt(topRow, left)?.fgPaletteIndex).toBe(6);
 			expect(terminal.cellAt(topRow, right)?.fgPaletteIndex).toBe(6);
-			expect(terminal.cellAt(topRow + 1, left + 1)?.inverse).toBe(true);
+			expect(terminal.cellAt(topRow + 1, left + 1)?.fgPaletteIndex).toBe(6);
+			expect(terminal.cellAt(topRow + 1, left + 1)?.inverse).toBe(false);
 		} finally {
 			terminal.dispose();
 		}
+	});
+
+	it("packs Cards without spacer rows and keeps the outer bottom border within 24 rows", async () => {
+		const installed = Array.from({ length: 10 }, (_, index) => ({ name: `demo-${index}`, installed: "1.2.3" }));
+		const frame = await renderPanel("dark", "packages", installed);
+		const plain = frame.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
+		const firstBottom = plain.findIndex((line) => line.includes("└") && line.includes("┘"));
+		expect(plain[firstBottom + 1]).toContain("┌");
+		expect(frame.length).toBeLessThanOrEqual(24);
+		expect(plain.at(-1)).toMatch(/^╰─+╯$/u);
 	});
 
 	it("renders every frame glyph in the border color, independent of styled content", async () => {

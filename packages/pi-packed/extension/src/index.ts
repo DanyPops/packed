@@ -26,7 +26,7 @@ export default async function (pi: ExtensionAPI) {
 
 	pi.registerCommand("packed", {
 		description:
-			"Browse and manage installed Pi packages -- u/U update, x remove, d disable, c config, f find, s settings -- or run setup plan/apply or config directly",
+			"Browse and manage installed Pi packages -- i inspect, u/U update, x remove, d disable, c config, f find, s settings -- or run setup plan/apply or config directly",
 		handler: async (args, ctx) => {
 			if (await handleSetupCommand(args, ctx, natives)) return;
 			if (await handleResourceConfigCommand(args, ctx, natives, showPackedPanel)) return;

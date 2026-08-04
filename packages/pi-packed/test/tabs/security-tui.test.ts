@@ -23,6 +23,7 @@ function fakeHost(confirm: boolean, notices: string[]): { host: TabHost; renders
 				},
 			},
 		} as unknown as TabHost["ctx"],
+		inspectPackage: () => {},
 		requestRender: () => {
 			state.renders += 1;
 		},
@@ -115,6 +116,7 @@ describe("SettingsTab (/packed's Settings tab -- a real Component, not Pi's nati
 					},
 				},
 			} as unknown as TabHost["ctx"],
+			inspectPackage() {},
 			requestRender() {},
 			onSessionReplaced() {},
 		};

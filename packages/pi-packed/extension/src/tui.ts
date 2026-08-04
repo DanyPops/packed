@@ -44,10 +44,10 @@
  * settled map U's batch path uses, not only as a scrollback toast. All
  * data flows through the packed CLI (thin seam).
  */
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { DynamicBorder, rawKeyHint } from "@earendil-works/pi-coding-agent";
+import { DynamicBorder, type ExtensionCommandContext, rawKeyHint, type Theme } from "@earendil-works/pi-coding-agent";
 import { Container, Input, matchesKey, Spacer, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import {
+	Card,
 	type Component,
 	Dialog,
 	Envelope,
@@ -55,13 +55,12 @@ import {
 	type MenuItem,
 	Spinner,
 	TabbedContainer,
-	Table,
 	type TextMeasure,
 } from "malevich-tui-components";
 import { confirmReload } from "./approval/reload.js";
-import { dialogTheme, menuTheme, panelFrameStyle, tabBarTheme } from "./menu-theme.js";
-import type { Row, ViewMode } from "./model.js";
-import { filterRows, mergeRows, nextMode, visibleRows } from "./model.js";
+import { cardTheme, dialogTheme, menuTheme, panelFrameStyle, tabBarTheme } from "./menu-theme.js";
+import { filterRows, mergeRows, nextMode, type Row, type ViewMode, visibleRows } from "./model.js";
+import { PackageInspector } from "./package-inspector.js";
 import type { Natives, PackageResources } from "./packed.js";
 import type { TabHost } from "./tab-host.js";
 import { createFindTab } from "./tabs/discover.js";
@@ -407,11 +406,6 @@ async function showActionMenu(ctx: ExtensionCommandContext, row: Row): Promise<"
 	);
 }
 
-interface PackagesTabTheme {
-	fg(color: string, s: string): string;
-	bold(s: string): string;
-}
-
 /** Packages -- the panel's default/"home" tab. A real Component (not the
  * panel's own top-level ctx.ui.custom owner anymore); the shared TabHost
  * gives it inline approval/reload dialogs and a way to signal the overlay
@@ -432,14 +426,13 @@ export class PackagesTab implements Component {
 	private updatingRowName: string | undefined;
 	private readonly spinner = new Spinner();
 	private readonly settled = new Map<string, { ok: boolean; tail: string | undefined }>();
-	private readonly table: Table;
-	private readonly maxVisible = 20;
+	private readonly maxVisible = 5;
 
 	constructor(
 		private readonly natives: Natives,
 		private readonly host: TabHost,
-		readonly theme: PackagesTabTheme,
-		measure: TextMeasure,
+		readonly theme: Theme,
+		private readonly measure: TextMeasure,
 		initialRows: Row[],
 		/** c on a row, or the Enter action menu's "Configure resources" --
 		 * switches the shared TabbedContainer to Config, seeded with that
@@ -448,16 +441,6 @@ export class PackagesTab implements Component {
 	) {
 		this.rows = initialRows;
 		this.filtered = visibleRows(this.rows, this.mode);
-		this.table = new Table({
-			columns: [
-				{ header: "Package", key: "name" },
-				{ header: "Version", key: "version" },
-				{ header: "", key: "status" },
-			],
-			rows: [],
-			measure,
-			headerStyle: (s) => theme.fg("muted", s),
-		});
 	}
 
 	/** An active filter or an in-flight mutation means Escape/Left-Right
@@ -478,9 +461,7 @@ export class PackagesTab implements Component {
 		return this.searchActive || this.updatingRowName !== undefined;
 	}
 
-	invalidate(): void {
-		this.table.invalidate();
-	}
+	invalidate(): void {}
 
 	private applyFilter(): void {
 		this.filtered = filterRows(visibleRows(this.rows, this.mode), this.searchInput.getValue());
@@ -504,6 +485,8 @@ export class PackagesTab implements Component {
 				rawKeyHint("x", "remove") +
 				theme.fg("muted", " · ") +
 				rawKeyHint("d", "disable") +
+				theme.fg("muted", " · ") +
+				rawKeyHint("i", "inspect") +
 				theme.fg("muted", " · ") +
 				rawKeyHint("c", "config") +
 				theme.fg("muted", " · ") +
@@ -530,28 +513,29 @@ export class PackagesTab implements Component {
 		// selectedIndex stays this tab's own job.
 		const start = Math.max(0, Math.min(this.selectedIndex - Math.floor(this.maxVisible / 2), this.filtered.length - this.maxVisible));
 		const end = Math.min(start + this.maxVisible, this.filtered.length);
-		this.table.setRows(
-			this.filtered.slice(start, end).map((row, offset) => {
-				const i = start + offset;
-				const selected = i === this.selectedIndex;
-				const cursor = selected ? theme.fg("accent", "❯ ") : "  ";
-				const name = selected ? theme.bold(row.name) : row.name;
-				// A settled row shows its real outcome even for the instant before
-				// the next row's "start" event moves updatingRowName off it --
-				// settled always wins over "still spinning".
-				const rowSettled = this.settled.get(row.name);
-				const isUpdating = !rowSettled && this.updatingRowName === row.name;
-				const status = isUpdating
-					? theme.fg("accent", `${this.spinner.glyph()} updating…`)
-					: rowSettled
-						? theme.fg(rowSettled.ok ? "success" : "error", `${rowSettled.ok ? "✓" : "✗"}${rowSettled.tail ? ` ${rowSettled.tail}` : ""}`)
-						: row.hasUpdate
-							? theme.fg("warning", `↑${row.latest}`)
-							: "";
-				return { name: `${cursor}${name}`, version: theme.fg("dim", row.version), status };
-			}),
-		);
-		lines.push(...this.table.render(width));
+		for (const [offset, row] of this.filtered.slice(start, end).entries()) {
+			const selected = start + offset === this.selectedIndex;
+			// A settled row shows its real outcome even for the instant before
+			// the next row's "start" event moves updatingRowName off it.
+			const rowSettled = this.settled.get(row.name);
+			const isUpdating = !rowSettled && this.updatingRowName === row.name;
+			const status = isUpdating
+				? theme.fg("accent", `${this.spinner.glyph()} updating…`)
+				: rowSettled
+					? theme.fg(rowSettled.ok ? "success" : "error", `${rowSettled.ok ? "✓" : "✗"}${rowSettled.tail ? ` ${rowSettled.tail}` : ""}`)
+					: row.hasUpdate
+						? theme.fg("warning", `↑${row.latest}`)
+						: theme.fg("muted", "installed");
+			const card = new Card({
+				title: theme.bold(row.name),
+				content: [`${theme.fg("dim", row.version)} · ${status}`],
+				selected,
+				theme: cardTheme(theme),
+				measure: this.measure,
+			});
+			lines.push(...card.render(width));
+			if (start + offset < end - 1) lines.push("");
+		}
 		const hasScroll = start > 0 || end < this.filtered.length;
 		lines.push(theme.fg("dim", `  ${hasScroll ? `${this.selectedIndex + 1}/${this.filtered.length} ` : ""}${this.mode}`));
 		return lines;
@@ -614,6 +598,11 @@ export class PackagesTab implements Component {
 			case "d": {
 				const row = this.filtered[this.selectedIndex];
 				if (row) void this.runRowActionInline({ type: "disable", row });
+				return;
+			}
+			case "i": {
+				const row = this.filtered[this.selectedIndex];
+				if (row) this.host.inspectPackage(row.name);
 				return;
 			}
 			case "c": {
@@ -765,6 +754,7 @@ function renderUnifiedPanel(
 			// host.inlineCtx below, exactly like the panel's own approval/reload
 			// dialogs always have been.
 			let pendingDialog: Dialog | undefined;
+			let packageInspector: PackageInspector | undefined;
 
 			function confirmInline(title: string, message: string): Promise<boolean> {
 				return new Promise((resolve) => {
@@ -788,14 +778,28 @@ function renderUnifiedPanel(
 			}
 
 			const inlineCtx: ExtensionCommandContext = { ...ctx, hasUI: true, ui: { ...ctx.ui, confirm: confirmInline } };
+			const measure: TextMeasure = { visibleWidth, truncateToWidth };
 			const host: TabHost = {
 				ctx,
 				inlineCtx,
+				inspectPackage: (name) => {
+					packageInspector = new PackageInspector(
+						name,
+						natives,
+						theme,
+						measure,
+						() => {
+							packageInspector = undefined;
+							tui.requestRender();
+						},
+						() => tui.requestRender(),
+					);
+					void packageInspector.load();
+					tui.requestRender();
+				},
 				requestRender: () => tui.requestRender(),
 				onSessionReplaced: () => done(undefined),
 			};
-
-			const measure: TextMeasure = { visibleWidth, truncateToWidth };
 
 			const packagesTab = new PackagesTab(natives, host, theme, measure, initialRows, (target, configFilter) => {
 				if (target === "config" && configFilter !== undefined) configTab.setFilter(configFilter);
@@ -831,6 +835,7 @@ function renderUnifiedPanel(
 				],
 				theme: tabBarTheme(theme),
 				initialKey: initialTab,
+				measure,
 				// Malevich's own default matcher only recognizes legacy CSI sequences;
 				// pi-tui's real matchesKey also covers the Kitty keyboard protocol and
 				// xterm's modifyOtherKeys encodings for the same keys. Malevich's
@@ -856,7 +861,7 @@ function renderUnifiedPanel(
 
 			return {
 				render(width: number): string[] {
-					envelope.setContent(pendingDialog ?? tabbedContainer);
+					envelope.setContent(pendingDialog ?? packageInspector ?? tabbedContainer);
 					return envelope.render(width);
 				},
 				invalidate: () => envelope.invalidate(),
@@ -864,6 +869,10 @@ function renderUnifiedPanel(
 					if (pendingDialog) {
 						pendingDialog.handleInput(data);
 						tui.requestRender();
+						return;
+					}
+					if (packageInspector) {
+						packageInspector.handleInput(data);
 						return;
 					}
 					const activeKey = tabbedContainer.getActiveKey() as PackedTabKey;

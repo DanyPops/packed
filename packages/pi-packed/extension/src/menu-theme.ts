@@ -1,8 +1,17 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import type { DialogTheme, MenuTheme, TabBarTheme } from "malevich-tui-components";
+import type { CardTheme, DialogTheme, MenuTheme, TabBarTheme } from "malevich-tui-components";
 
 /** Maps Pi's own Theme onto Malevich's Menu -- the one place this mapping
  * exists, shared by every ctx.ui.custom overlay menu in this extension. */
+export function cardTheme(theme: Theme): CardTheme {
+	return {
+		border: (s) => theme.fg("border", s),
+		selectedBorder: (s) => theme.fg("accent", s),
+		content: (s) => s,
+		selectedContent: (s) => (typeof theme.inverse === "function" ? theme.inverse(theme.fg("text", s)) : theme.fg("accent", s)),
+	};
+}
+
 export function menuTheme(theme: Theme): MenuTheme {
 	return {
 		border: (s) => theme.fg("border", s),

@@ -253,7 +253,7 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		expect(rendered.some((line) => line.startsWith("│") && line.endsWith("│"))).toBe(true); // real vertical sides, not just top/bottom rules
 	});
 
-	it("renders the package list as a real column-aligned table (Malevich's Table), not ad hoc concatenated strings", async () => {
+	it("renders every installed package as a bordered Malevich Card", async () => {
 		let rendered: string[] = [];
 		const ctx = {
 			hasUI: true,
@@ -286,18 +286,12 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		await showPackedPanel(ctx, natives);
 
 		const text = rendered.join("\n");
-		expect(text).toContain("Package"); // a real table header, not a bare list
-		expect(text).toContain("Version");
-		const nameLine = rendered.find((line) => line.includes("@scope/pi-longer-package-name"));
-		const versionLine = rendered.find((line) => line.includes("pi-lsp") && line.includes("1.0.0"));
-		expect(nameLine).toBeDefined();
-		expect(versionLine).toBeDefined();
-		// Real column alignment: the version cell starts at the same character
-		// column on both rows regardless of how long each package name is --
-		// impossible with the old `${cursor} ${name}@${version}` concatenation.
-		const longNameVersionCol = nameLine!.indexOf("0.3.12");
-		const shortNameVersionCol = versionLine!.indexOf("1.0.0");
-		expect(longNameVersionCol).toBe(shortNameVersionCol);
+		expect(text).toContain("@scope/pi-longer-package-name");
+		expect(text).toContain("0.3.12 · installed");
+		expect(text).toContain("pi-lsp");
+		expect(text).toContain("1.0.0 · ↑1.1.0");
+		expect(rendered.filter((line) => line.includes("┌") && line.includes("┐"))).toHaveLength(2);
+		expect(rendered.filter((line) => line.includes("└") && line.includes("┘"))).toHaveLength(2);
 	});
 
 	it("keeps every rendered line at the exact same real (ANSI-stripped) width, under genuine theme styling, not a plain fake theme", async () => {

@@ -21,6 +21,8 @@ export interface TabHost {
 	 * approve/reload call inside a tab's own mutation flow must go through
 	 * this, not ctx directly. */
 	inlineCtx: ExtensionCommandContext;
+	/** Opens registry metadata and README for one package inside this overlay. */
+	inspectPackage(name: string): void;
 	/** Re-renders the whole overlay. Call after any state change a tab
 	 * makes outside of a handleInput call the host already re-renders for. */
 	requestRender(): void;

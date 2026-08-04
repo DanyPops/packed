@@ -9,13 +9,15 @@
  * Install (behind a quick inline confirm, then the standard approval
  * every mutation surface requires) does.
  */
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
 import { rawKeyHint } from "@earendil-works/pi-coding-agent";
 import { Input, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { Component } from "malevich-tui-components";
+import { Card, type Component } from "malevich-tui-components";
+import { cardTheme } from "../menu-theme.js";
 import type { Natives, PackageSummary } from "../packed.js";
 import { InstallServiceError } from "../packed.js";
 import type { TabHost } from "../tab-host.js";
+import { sanitizeTerminalText } from "../terminal-text.js";
 import { approvePackageOperation } from "../tools.js";
 import { shouldSearch } from "./discover-model.js";
 
@@ -52,11 +54,6 @@ export async function applyInstall(result: PackageSummary, natives: Natives, ctx
 	}
 }
 
-interface Theme {
-	fg(color: string, s: string): string;
-	bold(s: string): string;
-}
-
 /** /packed's Find tab -- a real Component. Its query box always captures
  * free text (isCapturingInput() is unconditionally true), unlike
  * Packages/Config's toggleable search: there's no "browse mode" here to
@@ -69,13 +66,13 @@ export class FindTab implements Component {
 	private searching = false;
 	private error: string | undefined;
 	private busy = false;
-	private readonly maxVisible = 15;
+	private queryActive = true;
+	private readonly maxVisible = 4;
 
 	constructor(
 		private readonly natives: Natives,
 		private readonly host: TabHost,
-		// biome-ignore lint/correctness/noUnusedPrivateClassMembers: read via `const { theme } = this` in render(), which Biome's usage check doesn't trace
-		private readonly theme: Theme,
+		private readonly _theme: Theme,
 	) {}
 
 	/** Find's query box is always in text-edit mode (no separate toggle like
@@ -103,8 +100,10 @@ export class FindTab implements Component {
 	invalidate(): void {}
 
 	render(width: number): string[] {
-		const { theme } = this;
-		const hint = rawKeyHint("enter", "search/install");
+		const theme = this._theme;
+		const hint = this.queryActive
+			? rawKeyHint("enter", "search")
+			: `${rawKeyHint("enter", "install")}${theme.fg("muted", " · ")}${rawKeyHint("i", "inspect")}${theme.fg("muted", " · ")}${rawKeyHint("/", "query")}`;
 		const status = this.searching ? "searching…" : this.error ? theme.fg("error", this.error) : `${this.results.length} result(s)`;
 		const spacing = Math.max(1, width - visibleWidth(hint) - visibleWidth(status));
 		const line1 = truncateToWidth(`${hint}${" ".repeat(spacing)}`, width, "") + status;
@@ -118,11 +117,15 @@ export class FindTab implements Component {
 		for (let i = start; i < end; i++) {
 			const result = this.results[i]!;
 			const selected = i === this.selectedIndex;
-			const cursor = selected ? theme.fg("accent", "❯") : " ";
-			const name = selected ? theme.bold(result.name) : result.name;
-			const ver = theme.fg("dim", `@${result.version}`);
-			const description = result.description ? theme.fg("muted", ` — ${result.description}`) : "";
-			lines.push(truncateToWidth(`${cursor} ${name}${ver}${description}`, width, ""));
+			const card = new Card({
+				title: theme.bold(`${result.name}@${result.version}`),
+				content: [sanitizeTerminalText(result.description ?? "No description")],
+				selected,
+				theme: cardTheme(theme),
+				measure: { visibleWidth, truncateToWidth },
+			});
+			lines.push(...card.render(width));
+			if (i < end - 1) lines.push("");
 		}
 		return lines;
 	}
@@ -137,11 +140,21 @@ export class FindTab implements Component {
 				if (this.results.length > 0) this.selectedIndex = (this.selectedIndex + 1) % this.results.length;
 				break;
 			case "\r":
-				if (shouldSearch(this.queryInput.getValue(), this.lastSearchedQuery, this.results.length > 0)) void this.runSearch();
+				if (this.queryActive || shouldSearch(this.queryInput.getValue(), this.lastSearchedQuery, this.results.length > 0))
+					void this.runSearch();
 				else void this.installSelected();
 				return;
+			case "/":
+				this.queryActive = true;
+				break;
+			case "i": {
+				const result = this.results[this.selectedIndex];
+				if (!this.queryActive && result) this.host.inspectPackage(result.name);
+				else this.queryInput.handleInput(data);
+				return;
+			}
 			default:
-				this.queryInput.handleInput(data);
+				if (this.queryActive) this.queryInput.handleInput(data);
 				break;
 		}
 		this.host.requestRender();
@@ -158,6 +171,7 @@ export class FindTab implements Component {
 			this.results = response.results;
 			this.lastSearchedQuery = this.queryInput.getValue();
 			this.selectedIndex = 0;
+			this.queryActive = false;
 		} catch (e) {
 			this.error = e instanceof Error ? e.message : String(e);
 			this.results = [];

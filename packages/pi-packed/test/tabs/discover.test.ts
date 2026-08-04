@@ -1,8 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { Natives, PackageSummary } from "../../extension/src/packed.ts";
 import { InstallServiceError } from "../../extension/src/packed.ts";
-import { applyInstall } from "../../extension/src/tabs/discover.ts";
+import type { TabHost } from "../../extension/src/tab-host.ts";
+import { applyInstall, FindTab } from "../../extension/src/tabs/discover.ts";
 
 const result: PackageSummary = { name: "pi-lsp", version: "1.0.0", description: "LSP support" };
 
@@ -23,6 +24,33 @@ function fakeCtx(confirm: boolean, notices: string[], reloads: { count: number }
 		},
 	} as unknown as ExtensionCommandContext;
 }
+
+describe("FindTab entity inspection", () => {
+	it("uses i to inspect the selected search-result Card after search settles", async () => {
+		let inspected: string | undefined;
+		const host = {
+			inspectPackage(name: string) {
+				inspected = name;
+			},
+			requestRender() {},
+		} as unknown as TabHost;
+		const tab = new FindTab(
+			{
+				async search() {
+					return { query: "hello", total: 1, results: [{ name: "demo", version: "1.0.0", description: "Demo" }] };
+				},
+			} as unknown as Natives,
+			host,
+			{ fg: (_color: string, text: string) => text, bold: (text: string) => text, inverse: (text: string) => text } as Theme,
+		);
+		tab.handleInput("hello");
+		tab.handleInput("\r");
+		await Bun.sleep(0);
+		tab.handleInput("i");
+		expect(inspected).toBe("demo");
+		expect(tab.render(40).join("\n")).toContain("┌");
+	});
+});
 
 describe("applyInstall (/packed find's install action)", () => {
 	it("warns inline before running, requires approval like every other mutation surface", async () => {

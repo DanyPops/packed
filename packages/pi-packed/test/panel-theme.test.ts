@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { renderToTerminal, type TerminalCell } from "@danypops/pi-tui-harness";
 import { type ExtensionCommandContext, initTheme, type Theme } from "@earendil-works/pi-coding-agent";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import type { Natives } from "../extension/src/packed.ts";
 import { type PackedTabKey, showPackedPanel } from "../extension/src/tui.ts";
 
@@ -33,7 +34,12 @@ function ansiTheme(mode: "dark" | "light"): Theme {
 	} as Theme;
 }
 
-async function renderPanel(mode: "dark" | "light", activeTab: PackedTabKey): Promise<string[]> {
+async function renderPanel(
+	mode: "dark" | "light",
+	activeTab: PackedTabKey,
+	installed: Array<{ name: string; installed: string }> = [],
+	width = WIDTH,
+): Promise<string[]> {
 	let frame: string[] = [];
 	const ctx = {
 		hasUI: true,
@@ -47,14 +53,14 @@ async function renderPanel(mode: "dark" | "light", activeTab: PackedTabKey): Pro
 				) => { render(width: number): string[] },
 			) {
 				const component = factory({ requestRender() {} }, ansiTheme(mode), {}, () => {});
-				frame = component.render(WIDTH);
+				frame = component.render(width);
 			},
 			notify() {},
 		},
 	} as unknown as ExtensionCommandContext;
 	const natives = {
 		async installed() {
-			return [];
+			return installed;
 		},
 		async updates() {
 			return [];
@@ -97,6 +103,27 @@ describe("/packed panel theme rendering through a real VT parser", () => {
 			} finally {
 				terminal.dispose();
 			}
+		}
+	});
+
+	it.each([40, 80, 120])("bounds installed-package Cards at %i columns", async (width) => {
+		const frame = await renderPanel("dark", "packages", [{ name: "demo-package", installed: "1.2.3" }], width);
+		for (const line of frame) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+	});
+
+	it("renders installed entities as fully highlighted Cards", async () => {
+		const frame = await renderPanel("dark", "packages", [{ name: "demo-package", installed: "1.2.3" }]);
+		const terminal = await renderToTerminal(frame, { cols: WIDTH, rows: frame.length });
+		try {
+			const lines = terminal.plainLines();
+			const topRow = lines.findIndex((line) => line.includes("┌") && line.includes("┐"));
+			const left = lines[topRow]!.indexOf("┌");
+			const right = lines[topRow]!.lastIndexOf("┐");
+			expect(terminal.cellAt(topRow, left)?.fgPaletteIndex).toBe(6);
+			expect(terminal.cellAt(topRow, right)?.fgPaletteIndex).toBe(6);
+			expect(terminal.cellAt(topRow + 1, left + 1)?.inverse).toBe(true);
+		} finally {
+			terminal.dispose();
 		}
 	});
 

@@ -39,6 +39,55 @@ describe("repository policy", () => {
 		expect(result.violations[0]).toMatchObject({ code: "BUNDLED_DEPENDENCIES", path: "package.json" });
 	});
 
+	it.each([
+		"file:../sibling-repo/packages/example",
+		"file:/home/user/Projects/example",
+		"link:../example",
+		"/home/user/Projects/example",
+		"C:\\Projects\\example",
+	])("rejects local path dependency specifier %s", (specifier) => {
+		const result = evaluateRepositoryPolicy(
+			input({ manifests: [{ path: "package.json", value: { dependencies: { "@example/lib": specifier } } }] }),
+		);
+		expect(result.ok).toBe(false);
+		expect(result.violations[0]).toMatchObject({
+			code: "LOCAL_PATH_DEPENDENCY",
+			path: "package.json",
+			packageName: "@example/lib",
+			specifier,
+		});
+	});
+
+	it("checks every dependency field, not just dependencies", () => {
+		const result = evaluateRepositoryPolicy(
+			input({
+				manifests: [
+					{
+						path: "package.json",
+						value: {
+							devDependencies: { "@example/dev": "file:../dev" },
+							peerDependencies: { "@example/peer": "file:../peer" },
+							optionalDependencies: { "@example/optional": "file:../optional" },
+						},
+					},
+				],
+			}),
+		);
+		expect(result.ok).toBe(false);
+		expect(result.violations.map((violation) => ("packageName" in violation ? violation.packageName : undefined)).sort()).toEqual([
+			"@example/dev",
+			"@example/optional",
+			"@example/peer",
+		]);
+	});
+
+	it("never flags a workspace: specifier", () => {
+		const result = evaluateRepositoryPolicy(
+			input({ manifests: [{ path: "package.json", value: { dependencies: { "@example/sibling": "workspace:*" } } }] }),
+		);
+		expect(result).toEqual({ ok: true, violations: [] });
+	});
+
 	it("reports every locked version and introducer for duplicated internal packages", () => {
 		const lockText = `
 [packages]

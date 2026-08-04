@@ -27,6 +27,13 @@ export type RepositoryPolicyViolation =
 	| { readonly code: "UNMANAGED_DEPENDENCY_ARTIFACT"; readonly path: string; readonly message: string }
 	| { readonly code: "BUNDLED_DEPENDENCIES"; readonly path: string; readonly message: string }
 	| {
+			readonly code: "LOCAL_PATH_DEPENDENCY";
+			readonly path: string;
+			readonly packageName: string;
+			readonly specifier: string;
+			readonly message: string;
+	  }
+	| {
 			readonly code: "DUPLICATE_INTERNAL_RESOLUTION";
 			readonly packageName: string;
 			readonly resolutions: Readonly<Record<string, readonly string[]>>;
@@ -54,6 +61,23 @@ function unmanagedArtifact(path: string): boolean {
 		ARCHIVE_PATTERN.test(path) ||
 		MINIFIED_PATTERN.test(path)
 	);
+}
+
+const DEPENDENCY_FIELDS = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"] as const;
+
+/**
+ * `workspace:*` (npm/pnpm/bun) is the correct, reproducible way to address a
+ * sibling package inside this same repository -- never flagged. `file:`,
+ * `link:`, and a bare absolute path (no protocol at all, which npm also
+ * accepts) all point at a location that only exists on the machine that
+ * wrote it: not installable from a clean clone or CI runner, invisible to
+ * the lockfile's own version pinning, and -- per a real incident -- capable
+ * of silently going stale or missing entirely with no install-time error.
+ */
+function isLocalPathSpecifier(specifier: string): boolean {
+	if (specifier.startsWith("workspace:")) return false;
+	if (specifier.startsWith("file:") || specifier.startsWith("link:")) return true;
+	return /^(?:\/|[A-Za-z]:[\\/])/.test(specifier);
 }
 
 function normalizedResolutions(resolutions: Readonly<Record<string, readonly string[]>>): string {
@@ -123,6 +147,21 @@ export function evaluateRepositoryPolicy(input: RepositoryPolicyInput): Reposito
 				path: manifest.path,
 				message: `${manifest.path} bundles dependencies instead of declaring them for normal resolution`,
 			});
+		}
+
+		for (const field of DEPENDENCY_FIELDS) {
+			const dependencies = manifest.value[field];
+			if (typeof dependencies !== "object" || dependencies === null || Array.isArray(dependencies)) continue;
+			for (const [packageName, specifier] of Object.entries(dependencies as Record<string, unknown>)) {
+				if (typeof specifier !== "string" || !isLocalPathSpecifier(specifier)) continue;
+				violations.push({
+					code: "LOCAL_PATH_DEPENDENCY",
+					path: manifest.path,
+					packageName,
+					specifier,
+					message: `${manifest.path}: ${field}.${packageName} is "${specifier}", a local filesystem path instead of a registry version`,
+				});
+			}
 		}
 	}
 

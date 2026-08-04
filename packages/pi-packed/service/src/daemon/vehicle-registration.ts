@@ -37,7 +37,7 @@
  */
 
 import type { VehicleEffect, VehicleIdempotency } from "@danypops/vehicle-core";
-import { bindVehicleOperation, defineVehicleOperation, passthroughVehicleSchema, VehicleError } from "@danypops/vehicle-core";
+import { bindVehicleOperation, defineErrorMapping, defineVehicleOperation, passthroughVehicleSchema } from "@danypops/vehicle-core";
 import type { VehicleRegistry } from "@danypops/vehicle-server";
 import { OPERATION_NAMES, type OperationInputs, type OperationName, type OperationOutputs } from "./service.ts";
 
@@ -50,28 +50,12 @@ function hasStatus(error: unknown): error is StatusCarryingError {
 	return error instanceof Error && typeof (error as { status?: unknown }).status === "number";
 }
 
-async function withPackedErrorParity<T>(run: () => T | Promise<T>): Promise<T> {
-	try {
-		return await run();
-	} catch (error) {
-		if (error instanceof VehicleError) throw error;
-		if (hasStatus(error)) {
-			const category =
-				error.status === 403
-					? "authorization"
-					: error.status === 404
-						? "not_found"
-						: error.status === 400
-							? "validation"
-							: error.status >= 500
-								? "unavailable"
-								: "validation";
-			throw new VehicleError("operation-rejected", error.message, { category, cause: error });
-		}
-		const message = error instanceof Error ? error.message : String(error);
-		throw new VehicleError("operation-rejected", message, { category: "validation", cause: error });
-	}
-}
+const withPackedErrorParity = defineErrorMapping([
+	{ matches: (error) => hasStatus(error) && error.status === 403, category: "authorization" },
+	{ matches: (error) => hasStatus(error) && error.status === 404, category: "not_found" },
+	{ matches: (error) => hasStatus(error) && error.status === 400, category: "validation" },
+	{ matches: (error) => hasStatus(error) && error.status >= 500, category: "unavailable" },
+]);
 
 const OWNER = "packed";
 const LIMITS = { defaultTimeoutMs: 30_000, maxTimeoutMs: 120_000, maxRequestBytes: 65_536, maxResponseBytes: 4_194_304 };

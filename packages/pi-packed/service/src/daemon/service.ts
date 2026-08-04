@@ -251,7 +251,11 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 	// Additive, real Vehicle protocol surface for this daemon's full operation set -- served
 	// at /vehicle/* alongside (not replacing) /api/v1/ops below. Every operation delegates to
 	// the exact same executeOperation() this route's own /api/v1/ops handler calls.
-	const vehicleRegistry = new VehicleRegistry({ name: "packed", version: VERSION, description: "Pi package lifecycle daemon" });
+	const vehicleRegistry = new VehicleRegistry({
+		name: "packed",
+		packageJsonUrl: new URL("../../../package.json", import.meta.url),
+		description: "Pi package lifecycle daemon",
+	});
 	registerPackedVehicleOperations(vehicleRegistry, executeOperation);
 	const vehicleApp = createVehicleHttpApp({ registry: vehicleRegistry, token: deps.token });
 

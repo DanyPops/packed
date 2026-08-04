@@ -52,8 +52,14 @@ describe("published npm metadata E2E", () => {
 						description: "Encrypted credential vault daemon",
 						license: "MIT",
 						repository: { type: "git", url: "git+https://github.com/DanyPops/enigma.git" },
-						readme: PUBLISHED_README,
 						dist: { integrity: "sha512-published-fixture" },
+					});
+				}
+				if (url.pathname === "/%40danypops/enigma") {
+					return Response.json({
+						name: "@danypops/enigma",
+						"dist-tags": { latest: "0.22.1" },
+						readme: PUBLISHED_README,
 					});
 				}
 				return new Response("not found", { status: 404 });
@@ -78,7 +84,13 @@ describe("published npm metadata E2E", () => {
 		const client = new PackedClient(`http://127.0.0.1:${daemonServer.port}`, TOKEN);
 		const info = await client.info("@danypops/enigma");
 
-		expect(npmRequests).toEqual([{ path: "/%40danypops/enigma/latest", accept: "application/json" }]);
+		expect(npmRequests).toHaveLength(2);
+		expect(npmRequests).toEqual(
+			expect.arrayContaining([
+				{ path: "/%40danypops/enigma/latest", accept: "application/json" },
+				{ path: "/%40danypops/enigma", accept: "application/json" },
+			]),
+		);
 		expect(info).toMatchObject({
 			name: "@danypops/enigma",
 			version: "0.22.1",

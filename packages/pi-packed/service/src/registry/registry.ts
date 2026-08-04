@@ -16,6 +16,7 @@ import { createLogger } from "../shared/log.ts";
 
 const log = createLogger("registry");
 const README_MAX_CHARS = 50_000;
+const README_DOCUMENT_MAX_BYTES = 1024 * 1024;
 
 /** Upstream etiquette: honor Retry-After on 429, exponential backoff
  * otherwise, give up after RETRY_MAX_ATTEMPTS. */
@@ -126,11 +127,10 @@ export class HttpRegistry implements Registry {
 			pi?: Record<string, unknown>;
 			peerDependencies?: Record<string, string>;
 			scripts?: Record<string, string>;
-			readme?: unknown;
 			dist?: { unpackedSize?: number; integrity?: string; attestations?: { url?: string; provenance?: unknown } };
 		};
 		const manifestFields = v.pi ? Object.keys(v.pi).filter((key) => ["extensions", "skills", "prompts", "themes"].includes(key)) : [];
-		const readme = boundedString(v.readme, README_MAX_CHARS);
+		const readme = await this.publishedReadme(encoded);
 		return {
 			name: boundedString(v.name, 214) ?? boundedString(name, 214)!,
 			version: boundedString(v.version, 128) ?? "",
@@ -164,6 +164,22 @@ export class HttpRegistry implements Registry {
 				trustedPublisher: "unknown",
 			},
 		};
+	}
+
+	private async publishedReadme(encodedName: string): Promise<string | undefined> {
+		try {
+			const response = await fetchWithRetry(
+				`${this.base}/${encodedName}`,
+				{ headers: { accept: "application/json" } },
+				this.retryBaseDelayMs,
+			);
+			if (!response.ok) return undefined;
+			const document = (await boundedJson(response, README_DOCUMENT_MAX_BYTES)) as { readme?: unknown };
+			return boundedString(document.readme, README_MAX_CHARS);
+		} catch (error) {
+			log.debug("published README unavailable", { error: error instanceof Error ? error.message : String(error) });
+			return undefined;
+		}
 	}
 
 	/** Uses npm's abbreviated multi-version doc, not `/latest` (which carries

@@ -69,7 +69,6 @@ describe("HttpRegistry", () => {
 						license: "MIT",
 						keywords: ["pi-package", "lsp"],
 						pi: { extensions: ["./src/index.ts"] },
-						readme: `# pi-lsp\n\n${"r".repeat(60_000)}`,
 						dist: {
 							unpackedSize: 12345,
 							integrity: "sha512-test",
@@ -77,6 +76,7 @@ describe("HttpRegistry", () => {
 						},
 					});
 				}
+				if (url.pathname === "/pi-lsp") return Response.json({ readme: `# pi-lsp\n\n${"r".repeat(60_000)}` });
 				return new Response("nf", { status: 404 });
 			},
 		});

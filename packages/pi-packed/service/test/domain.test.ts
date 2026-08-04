@@ -260,21 +260,23 @@ describe("updates store", () => {
 describe("watcher producer", () => {
 	it("writes a snapshot on tick", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "packed-"));
+		let signalTick: ((snapshot: UpdatesSnapshot) => void) | undefined;
+		const tick = new Promise<UpdatesSnapshot>((resolve) => {
+			signalTick = resolve;
+		});
 		const stop = startWatcher(
 			() => "0.9.0",
 			dir,
 			() => [{ name: "pi-extension-manager", pinned: "0.8.2" }],
-			{ intervalMs: 60_000 },
+			{ intervalMs: 60_000, onTick: (snapshot) => signalTick?.(snapshot) },
 		);
-		const deadline = Date.now() + 2000;
-		let snap: UpdatesSnapshot | undefined;
-		while (Date.now() < deadline) {
-			snap = await loadUpdates(dir);
-			if (snap?.updates.length) break;
-			await Bun.sleep(25);
+		try {
+			const snap = await tick;
+			expect(snap.updates[0]?.latest).toBe("0.9.0");
+			expect(await loadUpdates(dir)).toEqual(snap);
+		} finally {
+			stop();
 		}
-		stop();
-		expect(snap?.updates[0]?.latest).toBe("0.9.0");
 	});
 });
 

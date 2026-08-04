@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createArmadaTestHarness } from "@danypops/armada/testing";
 import type { ServiceDoctorDeps } from "../src/adoption/service-doctor.ts";
 import { checkServiceUnitPaths } from "../src/adoption/service-doctor.ts";
 
@@ -64,27 +65,40 @@ describe("checkServiceUnitPaths", () => {
 		expect(report).toEqual({ ok: true, diagnostics: [], checked: 1 });
 	});
 
-	it("reports an Armada-managed Vehicle that is declared but not running", () => {
+	it("reports a stopped Vehicle from Armada's real status projection", async () => {
 		const home = piHome(["npm:fakedaemon"]);
 		const dir = installDaemonPackage(home, "fakedaemon");
-		const report = checkServiceUnitPaths(
-			home,
-			undefined,
-			fakeDeps({ vehicles: [{ name: "fakedaemon", executable: join(dir, "cli.ts"), nativeStatus: "stopped", ready: false }], diagnostics: [] }),
-		);
-		expect(report).toEqual({
-			ok: false,
-			checked: 1,
-			diagnostics: [
-				{
-					code: "SERVICE_NOT_RUNNING",
-					severity: "error",
-					package: "fakedaemon",
-					unitName: "fakedaemon",
-					message: expect.stringContaining("stopped"),
-				},
-			],
-		});
+		const harness = await createArmadaTestHarness();
+		try {
+			const registered = await harness.registrar.register({
+				name: "fakedaemon",
+				version: "1.0.0",
+				executable: join(dir, "cli.ts"),
+				arguments: ["serve"],
+				handlePath: join(harness.root, "fakedaemon", "handle.json"),
+				restart: { policy: "on-failure", delayMs: 100, maxAttempts: 2, windowMs: 1_000 },
+				readiness: { timeoutMs: 100, pollIntervalMs: 50 },
+			});
+			expect(registered.ok).toBe(true);
+			harness.application("fakedaemon").exitCleanly();
+
+			const report = checkServiceUnitPaths(home, undefined, fakeDeps(await harness.status()));
+			expect(report).toEqual({
+				ok: false,
+				checked: 1,
+				diagnostics: [
+					{
+						code: "SERVICE_NOT_RUNNING",
+						severity: "error",
+						package: "fakedaemon",
+						unitName: "fakedaemon",
+						message: expect.stringContaining("stopped"),
+					},
+				],
+			});
+		} finally {
+			await harness.dispose();
+		}
 	});
 
 	it("reports a missing Armada-managed executable", () => {

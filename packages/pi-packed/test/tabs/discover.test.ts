@@ -1,9 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import type { ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
+import { type ExtensionCommandContext, initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import type { Natives, PackageSummary } from "../../extension/src/packed.ts";
 import { InstallServiceError } from "../../extension/src/packed.ts";
 import type { TabHost } from "../../extension/src/tab-host.ts";
 import { applyInstall, FindTab } from "../../extension/src/tabs/discover.ts";
+
+initTheme();
 
 const result: PackageSummary = { name: "pi-lsp", version: "1.0.0", description: "LSP support" };
 
@@ -46,7 +48,7 @@ describe("FindTab entity inspection", () => {
 		);
 		tab.handleInput("demo");
 		tab.handleInput("\r");
-		await Bun.sleep(0);
+		await tab.whenIdle();
 		const lines = tab.render(40);
 		const firstBottom = lines.findIndex((line) => line.startsWith("└"));
 		expect(lines[firstBottom + 1]).toStartWith("┌");
@@ -71,7 +73,7 @@ describe("FindTab entity inspection", () => {
 		);
 		tab.handleInput("hello");
 		tab.handleInput("\r");
-		await Bun.sleep(0);
+		await tab.whenIdle();
 		tab.handleInput("i");
 		expect(inspected).toBe("demo");
 		expect(tab.render(40).join("\n")).toContain("┌");

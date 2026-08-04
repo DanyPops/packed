@@ -100,17 +100,6 @@ export function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOpt
 	];
 	const maintenanceTasks = configuredMaintenanceTasks.filter((task) => task.intervalMs > 0);
 
-	if (options.maintenanceTasks === undefined) {
-		for (const task of maintenanceTasks) {
-			// Armada reconciles the whole desired fleet. Running this before Packed
-			// publishes its readiness handle makes Armada replace Packed mid-startup.
-			if (task.name === "vehicle-reconcile") continue;
-			void Promise.resolve(task.run()).catch((error) =>
-				logger.error(`maintenance task failed: ${task.name}`, { error: error instanceof Error ? error.message : String(error) }),
-			);
-		}
-	}
-
 	return {
 		daemonLabel: "Packed",
 		handlePath: paths.handle,
@@ -123,18 +112,18 @@ export function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOpt
 	};
 }
 
-function runReadyVehicleReconcile(maintenanceTasks: MaintenanceTask[] | undefined): void {
-	const task = maintenanceTasks?.find((candidate) => candidate.name === "vehicle-reconcile");
-	if (!task) return;
-	void Promise.resolve(task.run()).catch((error) =>
-		logger.error(`maintenance task failed: ${task.name}`, { error: error instanceof Error ? error.message : String(error) }),
-	);
+function runInitialMaintenance(maintenanceTasks: MaintenanceTask[] | undefined): void {
+	for (const task of maintenanceTasks ?? []) {
+		void Promise.resolve(task.run()).catch((error) =>
+			logger.error(`maintenance task failed: ${task.name}`, { error: error instanceof Error ? error.message : String(error) }),
+		);
+	}
 }
 
 export async function startPackedDaemon(options: StartPackedDaemonOptions = {}): Promise<RunningDaemon> {
 	const configured = daemonOptions(options);
 	const running = await startDaemon(configured);
-	runReadyVehicleReconcile(configured.maintenanceTasks);
+	runInitialMaintenance(configured.maintenanceTasks);
 	return running;
 }
 
@@ -144,7 +133,7 @@ export function serveMain(): void {
 		...configured,
 		onListen: ({ host, port }) => {
 			logger.info("listening", { host, port });
-			runReadyVehicleReconcile(configured.maintenanceTasks);
+			runInitialMaintenance(configured.maintenanceTasks);
 		},
 	});
 }

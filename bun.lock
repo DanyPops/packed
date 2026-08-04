@@ -29,12 +29,12 @@
     },
     "packages/pi-packed": {
       "name": "@danypops/pi-packed",
-      "version": "0.21.3",
+      "version": "0.21.4",
       "bin": {
         "packed": "service/src/cli/cli.ts",
       },
       "dependencies": {
-        "@danypops/armada": "^0.2.0",
+        "@danypops/armada": "^0.3.1",
         "@danypops/packed": "^0.6.0",
         "@danypops/pi-extension-harness": "^0.2.0",
         "@danypops/vehicle-client": "^0.5.1",
@@ -128,7 +128,7 @@
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.5.6", "", { "os": "win32", "cpu": "x64" }, "sha512-WN05KwXnTO/2J45RQPvzZMXf7tZUIofHoR35xIPfCo7pQ2RFidxI8sfb5mGsaTxdMmEOzHzOPRCdA5/fCpc7xQ=="],
 
-    "@danypops/armada": ["@danypops/armada@0.2.0", "", { "dependencies": { "typebox": "^1.3.6" }, "bin": { "armada": "dist/cli.js" } }, "sha512-g84bLI/wuIBdjjfKGEFFjjR8U5BB0WQbOs1wAhs/PNMMwW1BRADwxx0Us7YiQvLtMTzY5DETJ+tiv33avcbRqA=="],
+    "@danypops/armada": ["@danypops/armada@0.3.1", "", { "dependencies": { "typebox": "^1.3.6" }, "bin": { "armada": "dist/cli.js" } }, "sha512-AxfFTJnsSbZXibgeHgPs97mt670AYqogKthI6sGNsNiFCNFqy7iXFdKt3ZusboN/SUKHtFCd+0j/B8jryi8EnQ=="],
 
     "@danypops/daemon-kit": ["@danypops/daemon-kit@0.4.0", "", { "dependencies": { "pino": "^10.3.1" }, "peerDependencies": { "typescript": "^5" } }, "sha512-oZ1Ryen4r9TpaoRdHPgxqvNo1EKO4erPCRTf4v2qlnF3RUYb6Rz/YHCacZF3WtWi0hr1qL9nmmR5YdT6RI6rgw=="],
 
@@ -643,6 +643,8 @@
     "@danypops/vehicle-client-pi/@danypops/vehicle-server": ["@danypops/vehicle-server@0.14.2", "", { "dependencies": { "@danypops/armada": "^0.1.1", "@danypops/vehicle-core": "^0.10.0", "pino": "^10.3.1" } }, "sha512-k60nMbpVtzZ4D4ch4YZ2kfuRPQo4qG9xNZR9J07s/YT22zzO4Hphi/cGGR2Rsikvf9oSWShZ80wClZEn35SKpg=="],
 
     "@danypops/vehicle-client-pi/malevich-tui-components": ["malevich-tui-components@0.19.1", "", {}, "sha512-4WPZ268h3dhz2deI+bdcmkxNG+DRrjGS4R71wLLDQwyrOPCmOjefgNvNbTthfBcu+wy4ih40vglmuVOt9I+xag=="],
+
+    "@danypops/vehicle-server/@danypops/armada": ["@danypops/armada@0.2.0", "", { "dependencies": { "typebox": "^1.3.6" }, "bin": { "armada": "dist/cli.js" } }, "sha512-g84bLI/wuIBdjjfKGEFFjjR8U5BB0WQbOs1wAhs/PNMMwW1BRADwxx0Us7YiQvLtMTzY5DETJ+tiv33avcbRqA=="],
 
     "@earendil-works/pi-agent-core/typebox": ["typebox@1.1.38", "", {}, "sha512-pZ0aQPmMmXoUvSbeuWf/Hzsc+avNw/Zd6VeE8CFgkVGWyuHPJvqeJJDeJqLve+K70LvjYIoleGcoJHPT17cWoA=="],
 

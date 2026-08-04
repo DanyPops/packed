@@ -2,8 +2,15 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createArmadaTestHarness } from "@danypops/armada/testing";
+import type { MaintenanceTask } from "@danypops/vehicle-server/daemon";
 import type { ServiceInstallResult, ServiceSpec } from "@danypops/vehicle-server/service";
 import { daemonOptions, startPackedDaemon } from "../src/daemon/daemon.ts";
+import {
+	type DaemonServiceInstaller,
+	RealDaemonServiceInstaller,
+	reconcileAllDaemonServices,
+} from "../src/daemon/daemon-service.ts";
 import type { Installer, Registry } from "../src/packages/package.ts";
 import { RECONCILE_INTERVAL_DEFAULT_MS } from "../src/shared/constants.ts";
 import { resolvePackedPaths } from "../src/shared/paths.ts";
@@ -24,6 +31,30 @@ function fakePaths() {
 	const root = mkdtempSync(join(tmpdir(), "packed-maintenance-state-"));
 	roots.push(root);
 	return resolvePackedPaths({ env: { PI_PACKED_HOME: root } });
+}
+
+function vehicleReconcileTask(piHome: string, daemonServiceInstaller: DaemonServiceInstaller): MaintenanceTask {
+	return {
+		name: "vehicle-reconcile",
+		intervalMs: RECONCILE_INTERVAL_DEFAULT_MS,
+		run: async () => {
+			await reconcileAllDaemonServices(piHome, undefined, daemonServiceInstaller);
+		},
+	};
+}
+
+function installMockDaemon(piHome: string, name: string): void {
+	const directory = join(piHome, "npm", "node_modules", name);
+	mkdirSync(directory, { recursive: true });
+	writeFileSync(
+		join(directory, "package.json"),
+		JSON.stringify({
+			name,
+			version: "1.0.0",
+			packed: { daemonService: { binPath: "cli.ts", args: ["serve"] } },
+		}),
+	);
+	writeFileSync(join(directory, "cli.ts"), "// Mock Vehicle entry point; Armada's test controller never executes it.\n");
 }
 
 const registry: Registry = {
@@ -101,40 +132,89 @@ describe("startPackedDaemon's own maintenance-task wiring (self-heals Vehicle dr
 		const task = options.maintenanceTasks?.find((t) => t.name === "vehicle-reconcile");
 		expect(task).toBeDefined();
 
-		// daemonOptions() also fires every default task once at startup (see the dedicated
-		// startup-self-heal test below) -- let that finish, then isolate this test's own
-		// explicit invocation from it rather than racing the two.
-		await new Promise((resolveTick) => setTimeout(resolveTick, 20));
-		installerSpy.gotSources = [];
 		await task?.run();
 
 		expect(installerSpy.gotSources).toEqual(["npm:@danypops/probe", "npm:@danypops/other"]);
 	});
 
+	it("runs initial maintenance only after publishing the daemon handle", async () => {
+		const piHome = fakePiHome([]);
+		const paths = fakePaths();
+		let resolveRun: (() => void) | undefined;
+		const ran = new Promise<void>((resolve) => {
+			resolveRun = resolve;
+		});
+		const task: MaintenanceTask = {
+			name: "probe-initial-maintenance",
+			intervalMs: RECONCILE_INTERVAL_DEFAULT_MS,
+			run: () => {
+				expect(existsSync(paths.handle)).toBe(true);
+				resolveRun?.();
+			},
+		};
+
+		const running = await startPackedDaemon({ paths, reg: registry, inst: installer, piHome, maintenanceTasks: [task] });
+		try {
+			await Promise.race([
+				ran,
+				new Promise<never>((_, reject) => setTimeout(() => reject(new Error("initial maintenance did not run")), 250)),
+			]);
+		} finally {
+			await running.stop();
+		}
+	});
+
 	it("does not reconcile Armada before the daemon has published its readiness handle", async () => {
 		const piHome = fakePiHome(["npm:@danypops/pi-packed", "npm:@danypops/probe"]);
 		const paths = fakePaths();
-		const installerSpy = new RecordingDaemonServiceInstaller();
-		mkdirSync(join(piHome, "npm", "node_modules"), { recursive: true });
-		daemonOptions({ paths, reg: registry, inst: installer, piHome, daemonServiceInstaller: installerSpy });
+		installMockDaemon(piHome, "@danypops/pi-packed");
+		installMockDaemon(piHome, "@danypops/probe");
+		const harness = await createArmadaTestHarness();
+		try {
+			const serviceInstaller = new RealDaemonServiceInstaller(harness.registrar);
+			daemonOptions({
+				paths,
+				reg: registry,
+				inst: installer,
+				piHome,
+				daemonServiceInstaller: serviceInstaller,
+				maintenanceTasks: [vehicleReconcileTask(piHome, serviceInstaller)],
+			});
 
-		// Give pre-listen maintenance enough time to expose an accidental Armada call.
-		await new Promise((resolveTick) => setTimeout(resolveTick, 10));
-
-		expect(installerSpy.gotSources).toEqual([]);
+			expect(existsSync(paths.handle)).toBe(false);
+			expect(harness.events()).toEqual([]);
+		} finally {
+			await harness.dispose();
+		}
 	});
 
 	it("reconciles Armada only after the real daemon handle is ready", async () => {
 		const piHome = fakePiHome(["npm:@danypops/pi-packed", "npm:@danypops/probe"]);
 		const paths = fakePaths();
-		const installerSpy = new RecordingDaemonServiceInstaller();
-		const running = await startPackedDaemon({ paths, reg: registry, inst: installer, piHome, daemonServiceInstaller: installerSpy });
+		installMockDaemon(piHome, "@danypops/pi-packed");
+		installMockDaemon(piHome, "@danypops/probe");
+		const harness = await createArmadaTestHarness();
+		const serviceInstaller = new RealDaemonServiceInstaller(harness.registrar);
+		const running = await startPackedDaemon({
+			paths,
+			reg: registry,
+			inst: installer,
+			piHome,
+			daemonServiceInstaller: serviceInstaller,
+			maintenanceTasks: [vehicleReconcileTask(piHome, serviceInstaller)],
+		});
 		try {
-			await new Promise((resolveTick) => setTimeout(resolveTick, 10));
+			await harness.waitForEvent("ready:probe");
 			expect(existsSync(paths.handle)).toBe(true);
-			expect(installerSpy.gotSources).toEqual(["npm:@danypops/probe"]);
+			expect(harness.events()).toEqual([
+				"replace:armada-probe.service",
+				"start:armada-probe.service",
+				"ready:probe",
+			]);
+			expect(await harness.registrar.isRegistered("pi-packed")).toBe(false);
 		} finally {
 			await running.stop();
+			await harness.dispose();
 		}
 	});
 });

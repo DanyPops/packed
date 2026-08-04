@@ -68,6 +68,7 @@ export class FindTab implements Component {
 	private busy = false;
 	private queryActive = true;
 	private readonly maxVisible = 4;
+	private readonly idleWaiters = new Set<() => void>();
 
 	constructor(
 		private readonly natives: Natives,
@@ -98,6 +99,17 @@ export class FindTab implements Component {
 	}
 
 	invalidate(): void {}
+
+	whenIdle(): Promise<void> {
+		if (!this.searching && !this.busy) return Promise.resolve();
+		return new Promise((resolve) => this.idleWaiters.add(resolve));
+	}
+
+	private signalIdle(): void {
+		if (this.searching || this.busy) return;
+		for (const resolve of this.idleWaiters) resolve();
+		this.idleWaiters.clear();
+	}
 
 	render(width: number): string[] {
 		const theme = this._theme;
@@ -177,6 +189,7 @@ export class FindTab implements Component {
 		} finally {
 			this.searching = false;
 			this.host.requestRender();
+			this.signalIdle();
 		}
 	}
 
@@ -196,6 +209,7 @@ export class FindTab implements Component {
 		} finally {
 			this.busy = false;
 			this.host.requestRender();
+			this.signalIdle();
 		}
 	}
 }

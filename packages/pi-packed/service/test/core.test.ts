@@ -23,11 +23,12 @@ describe("clampLimit", () => {
 });
 
 describe("TTLCache", () => {
-	it("stores and expires", async () => {
-		const c = new TTLCache(20); // ms
+	it("stores and expires against an injected clock", () => {
+		let now = 1_000;
+		const c = new TTLCache(20, () => now);
 		c.set("k", "v");
 		expect(c.get("k")).toBe("v");
-		await Bun.sleep(30);
+		now += 21;
 		expect(c.get("k")).toBeUndefined();
 	});
 });

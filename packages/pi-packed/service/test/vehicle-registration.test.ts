@@ -1,10 +1,21 @@
-import { describe, expect, it } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { afterEach, describe, expect, it } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OPERATION_NAMES } from "../src/daemon/service.ts";
 import { createApp, type Deps } from "../src/daemon/service.ts";
 import type { Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/packages/package.ts";
+
+const roots: string[] = [];
+afterEach(() => {
+	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function temporaryRoot(prefix: string): string {
+	const root = mkdtempSync(join(tmpdir(), prefix));
+	roots.push(root);
+	return root;
+}
 
 class FakeRegistry implements Registry {
 	constructor(
@@ -42,7 +53,7 @@ function deps(over: Partial<Deps> = {}): Deps {
 		reg: new FakeRegistry([{ name: "pi-lsp", version: "1.0.0", description: "An LSP package" }], 1),
 		inst: new FakeInstaller(),
 		token: "test-token",
-		stateDir: mkdtempSync(join(tmpdir(), "packed-vehicle-")),
+		stateDir: temporaryRoot("packed-vehicle-"),
 		...over,
 	};
 }
@@ -78,7 +89,7 @@ describe("packed's daemon operation surface, through the real Vehicle wire proto
 	});
 
 	it("package.installed and pi.status (daemon-only, never a Pi tool) are still reachable through /vehicle/invoke", async () => {
-		const app = createApp(deps({ piHome: mkdtempSync(join(tmpdir(), "packed-vehicle-pihome-")) }));
+		const app = createApp(deps({ piHome: temporaryRoot("packed-vehicle-pihome-") }));
 		const installed = await invoke(app, "package.installed", {});
 		expect(installed.status).toBe(200);
 		expect(installed.body.output).toEqual([]);

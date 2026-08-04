@@ -165,13 +165,22 @@ describe("buildIndex bounds", () => {
 		replaceAll(db, [{ name: "pi-one", version: "1.0.0" }], "test");
 		db.close();
 		let infoCalls = 0;
+		let releaseResponse: (() => void) | undefined;
+		let signalRequest: (() => void) | undefined;
+		const responseGate = new Promise<void>((resolve) => {
+			releaseResponse = resolve;
+		});
+		const requestReceived = new Promise<void>((resolve) => {
+			signalRequest = resolve;
+		});
 		const server = Bun.serve({
 			port: 0,
 			async fetch(req) {
 				const url = new URL(req.url);
 				if (url.pathname.endsWith("/latest")) {
 					infoCalls++;
-					await Bun.sleep(30);
+					signalRequest?.();
+					await responseGate;
 					return Response.json({ name: "pi-one", version: "1.0.0" });
 				}
 				return new Response("not found", { status: 404 });
@@ -179,7 +188,11 @@ describe("buildIndex bounds", () => {
 		});
 		try {
 			const reg = new HttpRegistry(`http://127.0.0.1:${server.port}`, 250, 0, 1, `http://127.0.0.1:${server.port}`);
-			const [a, b] = await Promise.all([buildIndex(reg, dir, { delayMs: 0 }), buildIndex(reg, dir, { delayMs: 0 })]);
+			const first = buildIndex(reg, dir, { delayMs: 0 });
+			await requestReceived;
+			const second = buildIndex(reg, dir, { delayMs: 0 });
+			releaseResponse?.();
+			const [a, b] = await Promise.all([first, second]);
 			expect(a).toBe(b); // the very same result object -- one real run, not two
 			expect(infoCalls).toBe(1); // never doubled
 		} finally {

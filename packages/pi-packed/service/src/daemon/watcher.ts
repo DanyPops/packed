@@ -68,6 +68,7 @@ export function checkUpdates(latestOf: (name: string) => string | undefined, ins
 export interface WatcherOptions {
 	intervalMs: number;
 	onError?: (e: unknown) => void;
+	onTick?: (snapshot: UpdatesSnapshot) => void;
 }
 
 /** Producer loop: immediate check, then on a timer. Returns a stop function. */
@@ -80,7 +81,9 @@ export function startWatcher(
 	async function check(): Promise<void> {
 		try {
 			const updates = checkUpdates(latestOf, readInstalled());
-			await saveUpdates(stateDir, { checkedAt: new Date().toISOString(), updates });
+			const snapshot = { checkedAt: new Date().toISOString(), updates };
+			await saveUpdates(stateDir, snapshot);
+			opts.onTick?.(snapshot);
 			log.info("updates check", { updates: updates.length });
 		} catch (e) {
 			opts.onError?.(e);

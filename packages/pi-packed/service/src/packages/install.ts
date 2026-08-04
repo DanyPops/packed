@@ -1,5 +1,6 @@
 /** install.ts — driven adapter: pi CLI mutations via Bun.spawn. */
 
+import { join } from "node:path";
 import { HeadlessInstallValidator, type InstallValidator } from "../adoption/install-validation.ts";
 import { defaultPiHome, isPinnedNpmSource, readResolvedVersion } from "./installed.ts";
 import type { Installer, UpdateOutcome } from "./package.ts";
@@ -11,11 +12,16 @@ export function defaultPiBin(): string {
 	return process.env.PI_PACKED_PI_BIN ?? process.env.PI_BIN ?? "pi";
 }
 
+export function defaultNpmBin(): string {
+	return process.env.PI_PACKED_NPM_BIN ?? process.env.NPM_BIN ?? "npm";
+}
+
 export class ExecInstaller implements Installer {
 	constructor(
 		private bin = defaultPiBin(),
 		private piHome = defaultPiHome(),
 		private validator: InstallValidator = new HeadlessInstallValidator(),
+		private npmBin = defaultNpmBin(),
 	) {}
 
 	private async run(args: string[]): Promise<string> {
@@ -24,6 +30,26 @@ export class ExecInstaller implements Installer {
 		const out = [stdout.trim(), stderr.trim()].filter(Boolean).join("\n");
 		const code = await proc.exited;
 		if (code !== 0) throw new Error(out || `exit ${code}`);
+		return out;
+	}
+
+	/**
+	 * `pi install`/`pi update --extension <source>` only resolve the target
+	 * package's own subtree. npm's own `dedupe` docs (confirmed by
+	 * npm/cli#5307 and npm/cli#7277) describe rearranging already-resolved
+	 * versions, never installing a newer one -- so a sibling package's own
+	 * declared range can go unsatisfied at the shared root and node's
+	 * resolution silently walks up to a stale copy nothing wanted. A full
+	 * `npm install` (no args) at piHome/npm is npm's own documented reliable
+	 * fix: it re-resolves the whole tree, not just the last-touched package.
+	 */
+	private async reresolveDependencyTree(): Promise<string> {
+		const cwd = join(this.piHome, "npm");
+		const proc = Bun.spawn([this.npmBin, "install"], { cwd, stdout: "pipe", stderr: "pipe" });
+		const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+		const out = [stdout.trim(), stderr.trim()].filter(Boolean).join("\n");
+		const code = await proc.exited;
+		if (code !== 0) throw new Error(`npm install failed to re-resolve the dependency tree at ${cwd} (exit ${code}): ${out || "no output"}`);
 		return out;
 	}
 
@@ -36,7 +62,9 @@ export class ExecInstaller implements Installer {
 				.join("; ");
 			throw new Error(`install refused -- ${detail || validation.message || "extension failed a headless load check"}`);
 		}
-		return this.run(["install", ...(options?.local ? ["-l"] : []), source]);
+		const output = await this.run(["install", ...(options?.local ? ["-l"] : []), source]);
+		await this.reresolveDependencyTree();
+		return output;
 	}
 
 	remove(source: string, options?: { approved?: boolean; local?: boolean }): Promise<string> {
@@ -47,6 +75,7 @@ export class ExecInstaller implements Installer {
 		const pinned = isPinnedNpmSource(source);
 		const previousVersion = readResolvedVersion(this.piHome, source);
 		const output = await this.run(["update", "--extension", source]);
+		await this.reresolveDependencyTree();
 		const currentVersion = readResolvedVersion(this.piHome, source);
 		// Only trust a "nothing changed" conclusion when we actually read a
 		// real version both before and after (npm source, resolvable in

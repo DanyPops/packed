@@ -8,6 +8,8 @@
  * pass.
  */
 import { describe, expect, it } from "bun:test";
+import { mkdirSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { InstallValidationResult, InstallValidator } from "../src/adoption/install-validation.ts";
@@ -94,13 +96,18 @@ describe("ExecInstaller.install() -- refuses before ever spawning the real pi bi
 		await expect(installer.install("npm:broken-pkg")).rejects.toThrow(/install refused.*extension\/index\.ts: boom/);
 	});
 
-	it("proceeds to the real install when the validator approves", async () => {
-		// /bin/true always exits 0 -- proves the real spawn path was reached
-		// (a refused install never gets this far to find out).
+	it("proceeds to the real install when the validator approves, then re-resolves the whole tree", async () => {
+		// A real piHome/npm dir must exist for the post-install re-resolution
+		// step to cwd into -- /bin/true always exits 0 regardless, proving both
+		// the real install spawn *and* the re-resolution spawn were reached (a
+		// refused install never gets this far to find out).
+		const piHome = mkdtempSync(join(tmpdir(), "packed-install-validation-pihome-"));
+		mkdirSync(join(piHome, "npm"), { recursive: true });
 		const installer = new ExecInstaller(
 			"/bin/true",
-			"/tmp/unused-pihome",
+			piHome,
 			fakeValidator({ ok: true, source: "npm:good-pkg", extensions: [] }),
+			"/bin/true",
 		);
 
 		await expect(installer.install("npm:good-pkg")).resolves.toBeDefined();

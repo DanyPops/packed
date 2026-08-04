@@ -40,6 +40,7 @@ function writeFakePi(dir: string, rewrite?: { piHome: string; name: string; newV
 
 function writePiHome(nodeModules: Record<string, string> = {}): string {
 	const dir = mkdtempSync(join(tmpdir(), "packed-exec-pihome-"));
+	mkdirSync(join(dir, "npm"), { recursive: true });
 	for (const [name, version] of Object.entries(nodeModules)) {
 		const pkgDir = join(dir, "npm", "node_modules", name);
 		mkdirSync(pkgDir, { recursive: true });
@@ -48,12 +49,35 @@ function writePiHome(nodeModules: Record<string, string> = {}): string {
 	return dir;
 }
 
+/**
+ * A fake `npm` binary standing in for ExecInstaller's post-install/update
+ * full-tree re-resolution step. Writes every invocation's cwd to `logFile`
+ * (so a test can assert it actually ran against piHome/npm, not some other
+ * directory) and, when `rewrite` is given, writes a fresh version for a
+ * *different* package than the one the fake `pi` binary touched --
+ * reproducing the real defect: only a real `npm install` (no args, whole
+ * tree) reaches a stale sibling that a targeted `pi update` never does.
+ */
+function writeFakeNpm(dir: string, logFile: string, rewrite?: { piHome: string; name: string; newVersion: string }): string {
+	const script = join(dir, "fake-npm");
+	const rewriteLine = rewrite
+		? `mkdir -p '${join(rewrite.piHome, "npm", "node_modules", rewrite.name)}' && printf '{"version":"%s"}' '${rewrite.newVersion}' > '${join(rewrite.piHome, "npm", "node_modules", rewrite.name, "package.json")}'`
+		: "true";
+	writeFileSync(
+		script,
+		["#!/usr/bin/env bash", "set -euo pipefail", `pwd >> '${logFile}'`, `echo "$@" >> '${logFile}'`, rewriteLine, "exit 0"].join("\n"),
+	);
+	chmodSync(script, 0o755);
+	return script;
+}
+
 describe("ExecInstaller.update() — honest reloadRequired despite pi's ambiguous exit-0 text", () => {
 	it("pinned source, version genuinely unchanged: alreadyUpToDate, reloadRequired false", async () => {
 		const scriptDir = mkdtempSync(join(tmpdir(), "packed-exec-bin-"));
 		const bin = writeFakePi(scriptDir);
+		const npmBin = writeFakeNpm(scriptDir, join(scriptDir, "npm.log"));
 		const piHome = writePiHome({ "@scope/pkg": "1.2.3" });
-		const installer = new ExecInstaller(bin, piHome);
+		const installer = new ExecInstaller(bin, piHome, undefined, npmBin);
 
 		const outcome = await installer.update("npm:@scope/pkg@1.2.3");
 
@@ -68,8 +92,9 @@ describe("ExecInstaller.update() — honest reloadRequired despite pi's ambiguou
 	it('unpinned source, already latest (pi still exits 0 and says "Updated"): alreadyUpToDate', async () => {
 		const scriptDir = mkdtempSync(join(tmpdir(), "packed-exec-bin-"));
 		const bin = writeFakePi(scriptDir);
+		const npmBin = writeFakeNpm(scriptDir, join(scriptDir, "npm.log"));
 		const piHome = writePiHome({ plain: "0.5.0" });
-		const installer = new ExecInstaller(bin, piHome);
+		const installer = new ExecInstaller(bin, piHome, undefined, npmBin);
 
 		const outcome = await installer.update("npm:plain");
 
@@ -84,7 +109,8 @@ describe("ExecInstaller.update() — honest reloadRequired despite pi's ambiguou
 		const scriptDir = mkdtempSync(join(tmpdir(), "packed-exec-bin-"));
 		const piHome = writePiHome({ plain: "0.5.0" });
 		const bin = writeFakePi(scriptDir, { piHome, name: "plain", newVersion: "0.6.0" });
-		const installer = new ExecInstaller(bin, piHome);
+		const npmBin = writeFakeNpm(scriptDir, join(scriptDir, "npm.log"));
+		const installer = new ExecInstaller(bin, piHome, undefined, npmBin);
 
 		const outcome = await installer.update("npm:plain");
 
@@ -98,8 +124,9 @@ describe("ExecInstaller.update() — honest reloadRequired despite pi's ambiguou
 	it("git: source (no npm resolution possible either side): conservatively assumes it may have changed", async () => {
 		const scriptDir = mkdtempSync(join(tmpdir(), "packed-exec-bin-"));
 		const bin = writeFakePi(scriptDir);
+		const npmBin = writeFakeNpm(scriptDir, join(scriptDir, "npm.log"));
 		const piHome = writePiHome();
-		const installer = new ExecInstaller(bin, piHome);
+		const installer = new ExecInstaller(bin, piHome, undefined, npmBin);
 
 		const outcome = await installer.update("git:github.com/u/r@main");
 
@@ -109,5 +136,63 @@ describe("ExecInstaller.update() — honest reloadRequired despite pi's ambiguou
 		// No ground truth either side -- must not falsely claim nothing changed.
 		expect(outcome.alreadyUpToDate).toBe(false);
 		expect(outcome.reloadRequired).toBe(true);
+	});
+});
+
+describe("ExecInstaller — forces full dependency re-resolution, not just the target's own subtree", () => {
+	it("update() fixes a stale root-level sibling that the targeted pi update never touched", async () => {
+		const scriptDir = mkdtempSync(join(tmpdir(), "packed-exec-bin-"));
+		// Simulates the confirmed live defect: after `pi update npm:@scope/leaf`,
+		// the leaf's own version bumps, but a root-level sibling
+		// (@scope/shared) that the freshly-updated leaf now needs a newer
+		// range of stays pinned at its old, now-unsatisfied version --
+		// `pi update --extension` only ever resolved the leaf's own subtree.
+		const piHome = writePiHome({ "@scope/leaf": "1.0.0", "@scope/shared": "1.0.0" });
+		const bin = writeFakePi(scriptDir, { piHome, name: "@scope/leaf", newVersion: "2.0.0" });
+		// A real `npm install` (no args, whole-tree) is the only thing that
+		// actually reaches @scope/shared -- reproduced here as the fake npm
+		// binary rewriting it to the version the leaf's new range needs.
+		const npmLog = join(scriptDir, "npm.log");
+		const npmBin = writeFakeNpm(scriptDir, npmLog, { piHome, name: "@scope/shared", newVersion: "2.0.0" });
+		const installer = new ExecInstaller(bin, piHome, undefined, npmBin);
+
+		const outcome = await installer.update("npm:@scope/leaf");
+
+		expect(outcome.currentVersion).toBe("2.0.0");
+		// The real assertion: a package `pi update` never named is resolved
+		// too, everywhere in the tree -- not just the target's own package.json.
+		expect(readFileSync(join(piHome, "npm", "node_modules", "@scope/shared", "package.json"), "utf8")).toContain("2.0.0");
+		// And it ran the re-resolution against piHome/npm specifically, with
+		// no target argument -- a full-tree resolve, not another targeted op.
+		const log = readFileSync(npmLog, "utf8").trim().split("\n");
+		expect(log[0]).toBe(join(piHome, "npm"));
+		expect(log[1]).toBe("install");
+	});
+
+	it("install() also forces a full re-resolution after a successful pi install", async () => {
+		const scriptDir = mkdtempSync(join(tmpdir(), "packed-exec-bin-"));
+		const piHome = writePiHome({ "@scope/shared": "1.0.0" });
+		const bin = writeFakePi(scriptDir);
+		const npmLog = join(scriptDir, "npm.log");
+		const npmBin = writeFakeNpm(scriptDir, npmLog, { piHome, name: "@scope/shared", newVersion: "2.0.0" });
+		const installer = new ExecInstaller(bin, piHome, { validate: async (source) => ({ ok: true, source, extensions: [] }) }, npmBin);
+
+		await installer.install("npm:@scope/new-pkg");
+
+		expect(readFileSync(join(piHome, "npm", "node_modules", "@scope/shared", "package.json"), "utf8")).toContain("2.0.0");
+		const log = readFileSync(npmLog, "utf8").trim().split("\n");
+		expect(log[0]).toBe(join(piHome, "npm"));
+	});
+
+	it("surfaces a failed re-resolution instead of silently reporting success", async () => {
+		const scriptDir = mkdtempSync(join(tmpdir(), "packed-exec-bin-"));
+		const piHome = writePiHome({ plain: "0.5.0" });
+		const bin = writeFakePi(scriptDir, { piHome, name: "plain", newVersion: "0.6.0" });
+		const failingNpm = join(scriptDir, "fake-npm-fail");
+		writeFileSync(failingNpm, ["#!/usr/bin/env bash", "echo 'ERESOLVE unable to resolve dependency tree' >&2", "exit 1"].join("\n"));
+		chmodSync(failingNpm, 0o755);
+		const installer = new ExecInstaller(bin, piHome, undefined, failingNpm);
+
+		await expect(installer.update("npm:plain")).rejects.toThrow(/npm install failed to re-resolve/);
 	});
 });

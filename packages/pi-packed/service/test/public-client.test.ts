@@ -67,9 +67,10 @@ describe("ensureClient (packed daemon auto-spawn-or-wait decision)", () => {
 		expect(connectAttempts).toBeGreaterThan(1); // genuinely retried, not a single shot
 	});
 
-	it("fails with a message pointing at the service, not a generic timeout, when a service is installed but never becomes reachable", async () => {
-		await expect(
-			ensureClient({
+	it("explains the supervisor failure and recovery when a managed service never becomes reachable", async () => {
+		let message = "";
+		try {
+			await ensureClient({
 				connect: async () => {
 					throw new Error("never reachable");
 				},
@@ -80,8 +81,14 @@ describe("ensureClient (packed daemon auto-spawn-or-wait decision)", () => {
 				sleep: async () => {},
 				retryAttempts: 2,
 				retryDelayMs: 0,
-			}),
-		).rejects.toThrow(/managed service is installed/);
+			});
+		} catch (error) {
+			message = error instanceof Error ? error.message : String(error);
+		}
+		expect(message).toContain("managed Packed service is registered but unreachable");
+		expect(message).toContain("restart the managed service");
+		expect(message).toContain("will not auto-spawn a competing process");
+		expect(message).not.toContain("packed doctor");
 	});
 
 	it("fails with a plain timeout message, and did spawn, when no service is installed and nothing ever becomes reachable", async () => {

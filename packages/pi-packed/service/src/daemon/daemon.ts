@@ -18,7 +18,6 @@ import { HttpRegistry } from "../registry/registry.ts";
 import {
 	CATALOG_INTERVAL_DEFAULT_MS,
 	ENV,
-	IDLE_BUDGET_DEFAULT_MS,
 	INDEX_INTERVAL_DEFAULT_MS,
 	RECONCILE_INTERVAL_DEFAULT_MS,
 	WATCH_INTERVAL_DEFAULT_MS,
@@ -41,6 +40,15 @@ export interface StartPackedDaemonOptions {
 	maintenanceTasks?: MaintenanceTask[];
 	idleBudgetMs?: number;
 	migrateLegacy?: boolean;
+	env?: Readonly<Record<string, string | undefined>>;
+}
+
+function configuredIdleBudgetMs(options: StartPackedDaemonOptions): number | undefined {
+	if (options.idleBudgetMs !== undefined) return options.idleBudgetMs;
+	const raw = (options.env ?? process.env)[ENV.IDLE_SECS];
+	if (raw === undefined) return undefined;
+	const seconds = Number(raw);
+	return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1_000 : undefined;
 }
 
 export function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOptions {
@@ -99,13 +107,14 @@ export function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOpt
 		},
 	];
 	const maintenanceTasks = configuredMaintenanceTasks.filter((task) => task.intervalMs > 0);
+	const idleBudgetMs = configuredIdleBudgetMs(options);
 
 	return {
 		daemonLabel: "Packed",
 		handlePath: paths.handle,
 		logger,
 		maintenanceTasks,
-		idleBudgetMs: options.idleBudgetMs ?? envMs(ENV.IDLE_SECS, IDLE_BUDGET_DEFAULT_MS),
+		...(idleBudgetMs === undefined ? {} : { idleBudgetMs }),
 		idleTickMs: WATCHDOG_TICK_MS,
 		buildApp: () => createApp({ reg, inst, token, stateDir: paths.stateDirectory, dataDir: dirname(paths.database), piHome, daemonServiceInstaller }),
 		onShutdown: () => database.close(),

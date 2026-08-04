@@ -104,6 +104,30 @@ class RecordingDaemonServiceInstaller {
 }
 
 describe("startPackedDaemon's own maintenance-task wiring (self-heals Vehicle drift, not just per-package on demand)", () => {
+	it("leaves the idle budget unspecified when no Packed override exists, so Vehicle can keep a service-launched daemon always on", () => {
+		const options = daemonOptions({
+			paths: fakePaths(),
+			reg: registry,
+			inst: installer,
+			piHome: fakePiHome([]),
+			maintenanceTasks: [],
+			env: {},
+		});
+		expect(options.idleBudgetMs).toBeUndefined();
+	});
+
+	it("honors an explicit Packed idle override without replacing Vehicle's provenance default", () => {
+		const options = daemonOptions({
+			paths: fakePaths(),
+			reg: registry,
+			inst: installer,
+			piHome: fakePiHome([]),
+			maintenanceTasks: [],
+			env: { PI_PACKED_IDLE_SECS: "17" },
+		});
+		expect(options.idleBudgetMs).toBe(17_000);
+	});
+
 	it("includes a vehicle-reconcile task, defaulting to RECONCILE_INTERVAL_DEFAULT_MS", () => {
 		const piHome = fakePiHome([]);
 		const paths = fakePaths();

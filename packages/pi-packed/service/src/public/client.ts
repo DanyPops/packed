@@ -239,7 +239,7 @@ export async function ensureClient(deps: EnsureClientDeps): Promise<PackedClient
 	const waitedSeconds = (attempts * delayMs) / 1000;
 	throw new Error(
 		serviceInstalled
-			? `Packed daemon did not become ready within ${waitedSeconds} seconds, but a managed service is installed -- run packed doctor rather than auto-spawning a second one`
+			? `The managed Packed service is registered but unreachable after ${waitedSeconds} seconds. Its supervisor may have stopped it or it may be failing; restart the managed service and inspect its status and logs. Packed will not auto-spawn a competing process.`
 			: `Packed daemon did not become ready within ${waitedSeconds} seconds`,
 	);
 }

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ServiceInstallResult, ServiceSpec } from "@danypops/vehicle-server/service";
-import { daemonOptions } from "../src/daemon/daemon.ts";
+import { daemonOptions, startPackedDaemon } from "../src/daemon/daemon.ts";
 import type { Installer, Registry } from "../src/packages/package.ts";
 import { RECONCILE_INTERVAL_DEFAULT_MS } from "../src/shared/constants.ts";
 import { resolvePackedPaths } from "../src/shared/paths.ts";
@@ -111,17 +111,30 @@ describe("startPackedDaemon's own maintenance-task wiring (self-heals Vehicle dr
 		expect(installerSpy.gotSources).toEqual(["npm:@danypops/probe", "npm:@danypops/other"]);
 	});
 
-	it("runs vehicle-reconcile once automatically at startup, not just on its own interval -- the actual self-heal", async () => {
-		const piHome = fakePiHome(["npm:@danypops/probe"]);
+	it("does not reconcile Armada before the daemon has published its readiness handle", async () => {
+		const piHome = fakePiHome(["npm:@danypops/pi-packed", "npm:@danypops/probe"]);
 		const paths = fakePaths();
 		const installerSpy = new RecordingDaemonServiceInstaller();
 		mkdirSync(join(piHome, "npm", "node_modules"), { recursive: true });
 		daemonOptions({ paths, reg: registry, inst: installer, piHome, daemonServiceInstaller: installerSpy });
 
-		// The startup fire-and-forget is intentionally not awaited by daemonOptions itself
-		// (matching every other default maintenance task) -- give its microtasks a turn.
+		// Give pre-listen maintenance enough time to expose an accidental Armada call.
 		await new Promise((resolveTick) => setTimeout(resolveTick, 10));
 
-		expect(installerSpy.gotSources).toEqual(["npm:@danypops/probe"]);
+		expect(installerSpy.gotSources).toEqual([]);
+	});
+
+	it("reconciles Armada only after the real daemon handle is ready", async () => {
+		const piHome = fakePiHome(["npm:@danypops/pi-packed", "npm:@danypops/probe"]);
+		const paths = fakePaths();
+		const installerSpy = new RecordingDaemonServiceInstaller();
+		const running = await startPackedDaemon({ paths, reg: registry, inst: installer, piHome, daemonServiceInstaller: installerSpy });
+		try {
+			await new Promise((resolveTick) => setTimeout(resolveTick, 10));
+			expect(existsSync(paths.handle)).toBe(true);
+			expect(installerSpy.gotSources).toEqual(["npm:@danypops/probe"]);
+		} finally {
+			await running.stop();
+		}
 	});
 });

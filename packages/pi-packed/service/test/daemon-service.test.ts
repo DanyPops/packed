@@ -229,6 +229,18 @@ describe("RealDaemonServiceInstaller -- Armada registration through the in-proce
 		expect(registrar.registered.has("web-spider-daemon")).toBe(true);
 	});
 
+	it("install() never asks Armada to replace Packed from inside Packed's own process", async () => {
+		const piHome = fakePiHome();
+		writePackage(piHome, "@danypops/pi-packed", { binPath: "service/src/cli/cli.ts", args: ["serve"] });
+		const registrar = new FakeVehicleRegistrar();
+		const installer = new RealDaemonServiceInstaller(registrar);
+
+		const outcome = await installer.install(piHome, "npm:@danypops/pi-packed");
+
+		expect(outcome).toMatchObject({ ok: true, result: { installed: false }, spec: { name: "pi-packed" } });
+		expect(registrar.registered.size).toBe(0);
+	});
+
 	it("install() reports a non-daemon package without ever touching the registrar", async () => {
 		const piHome = fakePiHome();
 		writePackage(piHome, "some-pkg", undefined);

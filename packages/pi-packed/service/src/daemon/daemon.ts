@@ -102,6 +102,9 @@ export function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOpt
 
 	if (options.maintenanceTasks === undefined) {
 		for (const task of maintenanceTasks) {
+			// Armada reconciles the whole desired fleet. Running this before Packed
+			// publishes its readiness handle makes Armada replace Packed mid-startup.
+			if (task.name === "vehicle-reconcile") continue;
 			void Promise.resolve(task.run()).catch((error) =>
 				logger.error(`maintenance task failed: ${task.name}`, { error: error instanceof Error ? error.message : String(error) }),
 			);
@@ -120,13 +123,28 @@ export function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOpt
 	};
 }
 
-export function startPackedDaemon(options: StartPackedDaemonOptions = {}): Promise<RunningDaemon> {
-	return startDaemon(daemonOptions(options));
+function runReadyVehicleReconcile(maintenanceTasks: MaintenanceTask[] | undefined): void {
+	const task = maintenanceTasks?.find((candidate) => candidate.name === "vehicle-reconcile");
+	if (!task) return;
+	void Promise.resolve(task.run()).catch((error) =>
+		logger.error(`maintenance task failed: ${task.name}`, { error: error instanceof Error ? error.message : String(error) }),
+	);
+}
+
+export async function startPackedDaemon(options: StartPackedDaemonOptions = {}): Promise<RunningDaemon> {
+	const configured = daemonOptions(options);
+	const running = await startDaemon(configured);
+	runReadyVehicleReconcile(configured.maintenanceTasks);
+	return running;
 }
 
 export function serveMain(): void {
+	const configured = daemonOptions({});
 	runDaemonProcess({
-		...daemonOptions({}),
-		onListen: ({ host, port }) => logger.info("listening", { host, port }),
+		...configured,
+		onListen: ({ host, port }) => {
+			logger.info("listening", { host, port });
+			runReadyVehicleReconcile(configured.maintenanceTasks);
+		},
 	});
 }

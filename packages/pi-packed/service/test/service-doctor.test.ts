@@ -64,6 +64,29 @@ describe("checkServiceUnitPaths", () => {
 		expect(report).toEqual({ ok: true, diagnostics: [], checked: 1 });
 	});
 
+	it("reports an Armada-managed Vehicle that is declared but not running", () => {
+		const home = piHome(["npm:fakedaemon"]);
+		const dir = installDaemonPackage(home, "fakedaemon");
+		const report = checkServiceUnitPaths(
+			home,
+			undefined,
+			fakeDeps({ vehicles: [{ name: "fakedaemon", executable: join(dir, "cli.ts"), nativeStatus: "stopped", ready: false }], diagnostics: [] }),
+		);
+		expect(report).toEqual({
+			ok: false,
+			checked: 1,
+			diagnostics: [
+				{
+					code: "SERVICE_NOT_RUNNING",
+					severity: "error",
+					package: "fakedaemon",
+					unitName: "fakedaemon",
+					message: expect.stringContaining("stopped"),
+				},
+			],
+		});
+	});
+
 	it("reports a missing Armada-managed executable", () => {
 		const home = piHome(["npm:fakedaemon"]);
 		const dir = installDaemonPackage(home, "fakedaemon");

@@ -226,6 +226,9 @@ export interface ReconcileAllResult {
 
 /** Matches readPackageDeclarations' own bound -- a reconcile-all sweep never processes an unbounded package list. */
 const MAX_RECONCILE_PACKAGES = 500;
+const PACKED_PACKAGE_NAME = "@danypops/pi-packed";
+const PACKED_VEHICLE_NAME = "pi-packed";
+const SELF_REGISTRATION_REASON = "Packed cannot replace its own Armada service from inside the running daemon";
 
 /**
  * Sweeps every installed Packed package (global scope, plus a project's own
@@ -253,6 +256,12 @@ export async function reconcileAllDaemonServices(
 	const seen = new Set<string>();
 	let skipped = 0;
 	for (const pkg of packages) {
+		// Re-registering the daemon from inside its own process makes Armada stop
+		// that process before registration can start the replacement.
+		if (pkg.name === PACKED_PACKAGE_NAME) {
+			skipped++;
+			continue;
+		}
 		const resolved = await installer.install(piHome, `npm:${pkg.name}`);
 		if (!resolved.ok) {
 			if (resolved.notADaemon) {
@@ -305,6 +314,9 @@ export class RealDaemonServiceInstaller implements DaemonServiceInstaller {
 	): Promise<{ ok: true; result: ServiceInstallResult; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean }> {
 		const resolved = resolveDaemonServiceSpec(piHome, source);
 		if (!resolved.ok) return resolved;
+		if (resolved.spec.name === PACKED_VEHICLE_NAME) {
+			return { ok: true, result: { installed: false, reason: SELF_REGISTRATION_REASON }, spec: resolved.spec };
+		}
 		const result = await registerVehicleService(resolved.spec, this.registrar);
 		return { ok: true, result, spec: resolved.spec };
 	}
@@ -315,6 +327,9 @@ export class RealDaemonServiceInstaller implements DaemonServiceInstaller {
 	): Promise<{ ok: true; result: ServiceInstallResult; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean }> {
 		const resolved = resolveDaemonServiceSpec(piHome, source);
 		if (!resolved.ok) return resolved;
+		if (resolved.spec.name === PACKED_VEHICLE_NAME) {
+			return { ok: true, result: { installed: false, reason: SELF_REGISTRATION_REASON }, spec: resolved.spec };
+		}
 		const result = await unregisterVehicleService(resolved.spec.name, this.registrar);
 		return { ok: true, result, spec: resolved.spec };
 	}
@@ -325,6 +340,9 @@ export class RealDaemonServiceInstaller implements DaemonServiceInstaller {
 	): Promise<{ ok: true; restarted: boolean; reason?: string; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean }> {
 		const resolved = resolveDaemonServiceSpec(piHome, source);
 		if (!resolved.ok) return resolved;
+		if (resolved.spec.name === PACKED_VEHICLE_NAME) {
+			return { ok: true, restarted: false, reason: SELF_REGISTRATION_REASON, spec: resolved.spec };
+		}
 		if (!(await isVehicleServiceRegistered(resolved.spec.name, this.registrar))) {
 			return { ok: true, restarted: false, reason: `no persistent service is registered for ${resolved.spec.name}`, spec: resolved.spec };
 		}

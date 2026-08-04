@@ -3,7 +3,7 @@ import { readInstalledPackagesAcrossScopes } from "../packages/installed.ts";
 import { resolveDaemonServiceSpec } from "../daemon/daemon-service.ts";
 
 export interface ServiceUnitDiagnostic {
-	code: "SERVICE_EXEC_PATH_MISSING" | "SERVICE_STATUS_UNAVAILABLE";
+	code: "SERVICE_EXEC_PATH_MISSING" | "SERVICE_NOT_RUNNING" | "SERVICE_STATUS_UNAVAILABLE";
 	severity: "error" | "warning";
 	package: string;
 	unitName: string;
@@ -21,7 +21,7 @@ export interface ServiceDoctorDeps extends ServiceInstallDeps {
 }
 
 interface ArmadaStatus {
-	vehicles?: Array<{ name?: string; executable?: string }>;
+	vehicles?: Array<{ name?: string; executable?: string; nativeStatus?: string; ready?: boolean }>;
 }
 
 export function checkServiceUnitPaths(
@@ -79,14 +79,24 @@ export function checkServiceUnitPaths(
 		if (!vehicle) continue;
 		checked++;
 		const executable = vehicle.executable ?? managedPackage.spec.binPath;
-		if (deps.fileExists(executable)) continue;
-		diagnostics.push({
-			code: "SERVICE_EXEC_PATH_MISSING",
-			severity: "error",
-			package: managedPackage.packageName,
-			unitName: managedPackage.spec.name,
-			message: `${managedPackage.spec.name}'s Armada declaration references a path that no longer exists: ${executable}`,
-		});
+		if (!deps.fileExists(executable)) {
+			diagnostics.push({
+				code: "SERVICE_EXEC_PATH_MISSING",
+				severity: "error",
+				package: managedPackage.packageName,
+				unitName: managedPackage.spec.name,
+				message: `${managedPackage.spec.name}'s Armada declaration references a path that no longer exists: ${executable}`,
+			});
+		}
+		if (vehicle.nativeStatus !== undefined && vehicle.nativeStatus !== "running") {
+			diagnostics.push({
+				code: "SERVICE_NOT_RUNNING",
+				severity: "error",
+				package: managedPackage.packageName,
+				unitName: managedPackage.spec.name,
+				message: `${managedPackage.spec.name}'s Armada service is ${vehicle.nativeStatus}; start it through Armada before connecting`,
+			});
+		}
 	}
 	return { ok: diagnostics.length === 0, diagnostics, checked };
 }

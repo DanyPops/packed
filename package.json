@@ -12,7 +12,9 @@
     "prepare": "git config core.hooksPath .githooks",
     "format": "biome format --write .",
     "lint": "biome check --write . && eslint packages --max-warnings 0",
-    "lint:ci": "biome ci . && eslint packages --max-warnings 0"
+    "lint:ci": "biome ci . && eslint packages --max-warnings 0",
+    "lint:deps": "bunx sherif@1.13.0 --fail-on-warnings",
+    "policy": "bun packages/packed/src/cli/repository-policy-cli.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.6",

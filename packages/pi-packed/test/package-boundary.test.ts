@@ -23,7 +23,7 @@ describe("pi-packed package boundary", () => {
 			// pi-packed@0.19.10 published this way and was uninstallable outside the
 			// monorepo). `bun install` still resolves this range to the local workspace
 			// package during monorepo development, same as before the Pi-core split.
-			dependencies: { "@danypops/packed": "^0.6.0" },
+			dependencies: { "@danypops/packed": "^0.7.0" },
 		});
 		for (const file of sourceFiles(join(root, "extension"))) {
 			const source = readFileSync(file, "utf8");

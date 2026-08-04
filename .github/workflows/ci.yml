@@ -19,5 +19,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y bubblewrap util-linux
       - run: bun install
       - run: bun run lint:ci
+      - run: bun run lint:deps
+      - run: bun run policy
       - run: bun run typecheck
       - run: bun run test

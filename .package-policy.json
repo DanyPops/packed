@@ -1,0 +1,8 @@
+{
+  "allowedDuplicateResolutions": {
+    "@danypops/armada": {
+      "0.2.0": ["@danypops/vehicle-server/@danypops/armada"],
+      "0.3.1": ["@danypops/armada"]
+    }
+  }
+}

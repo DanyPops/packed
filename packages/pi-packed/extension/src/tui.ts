@@ -67,6 +67,7 @@ import { createFindTab } from "./tabs/discover.js";
 import { applyResourceToggle, ConfigTab } from "./tabs/resource-config.js";
 import { SettingsTab } from "./tabs/security-tui.js";
 import { approvePackageOperation } from "./tools.js";
+import { TuiErrorBoundary } from "./tui-error-boundary.js";
 
 export type PackedTabKey = "packages" | "find" | "config" | "settings";
 
@@ -859,7 +860,7 @@ function renderUnifiedPanel(
 				measure,
 			});
 
-			return {
+			const panel: Component = {
 				render(width: number): string[] {
 					envelope.setContent(pendingDialog ?? packageInspector ?? tabbedContainer);
 					return envelope.render(width);
@@ -929,6 +930,7 @@ function renderUnifiedPanel(
 					tui.requestRender();
 				},
 			};
+			return new TuiErrorBoundary(panel, ["Packed could not render.", "Restart Pi and run /packed again."], () => tui.requestRender());
 			// Pinned to the very top (anchor:"top-center"+offsetY:1 -- a fixed row
 			// count regardless of terminal size), not row:"40%". The percentage
 			// positioning was tried instead but reverted: pi-tui's row-percentage

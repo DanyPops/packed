@@ -16,7 +16,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.6",
-    "@danypops/daemon-kit": "^0.4.0",
+    "@danypops/daemon-kit": "^0.22.1",
     "@danypops/packed": "workspace:*",
     "@danypops/pi-packed": "workspace:*",
     "@earendil-works/pi-coding-agent": "^0.82.1",

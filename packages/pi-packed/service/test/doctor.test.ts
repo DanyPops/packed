@@ -13,6 +13,11 @@ afterEach(() => {
 	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
+function track(dir: string): string {
+	roots.push(dir);
+	return dir;
+}
+
 // Same sandbox-availability probe as smoke.test.ts: binary presence alone
 // doesn't prove bwrap actually works under this host's user namespaces.
 function bwrapUsable(): boolean {
@@ -216,8 +221,8 @@ describeIfSandboxed("doctor.run (daemon RPC wiring)", () => {
 			reg: new NoopRegistry(),
 			inst: new NoopInstaller(),
 			token: "test-token",
-			stateDir: mkdtempSync(join(tmpdir(), "packed-doctor-state-")),
-			dataDir: mkdtempSync(join(tmpdir(), "packed-doctor-data-")),
+			stateDir: track(mkdtempSync(join(tmpdir(), "packed-doctor-state-"))),
+			dataDir: track(mkdtempSync(join(tmpdir(), "packed-doctor-data-"))),
 			piHome: home,
 		});
 		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", {

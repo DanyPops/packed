@@ -7,8 +7,8 @@
  * a broken fixture must genuinely be refused, a healthy one must genuinely
  * pass.
  */
-import { describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { afterEach, describe, expect, it } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,6 +22,16 @@ const HEALTHY = join(FIXTURES, "healthy-package");
 const BROKEN = join(FIXTURES, "broken-package");
 const NO_MANIFEST = join(FIXTURES, "no-manifest-package");
 const DEP_PACKAGE = join(FIXTURES, "dep-package");
+
+const roots: string[] = [];
+afterEach(() => {
+	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function track(dir: string): string {
+	roots.push(dir);
+	return dir;
+}
 
 /** Writes a fresh package into `dir` whose extension entry point has a real
  * runtime import (`packed-fixture-dep`, a `file:` dependency resolvable
@@ -145,7 +155,7 @@ describe("HeadlessInstallValidator (vehicle-client-pi pi-load-harness, non-gatin
 
 describe("HeadlessInstallValidator (bug repro, packed-headlessinstallvalidator-never-installs-the): staged tarball's own declared dependencies are never installed before the load check", () => {
 	it("approves an otherwise-healthy package whose entry point needs its one declared file: dependency", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "packed-install-validation-dep-fixture-"));
+		const dir = track(mkdtempSync(join(tmpdir(), "packed-install-validation-dep-fixture-")));
 		writePackageWithRealDependency(dir);
 
 		// Ground truth this isn't a broken fixture: a plain `bun install` in an
@@ -193,7 +203,7 @@ describe("ExecInstaller.install() -- refuses before ever spawning the real pi bi
 		// step to cwd into -- /bin/true always exits 0 regardless, proving both
 		// the real install spawn *and* the re-resolution spawn were reached (a
 		// refused install never gets this far to find out).
-		const piHome = mkdtempSync(join(tmpdir(), "packed-install-validation-pihome-"));
+		const piHome = track(mkdtempSync(join(tmpdir(), "packed-install-validation-pihome-")));
 		mkdirSync(join(piHome, "npm"), { recursive: true });
 		const installer = new ExecInstaller(
 			"/bin/true",

@@ -1,6 +1,6 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { writeDaemonHandle } from "@danypops/vehicle-server/paths";
@@ -125,6 +125,16 @@ class FakeDaemonServiceInstaller {
 	}
 }
 
+const roots: string[] = [];
+afterEach(() => {
+	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function track(dir: string): string {
+	roots.push(dir);
+	return dir;
+}
+
 function deps(over: Partial<CliDeps> = {}): CliDeps {
 	return {
 		reg: new FakeRegistry(),
@@ -138,8 +148,8 @@ function deps(over: Partial<CliDeps> = {}): CliDeps {
 				return { mutationApproval };
 			},
 		},
-		stateDir: mkdtempSync(join(tmpdir(), "packed-")),
-		piHome: mkdtempSync(join(tmpdir(), "packed-pihome-")),
+		stateDir: track(mkdtempSync(join(tmpdir(), "packed-"))),
+		piHome: track(mkdtempSync(join(tmpdir(), "packed-pihome-"))),
 		...over,
 	};
 }
@@ -389,7 +399,7 @@ describe("CLI", () => {
 	it("updates --project also checks a project's own .pi/settings.json pins -- global-only misses them entirely", async () => {
 		const d = deps();
 		writeFileSync(join(d.piHome, "settings.json"), JSON.stringify({ packages: ["npm:pi-global@1.0.0"] }));
-		const projectRoot = mkdtempSync(join(tmpdir(), "packed-project-"));
+		const projectRoot = track(mkdtempSync(join(tmpdir(), "packed-project-")));
 		const projectHome = join(projectRoot, ".pi");
 		mkdirSync(projectHome, { recursive: true });
 		writeFileSync(join(projectHome, "settings.json"), JSON.stringify({ packages: ["npm:papyrus@0.21.2"] }));
@@ -938,7 +948,7 @@ describe("CLI", () => {
 	});
 
 	it("advisories runs standalone without a daemon and degrades to zero findings, never a real network call, when nothing is installed", async () => {
-		const d = deps({ piHome: mkdtempSync(join(tmpdir(), "packed-advisories-cli-")) });
+		const d = deps({ piHome: track(mkdtempSync(join(tmpdir(), "packed-advisories-cli-"))) });
 		const result = await cliRun(["advisories", "--json"], d);
 		expect(result.code).toBe(0);
 		expect(JSON.parse(result.out)).toEqual({ scanned: 0, findings: [], diagnostics: [], truncated: false });
@@ -956,7 +966,7 @@ describe("CLI", () => {
 	});
 
 	it("resources list and toggle run standalone without a daemon (CLI parity for the daemon-only resources.list/toggle operations)", async () => {
-		const piHome = mkdtempSync(join(tmpdir(), "packed-resources-cli-"));
+		const piHome = track(mkdtempSync(join(tmpdir(), "packed-resources-cli-")));
 		writeFileSync(join(piHome, "settings.json"), JSON.stringify({ packages: ["npm:pi-demo"] }));
 		const pkgDir = join(piHome, "npm", "node_modules", "pi-demo");
 		mkdirSync(pkgDir, { recursive: true });
@@ -998,7 +1008,7 @@ describe("CLI", () => {
 	(bwrapUsable ? it : it.skip)(
 		"doctor runs standalone without a daemon and reproduces the jittor incident through the real CLI (CLI parity for the daemon-only doctor.run operation)",
 		async () => {
-			const piHome = mkdtempSync(join(tmpdir(), "packed-doctor-cli-"));
+			const piHome = track(mkdtempSync(join(tmpdir(), "packed-doctor-cli-")));
 			writeFileSync(join(piHome, "settings.json"), JSON.stringify({ packages: ["npm:pi-papyrus"] }));
 			const globalPkg = join(piHome, "npm", "node_modules", "pi-papyrus");
 			mkdirSync(join(globalPkg, "extension"), { recursive: true });
@@ -1007,7 +1017,7 @@ describe("CLI", () => {
 				JSON.stringify({ name: "pi-papyrus", version: "1.0.0", pi: { extensions: ["extension/index.ts"] } }),
 			);
 			writeFileSync(join(globalPkg, "extension", "index.ts"), 'export default function (pi: any) { pi.registerTool({ name: "tasks" }); }');
-			const projectRoot = mkdtempSync(join(tmpdir(), "packed-doctor-cli-project-"));
+			const projectRoot = track(mkdtempSync(join(tmpdir(), "packed-doctor-cli-project-")));
 			const projectHome = join(projectRoot, ".pi");
 			mkdirSync(projectHome, { recursive: true });
 			writeFileSync(join(projectHome, "settings.json"), JSON.stringify({ packages: ["npm:papyrus"] }));
@@ -1063,12 +1073,14 @@ describe("CLI", () => {
 describe("daemon client", () => {
 	let server: Server<undefined>;
 	let daemonDir: string;
+	let daemonPiHome: string;
 	let daemonPaths: PackedPaths;
 	let daemonInstaller: FakeInstaller;
 	const daemonToken = "d".repeat(64);
 
 	beforeAll(async () => {
 		daemonDir = mkdtempSync(join(tmpdir(), "packed-daemon-"));
+		daemonPiHome = mkdtempSync(join(tmpdir(), "packed-daemon-pi-"));
 		daemonPaths = resolvePackedPaths({ env: { PI_PACKED_HOME: daemonDir } });
 		writeFileSync(daemonPaths.token, `${daemonToken}\n`);
 		daemonInstaller = new FakeInstaller();
@@ -1100,7 +1112,7 @@ describe("daemon client", () => {
 			},
 			token: daemonToken,
 			stateDir: daemonDir,
-			piHome: mkdtempSync(join(tmpdir(), "packed-daemon-pi-")),
+			piHome: daemonPiHome,
 			packer: {
 				async verify(path) {
 					return {
@@ -1169,7 +1181,11 @@ describe("daemon client", () => {
 		server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => app.fetch(req) });
 		writeDaemonHandle(daemonPaths.handle, { host: "127.0.0.1", port: server.port!, pid: process.pid });
 	});
-	afterAll(() => server.stop(true));
+	afterAll(() => {
+		server.stop(true);
+		rmSync(daemonDir, { recursive: true, force: true });
+		rmSync(daemonPiHome, { recursive: true, force: true });
+	});
 
 	it("probe finds a live daemon", async () => {
 		const found = await probe(daemonPaths);
@@ -1188,7 +1204,7 @@ describe("daemon client", () => {
 	});
 
 	it("probe rejects dead state", async () => {
-		const directory = mkdtempSync(join(tmpdir(), "packed-"));
+		const directory = track(mkdtempSync(join(tmpdir(), "packed-")));
 		expect(await probe(resolvePackedPaths({ env: { PI_PACKED_HOME: directory } }))).toBeUndefined();
 	});
 
@@ -1260,7 +1276,7 @@ describe("daemon client", () => {
 	it("resolveRegistry prefers daemon, falls back direct", async () => {
 		const viaDaemon = await resolveRegistry(daemonPaths, "https://registry.npmjs.org");
 		expect(viaDaemon).toBeInstanceOf(DaemonRegistry);
-		const directory = mkdtempSync(join(tmpdir(), "packed-"));
+		const directory = track(mkdtempSync(join(tmpdir(), "packed-")));
 		const direct = await resolveRegistry(resolvePackedPaths({ env: { PI_PACKED_HOME: directory } }), "https://registry.npmjs.org");
 		expect(direct).toBeInstanceOf(HttpRegistry);
 	});

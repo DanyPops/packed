@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Server } from "bun";
@@ -86,6 +86,14 @@ describe("HttpRegistry vs DaemonRegistry", () => {
 	let httpServer: Server<undefined>;
 	let daemonServer: Server<undefined>;
 	const daemonToken = "c".repeat(64);
+	// createApp() is invoked fresh on every request below, so this can grow
+	// past one entry -- every one of them still needs cleanup.
+	const stateDirs: string[] = [];
+	function trackedStateDir(): string {
+		const dir = mkdtempSync(join(tmpdir(), "packed-registry-contract-"));
+		stateDirs.push(dir);
+		return dir;
+	}
 
 	beforeAll(() => {
 		httpServer = Bun.serve({
@@ -110,13 +118,14 @@ describe("HttpRegistry vs DaemonRegistry", () => {
 					reg: new InMemoryRegistry(),
 					inst: new NoopInstaller(),
 					token: daemonToken,
-					stateDir: mkdtempSync(join(tmpdir(), "packed-registry-contract-")),
+					stateDir: trackedStateDir(),
 				}).fetch(req),
 		});
 	});
 	afterAll(() => {
 		httpServer.stop(true);
 		daemonServer.stop(true);
+		for (const dir of stateDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 	});
 
 	registryContract("HttpRegistry (real Bun.serve npm-mock)", () => new HttpRegistry(`http://127.0.0.1:${httpServer.port}`, 2, 0, 1_000));

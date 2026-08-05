@@ -1,8 +1,18 @@
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { ensureClient, resolvePiBinForSpawn } from "../src/public/client.ts";
+
+const roots: string[] = [];
+afterEach(() => {
+	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function track(dir: string): string {
+	roots.push(dir);
+	return dir;
+}
 
 describe("ensureClient (packed daemon auto-spawn-or-wait decision)", () => {
 	it("connects immediately without ever checking for a service or spawning, when already reachable", async () => {
@@ -150,12 +160,12 @@ describe("resolvePiBinForSpawn", () => {
 	});
 
 	it("returns undefined when no PATH directory has an executable `pi`", () => {
-		const dir = mkdtempSync(join(tmpdir(), "packed-resolve-pi-bin-"));
+		const dir = track(mkdtempSync(join(tmpdir(), "packed-resolve-pi-bin-")));
 		expect(resolvePiBinForSpawn({ PATH: dir })).toBeUndefined();
 	});
 
 	it("resolves the absolute path to an executable `pi` on PATH", () => {
-		const dir = mkdtempSync(join(tmpdir(), "packed-resolve-pi-bin-"));
+		const dir = track(mkdtempSync(join(tmpdir(), "packed-resolve-pi-bin-")));
 		const piPath = join(dir, "pi");
 		writeFileSync(piPath, "#!/bin/sh\necho pi\n");
 		chmodSync(piPath, 0o755);
@@ -163,8 +173,8 @@ describe("resolvePiBinForSpawn", () => {
 	});
 
 	it("skips a non-executable `pi` earlier on PATH and resolves a later one", () => {
-		const deadDir = mkdtempSync(join(tmpdir(), "packed-resolve-pi-bin-dead-"));
-		const liveDir = mkdtempSync(join(tmpdir(), "packed-resolve-pi-bin-live-"));
+		const deadDir = track(mkdtempSync(join(tmpdir(), "packed-resolve-pi-bin-dead-")));
+		const liveDir = track(mkdtempSync(join(tmpdir(), "packed-resolve-pi-bin-live-")));
 		writeFileSync(join(deadDir, "pi"), "not executable");
 		chmodSync(join(deadDir, "pi"), 0o644);
 		const livePi = join(liveDir, "pi");

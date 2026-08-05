@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,8 +32,18 @@ class RegistryFixture implements Registry {
 	}
 }
 
+const roots: string[] = [];
+afterEach(() => {
+	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function track(dir: string): string {
+	roots.push(dir);
+	return dir;
+}
+
 function project(overrides: Record<string, unknown> = {}): string {
-	const root = mkdtempSync(join(tmpdir(), "packed-publish-"));
+	const root = track(mkdtempSync(join(tmpdir(), "packed-publish-")));
 	writeFileSync(
 		join(root, "package.json"),
 		JSON.stringify({
@@ -84,7 +94,7 @@ class MultiRegistryFixture implements Registry {
 /** A two-package Bun workspace: packages/core (published, depended on) and
  * packages/ext (the one under test, declaring a dependency on core). */
 function workspace(extDependencyRange = "^1.0.0"): { root: string; corePath: string; extPath: string } {
-	const root = mkdtempSync(join(tmpdir(), "packed-workspace-"));
+	const root = track(mkdtempSync(join(tmpdir(), "packed-workspace-")));
 	writeFileSync(join(root, "package.json"), JSON.stringify({ name: "demo-workspace", private: true, workspaces: ["packages/*"] }));
 	writeFileSync(join(root, "bun.lock"), "{}");
 	const corePath = join(root, "packages", "core");

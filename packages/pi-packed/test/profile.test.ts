@@ -1,9 +1,19 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { decodeProfiles, loadProfiles, registerProfiles } from "../extension/src/profile.ts";
+
+const roots: string[] = [];
+afterEach(() => {
+	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function track(dir: string): string {
+	roots.push(dir);
+	return dir;
+}
 
 describe("Packed profiles", () => {
 	it("strictly bounds profile files and preserves the existing schema", () => {
@@ -38,8 +48,8 @@ describe("Packed profiles", () => {
 	});
 
 	it("merges project profiles only for trusted projects", () => {
-		const agent = mkdtempSync(join(tmpdir(), "packed-profile-agent-"));
-		const cwd = mkdtempSync(join(tmpdir(), "packed-profile-project-"));
+		const agent = track(mkdtempSync(join(tmpdir(), "packed-profile-agent-")));
+		const cwd = track(mkdtempSync(join(tmpdir(), "packed-profile-project-")));
 		mkdirSync(join(cwd, ".pi"));
 		writeFileSync(join(agent, "profiles.json"), JSON.stringify({ shared: { model: "global" }, global: { theme: "dark" } }));
 		writeFileSync(join(cwd, ".pi/profiles.json"), JSON.stringify({ shared: { model: "project" }, project: { theme: "light" } }));
@@ -52,7 +62,7 @@ describe("Packed profiles", () => {
 	});
 
 	it("applies, warns, injects instructions, persists, and restores through the Pi API", async () => {
-		const agent = mkdtempSync(join(tmpdir(), "packed-profile-agent-"));
+		const agent = track(mkdtempSync(join(tmpdir(), "packed-profile-agent-")));
 		writeFileSync(
 			join(agent, "profiles.json"),
 			JSON.stringify({
@@ -119,7 +129,7 @@ describe("Packed profiles", () => {
 			} as unknown as ExtensionAPI;
 			let selection = "(none)";
 			const ctx = {
-				cwd: mkdtempSync(join(tmpdir(), "packed-profile-cwd-")),
+				cwd: track(mkdtempSync(join(tmpdir(), "packed-profile-cwd-"))),
 				model,
 				modelRegistry: { find: () => ({ provider: "openai", id: "gpt" }) },
 				isProjectTrusted: () => true,

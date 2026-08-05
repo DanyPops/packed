@@ -12,6 +12,11 @@ afterEach(() => {
 	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
+function track(dir: string): string {
+	roots.push(dir);
+	return dir;
+}
+
 function pkg(manifest: Record<string, unknown>): string {
 	const root = mkdtempSync(join(tmpdir(), "packed-cleanup-"));
 	roots.push(root);
@@ -169,8 +174,8 @@ describe("packed remove applies pi.cleanup before delegating to pi remove (real 
 			reg: new NoopRegistry(),
 			inst,
 			token: "test-token",
-			stateDir: mkdtempSync(join(tmpdir(), "packed-cleanup-state-")),
-			dataDir: mkdtempSync(join(tmpdir(), "packed-cleanup-data-")),
+			stateDir: track(mkdtempSync(join(tmpdir(), "packed-cleanup-state-"))),
+			dataDir: track(mkdtempSync(join(tmpdir(), "packed-cleanup-data-"))),
 			piHome,
 		});
 		return new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", {

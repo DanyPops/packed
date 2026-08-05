@@ -1,5 +1,5 @@
-import { describe, expect, it } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { afterEach, describe, expect, it } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createGithubLastCommitAt, type FetchGithubLastCommitAt } from "../src/adoption/commit-freshness.ts";
@@ -30,8 +30,14 @@ class FakeRegistry implements Registry {
 	}
 }
 
+const roots: string[] = [];
+afterEach(() => {
+	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
 function fixture(manifest: Record<string, unknown>, readme = ""): string {
 	const root = mkdtempSync(join(tmpdir(), "packed-pack-"));
+	roots.push(root);
 	writeFileSync(join(root, "package.json"), JSON.stringify(manifest));
 	if (readme) writeFileSync(join(root, "README.md"), readme);
 	return root;

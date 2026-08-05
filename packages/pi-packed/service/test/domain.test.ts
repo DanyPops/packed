@@ -1,5 +1,5 @@
-import { describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { afterEach, describe, expect, it } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthenticatedRpcClient } from "@danypops/vehicle-client/rpc-client";
@@ -17,8 +17,18 @@ import {
 } from "../src/packages/installed.ts";
 import type { Installer, PkgInfo, Registry, SearchPage, UpdateOutcome, UpdatesSnapshot } from "../src/packages/package.ts";
 
+const roots: string[] = [];
+afterEach(() => {
+	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function track(dir: string): string {
+	roots.push(dir);
+	return dir;
+}
+
 function writePiHome(settings: unknown, nodeModules: Record<string, string> = {}): string {
-	const dir = mkdtempSync(join(tmpdir(), "packed-pihome-"));
+	const dir = track(mkdtempSync(join(tmpdir(), "packed-pihome-")));
 	writeFileSync(join(dir, "settings.json"), JSON.stringify(settings));
 	for (const [name, version] of Object.entries(nodeModules)) {
 		const pkgDir = join(dir, "npm", "node_modules", name);
@@ -99,7 +109,7 @@ describe("readInstalledPackages", () => {
 	});
 
 	it("missing settings → empty", () => {
-		expect(readInstalledPackages(mkdtempSync(join(tmpdir(), "packed-")))).toEqual([]);
+		expect(readInstalledPackages(track(mkdtempSync(join(tmpdir(), "packed-"))))).toEqual([]);
 	});
 });
 
@@ -113,7 +123,7 @@ describe("readInstalledPackagesAcrossScopes", () => {
 
 	it("reproduces the real jittor gap: a stale project-scoped pin is invisible to a global-only read, visible once project scope is included", () => {
 		const home = writePiHome({ packages: ["npm:pi-global@1.0.0"] });
-		const projectRoot = mkdtempSync(join(tmpdir(), "packed-project-"));
+		const projectRoot = track(mkdtempSync(join(tmpdir(), "packed-project-")));
 		const projectHome = join(projectRoot, ".pi");
 		mkdirSync(projectHome, { recursive: true });
 		writeFileSync(join(projectHome, "settings.json"), JSON.stringify({ packages: ["npm:papyrus@0.21.2"] }));
@@ -128,7 +138,7 @@ describe("readInstalledPackagesAcrossScopes", () => {
 
 	it("is unaffected by a missing project settings file", () => {
 		const home = writePiHome({ packages: ["npm:pi-global@1.0.0"] });
-		const projectRoot = mkdtempSync(join(tmpdir(), "packed-project-"));
+		const projectRoot = track(mkdtempSync(join(tmpdir(), "packed-project-")));
 		expect(readInstalledPackagesAcrossScopes(home, projectRoot)).toEqual([
 			{ name: "pi-global", pinned: "1.0.0", installed: undefined, scope: "global" },
 		]);
@@ -214,13 +224,13 @@ class NoopInstaller implements Installer {
 
 describe("package.updates.project (daemon RPC wiring)", () => {
 	it("computes a live, cross-scope drift check on demand, distinct from package.updates' own persisted global-only snapshot", async () => {
-		const home = mkdtempSync(join(tmpdir(), "packed-updates-project-"));
+		const home = track(mkdtempSync(join(tmpdir(), "packed-updates-project-")));
 		writeFileSync(join(home, "settings.json"), JSON.stringify({ packages: ["npm:pi-global@1.0.0"] }));
-		const projectRoot = mkdtempSync(join(tmpdir(), "packed-updates-project-root-"));
+		const projectRoot = track(mkdtempSync(join(tmpdir(), "packed-updates-project-root-")));
 		const projectHome = join(projectRoot, ".pi");
 		mkdirSync(projectHome, { recursive: true });
 		writeFileSync(join(projectHome, "settings.json"), JSON.stringify({ packages: ["npm:papyrus@0.21.2"] }));
-		const stateDir = mkdtempSync(join(tmpdir(), "packed-updates-project-state-"));
+		const stateDir = track(mkdtempSync(join(tmpdir(), "packed-updates-project-state-")));
 		const db = openDb(dbPath(stateDir));
 		replaceAll(
 			db,
@@ -249,7 +259,7 @@ describe("package.updates.project (daemon RPC wiring)", () => {
 
 describe("updates store", () => {
 	it("roundtrips", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "packed-"));
+		const dir = track(mkdtempSync(join(tmpdir(), "packed-")));
 		const snap = { checkedAt: new Date().toISOString(), updates: [{ name: "a", installed: "1", latest: "2", detectedAt: "" }] };
 		await saveUpdates(dir, snap);
 		expect(await loadUpdates(dir)).toEqual(snap);
@@ -259,7 +269,7 @@ describe("updates store", () => {
 
 describe("watcher producer", () => {
 	it("writes a snapshot on tick", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "packed-"));
+		const dir = track(mkdtempSync(join(tmpdir(), "packed-")));
 		let signalTick: ((snapshot: UpdatesSnapshot) => void) | undefined;
 		const tick = new Promise<UpdatesSnapshot>((resolve) => {
 			signalTick = resolve;
@@ -282,7 +292,7 @@ describe("watcher producer", () => {
 
 describe("catalog status", () => {
 	it("stale when unsynced, fresh after sync", () => {
-		const dir = mkdtempSync(join(tmpdir(), "packed-"));
+		const dir = track(mkdtempSync(join(tmpdir(), "packed-")));
 		expect(catalogStatus(dir, 6 * 3_600_000).stale).toBe(true);
 		const db = openDb(`${dir}/packed.db`);
 		replaceAll(db, [{ name: "a", version: "1" }], "test");

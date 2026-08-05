@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthenticatedRpcClient } from "@danypops/vehicle-client/rpc-client";
@@ -36,10 +36,17 @@ class NoopInstaller implements Installer {
 }
 
 let server: Server<undefined> | undefined;
+const roots: string[] = [];
 afterEach(() => {
 	server?.stop(true);
 	server = undefined;
+	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
+
+function track(dir: string): string {
+	roots.push(dir);
+	return dir;
+}
 
 const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
 
@@ -221,6 +228,7 @@ describe("scanInstalledPackages", () => {
 describe("advisories.scan operation (real daemon route)", () => {
 	it("resolves real installed npm packages' on-disk versions and routes through the authenticated operation registry", async () => {
 		const piHome = mkdtempSync(join(tmpdir(), "packed-advisories-daemon-"));
+		roots.push(piHome);
 		writeFileSync(join(piHome, "settings.json"), JSON.stringify({ packages: ["npm:pi-vuln"] }));
 		const pkgDir = join(piHome, "npm", "node_modules", "pi-vuln");
 		mkdirSync(pkgDir, { recursive: true });
@@ -231,8 +239,8 @@ describe("advisories.scan operation (real daemon route)", () => {
 			reg: new NoopRegistry(),
 			inst: new NoopInstaller(),
 			token: "test-token",
-			stateDir: mkdtempSync(join(tmpdir(), "packed-advisories-state-")),
-			dataDir: mkdtempSync(join(tmpdir(), "packed-advisories-data-")),
+			stateDir: track(mkdtempSync(join(tmpdir(), "packed-advisories-state-"))),
+			dataDir: track(mkdtempSync(join(tmpdir(), "packed-advisories-data-"))),
 			piHome,
 			// injected exactly like pi.status's piVersion seam -- never a real
 			// network call to the live npm registry from an automated test.
@@ -258,9 +266,9 @@ describe("advisories.scan operation (real daemon route)", () => {
 			reg: new NoopRegistry(),
 			inst: new NoopInstaller(),
 			token: "test-token",
-			stateDir: mkdtempSync(join(tmpdir(), "packed-advisories-state-")),
-			dataDir: mkdtempSync(join(tmpdir(), "packed-advisories-data-")),
-			piHome: mkdtempSync(join(tmpdir(), "packed-advisories-pihome-")),
+			stateDir: track(mkdtempSync(join(tmpdir(), "packed-advisories-state-"))),
+			dataDir: track(mkdtempSync(join(tmpdir(), "packed-advisories-data-"))),
+			piHome: track(mkdtempSync(join(tmpdir(), "packed-advisories-pihome-"))),
 		});
 		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", {
 			label: "Packed",
@@ -274,9 +282,9 @@ describe("advisories.scan operation (real daemon route)", () => {
 			reg: new NoopRegistry(),
 			inst: new NoopInstaller(),
 			token: "test-token",
-			stateDir: mkdtempSync(join(tmpdir(), "packed-advisories-state-")),
-			dataDir: mkdtempSync(join(tmpdir(), "packed-advisories-data-")),
-			piHome: mkdtempSync(join(tmpdir(), "packed-advisories-pihome-")),
+			stateDir: track(mkdtempSync(join(tmpdir(), "packed-advisories-state-"))),
+			dataDir: track(mkdtempSync(join(tmpdir(), "packed-advisories-data-"))),
+			piHome: track(mkdtempSync(join(tmpdir(), "packed-advisories-pihome-"))),
 		});
 		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", {
 			label: "Packed",

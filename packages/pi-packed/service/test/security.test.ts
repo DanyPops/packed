@@ -1,12 +1,22 @@
-import { describe, expect, it } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { afterEach, describe, expect, it } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PACKAGE_OPERATIONS, packagePermissionDecision, readSecuritySettings, writeSecuritySettings } from "../src/security/security.ts";
 
+const roots: string[] = [];
+afterEach(() => {
+	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function track(dir: string): string {
+	roots.push(dir);
+	return dir;
+}
+
 describe("package permission policy", () => {
 	it("defaults every arbitrary-code and settings/install-root mutation to approval", () => {
-		const dir = mkdtempSync(join(tmpdir(), "packed-security-"));
+		const dir = track(mkdtempSync(join(tmpdir(), "packed-security-")));
 		const settings = readSecuritySettings(dir);
 		expect(settings).toEqual({ mutationApproval: "always" });
 		expect(PACKAGE_OPERATIONS).toEqual([
@@ -72,11 +82,11 @@ describe("package permission policy", () => {
 	});
 
 	it("persists an explicit unsafe opt-out and migrates the prior storage key", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "packed-security-"));
+		const dir = track(mkdtempSync(join(tmpdir(), "packed-security-")));
 		expect(await writeSecuritySettings(dir, { mutationApproval: "never" })).toEqual({ mutationApproval: "never" });
 		expect(readSecuritySettings(dir)).toEqual({ mutationApproval: "never" });
 
-		const legacyDir = mkdtempSync(join(tmpdir(), "packed-security-legacy-"));
+		const legacyDir = track(mkdtempSync(join(tmpdir(), "packed-security-legacy-")));
 		writeFileSync(join(legacyDir, "security.json"), '{"installApproval":"never"}\n');
 		expect(readSecuritySettings(legacyDir)).toEqual({ mutationApproval: "never" });
 	});

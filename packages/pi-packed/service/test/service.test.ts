@@ -1,5 +1,5 @@
-import { describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { afterEach, describe, expect, it } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ServiceSpec } from "@danypops/vehicle-server/service";
@@ -105,12 +105,22 @@ class FakeDaemonServiceInstaller implements DaemonServiceInstaller {
 	}
 }
 
+const roots: string[] = [];
+afterEach(() => {
+	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function track(dir: string): string {
+	roots.push(dir);
+	return dir;
+}
+
 function deps(over: Partial<Deps> = {}): Deps {
 	return {
 		reg: new FakeRegistry(),
 		inst: new FakeInstaller(),
 		token: "test-token",
-		stateDir: mkdtempSync(join(tmpdir(), "packed-")),
+		stateDir: track(mkdtempSync(join(tmpdir(), "packed-"))),
 		...over,
 	};
 }
@@ -272,7 +282,7 @@ describe("service app", () => {
 
 	it("POST /install configures an npm package's persistent Vehicle under the same approval", async () => {
 		const svc = new FakeDaemonServiceInstaller();
-		const piHome = mkdtempSync(join(tmpdir(), "packed-install-vehicle-"));
+		const piHome = track(mkdtempSync(join(tmpdir(), "packed-install-vehicle-")));
 		const app = createApp(deps({ daemonServiceInstaller: svc, piHome }));
 		const response = await app.fetch(
 			new Request("http://x/install", {
@@ -328,7 +338,7 @@ describe("service app", () => {
 
 	it("POST /install-service installs a real service once approved, reporting the resolved spec", async () => {
 		const svc = new FakeDaemonServiceInstaller();
-		const piHome = mkdtempSync(join(tmpdir(), "packed-pi-"));
+		const piHome = track(mkdtempSync(join(tmpdir(), "packed-pi-")));
 		const app = createApp(deps({ daemonServiceInstaller: svc, piHome }));
 
 		const res = await app.fetch(
@@ -406,7 +416,7 @@ describe("service app", () => {
 
 	it("POST /restart-service restarts a real service once approved, reporting the resolved spec", async () => {
 		const svc = new FakeDaemonServiceInstaller();
-		const piHome = mkdtempSync(join(tmpdir(), "packed-pi-"));
+		const piHome = track(mkdtempSync(join(tmpdir(), "packed-pi-")));
 		const app = createApp(deps({ daemonServiceInstaller: svc, piHome }));
 
 		const res = await app.fetch(
@@ -492,7 +502,7 @@ describe("service app", () => {
 
 	it("POST /update reconciles an installed Vehicle after a real package change", async () => {
 		const svc = new FakeDaemonServiceInstaller();
-		const piHome = mkdtempSync(join(tmpdir(), "packed-update-vehicle-"));
+		const piHome = track(mkdtempSync(join(tmpdir(), "packed-update-vehicle-")));
 		const app = createApp(deps({ daemonServiceInstaller: svc, piHome }));
 		const response = await app.fetch(
 			new Request("http://x/update", {
@@ -542,7 +552,7 @@ describe("service app", () => {
 	});
 
 	it("GET /installed lists packages from pi settings", async () => {
-		const piHome = mkdtempSync(join(tmpdir(), "packed-pi-"));
+		const piHome = track(mkdtempSync(join(tmpdir(), "packed-pi-")));
 		writeFileSync(
 			join(piHome, "settings.json"),
 			JSON.stringify({ packages: ["npm:pi-extension-manager@0.8.2", { source: "npm:obj@2.0.0" }] }),
@@ -582,7 +592,7 @@ describe("service app", () => {
 	});
 
 	it("POST /remove removes declared Vehicle state before deleting the package", async () => {
-		const piHome = mkdtempSync(join(tmpdir(), "packed-remove-vehicle-"));
+		const piHome = track(mkdtempSync(join(tmpdir(), "packed-remove-vehicle-")));
 		const packageDir = join(piHome, "npm", "node_modules", "probe");
 		mkdirSync(packageDir, { recursive: true });
 		writeFileSync(

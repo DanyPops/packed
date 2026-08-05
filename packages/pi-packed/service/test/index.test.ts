@@ -1,11 +1,21 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Server } from "bun";
 import { buildIndex, generateIndex, indexPath, indexStatus, readIndex, writeIndex } from "../src/index/build-index.ts";
 import { dbPath, openDb, replaceAll } from "../src/packages/db.ts";
 import { HttpRegistry } from "../src/registry/registry.ts";
+
+const roots: string[] = [];
+afterEach(() => {
+	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function track(dir: string): string {
+	roots.push(dir);
+	return dir;
+}
 
 // Guards the "never bulk GitHub calls" constraint against regression: a
 // future edit could easily start threading a GitHub-commit fetcher through
@@ -89,7 +99,10 @@ describe("buildIndex", () => {
 		registry = new HttpRegistry(`http://127.0.0.1:${server.port}`, 250, 0, 1, `http://127.0.0.1:${server.port}`);
 	});
 
-	afterAll(() => server.stop(true));
+	afterAll(() => {
+		server.stop(true);
+		rmSync(catalogDir, { recursive: true, force: true });
+	});
 
 	it("builds one entry per cataloged package, skipping a lookup failure rather than failing the whole run", async () => {
 		const index = await buildIndex(registry, catalogDir, { delayMs: 0, currentPiVersion: async () => "0.83.0" });
@@ -123,7 +136,7 @@ describe("buildIndex", () => {
 
 describe("buildIndex bounds", () => {
 	it("never calls downloads() -- confirmed live to trigger npm's 429s at real catalog scale -- and truncates past maxPackages, marking the result", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "packed-index-bounds-"));
+		const dir = track(mkdtempSync(join(tmpdir(), "packed-index-bounds-")));
 		const db = openDb(dbPath(dir));
 		replaceAll(
 			db,
@@ -160,7 +173,7 @@ describe("buildIndex bounds", () => {
 	});
 
 	it("collapses two concurrent callers into one run -- confirmed live to matter: the daemon's own maintenance tick and an on-demand CLI build overlapping compounded into a shutdown the daemon's SIGTERM grace period couldn't outlast", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "packed-index-concurrent-"));
+		const dir = track(mkdtempSync(join(tmpdir(), "packed-index-concurrent-")));
 		const db = openDb(dbPath(dir));
 		replaceAll(db, [{ name: "pi-one", version: "1.0.0" }], "test");
 		db.close();
@@ -203,7 +216,7 @@ describe("buildIndex bounds", () => {
 
 describe("buildIndex incremental delta scanning", () => {
 	it("partitions the catalog into New/Changed/Unchanged against the prior index -- Unchanged makes zero live registry calls, New and Changed do", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "packed-index-delta-"));
+		const dir = track(mkdtempSync(join(tmpdir(), "packed-index-delta-")));
 		const db = openDb(dbPath(dir));
 		replaceAll(
 			db,
@@ -275,7 +288,7 @@ describe("buildIndex incremental delta scanning", () => {
 	});
 
 	it("maxPackages bounds only the New+Changed live-call queue -- Unchanged entries beyond that count still complete", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "packed-index-delta-bound-"));
+		const dir = track(mkdtempSync(join(tmpdir(), "packed-index-delta-bound-")));
 		const db = openDb(dbPath(dir));
 		// 5 unchanged entries alone already exceed maxPackages: 1 below.
 		replaceAll(
@@ -323,7 +336,7 @@ describe("buildIndex incremental delta scanning", () => {
 
 describe("index persistence", () => {
 	it("writes, reads, and reports staleness", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "packed-index-store-"));
+		const dir = track(mkdtempSync(join(tmpdir(), "packed-index-store-")));
 		const path = indexPath(dir);
 		expect(readIndex(path)).toBeUndefined();
 		expect(indexStatus(path, 1_000).stale).toBe(true);
@@ -343,7 +356,7 @@ describe("index persistence", () => {
 	});
 
 	it("generateIndex builds and writes in one call", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "packed-index-generate-"));
+		const dir = track(mkdtempSync(join(tmpdir(), "packed-index-generate-")));
 		const db = openDb(dbPath(dir));
 		replaceAll(db, [{ name: "pi-alpha", version: "1.0.0" }], "npm:keywords:pi-package");
 		db.close();

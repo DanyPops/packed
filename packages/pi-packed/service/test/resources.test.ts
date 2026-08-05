@@ -12,6 +12,11 @@ afterEach(() => {
 	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
+function track(dir: string): string {
+	roots.push(dir);
+	return dir;
+}
+
 function piHome(settingsPackages: unknown[]): string {
 	const root = mkdtempSync(join(tmpdir(), "packed-resources-"));
 	roots.push(root);
@@ -149,8 +154,8 @@ function rpcClient(piHome: string) {
 		reg: new NoopRegistry(),
 		inst: new NoopInstaller(),
 		token: "test-token",
-		stateDir: mkdtempSync(join(tmpdir(), "packed-resources-state-")),
-		dataDir: mkdtempSync(join(tmpdir(), "packed-resources-data-")),
+		stateDir: track(mkdtempSync(join(tmpdir(), "packed-resources-state-"))),
+		dataDir: track(mkdtempSync(join(tmpdir(), "packed-resources-data-"))),
 		piHome,
 	});
 	return new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", {

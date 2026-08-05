@@ -1,5 +1,5 @@
-import { describe, expect, it } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { afterEach, describe, expect, it } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Installer, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/packages/package.ts";
@@ -54,8 +54,18 @@ class GitFixture implements GitResolutionPort {
 	}
 }
 
+const roots: string[] = [];
+afterEach(() => {
+	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function track(dir: string): string {
+	roots.push(dir);
+	return dir;
+}
+
 function piHome(withPackage = true): string {
-	const root = mkdtempSync(join(tmpdir(), "packed-setup-home-"));
+	const root = track(mkdtempSync(join(tmpdir(), "packed-setup-home-")));
 	const packages = withPackage ? ["npm:pi-demo"] : [];
 	writeFileSync(join(root, "settings.json"), JSON.stringify({ packages }));
 	if (withPackage) {
@@ -73,7 +83,7 @@ function piHome(withPackage = true): string {
 }
 
 function project(): string {
-	const root = mkdtempSync(join(tmpdir(), "packed-setup-project-"));
+	const root = track(mkdtempSync(join(tmpdir(), "packed-setup-project-")));
 	mkdirSync(join(root, ".pi"), { recursive: true });
 	return root;
 }

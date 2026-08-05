@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthenticatedRpcClient } from "@danypops/vehicle-client/rpc-client";
@@ -16,6 +16,16 @@ import {
 	runPiUpdateSelf,
 } from "../src/pi/pi-version.ts";
 import type { VersionCommand } from "../src/publish/publish.ts";
+
+const roots: string[] = [];
+afterEach(() => {
+	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function track(dir: string): string {
+	roots.push(dir);
+	return dir;
+}
 
 class NoopRegistry implements Registry {
 	async search(): Promise<SearchPage> {
@@ -288,8 +298,8 @@ describe("pi.status operation", () => {
 			reg: new NoopRegistry(),
 			inst: new NoopInstaller(),
 			token: "test-token",
-			stateDir: mkdtempSync(join(tmpdir(), "packed-pi-version-state-")),
-			dataDir: mkdtempSync(join(tmpdir(), "packed-pi-version-data-")),
+			stateDir: track(mkdtempSync(join(tmpdir(), "packed-pi-version-state-"))),
+			dataDir: track(mkdtempSync(join(tmpdir(), "packed-pi-version-data-"))),
 			piVersion: { check: async () => ({ current: "0.82.1", latest: "0.83.0", upToDate: false }) },
 		});
 		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", {
@@ -305,8 +315,8 @@ describe("pi.status operation", () => {
 			reg: new NoopRegistry(),
 			inst: new NoopInstaller(),
 			token: "test-token",
-			stateDir: mkdtempSync(join(tmpdir(), "packed-pi-version-state-")),
-			dataDir: mkdtempSync(join(tmpdir(), "packed-pi-version-data-")),
+			stateDir: track(mkdtempSync(join(tmpdir(), "packed-pi-version-state-"))),
+			dataDir: track(mkdtempSync(join(tmpdir(), "packed-pi-version-data-"))),
 			piVersion: { check: async () => ({}) },
 		});
 		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", {

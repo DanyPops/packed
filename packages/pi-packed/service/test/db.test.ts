@@ -1,5 +1,5 @@
-import { describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync } from "node:fs";
+import { afterEach, describe, expect, it } from "bun:test";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { syncCatalog } from "../src/packages/catalog.ts";
@@ -127,9 +127,15 @@ class PagedRegistry implements Registry {
 	}
 }
 
+const roots: string[] = [];
+afterEach(() => {
+	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
 describe("syncCatalog → SQLite", () => {
 	it("accumulates pages into the DB and records sync meta", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "packed-"));
+		roots.push(dir);
 		const reg = new PagedRegistry({ 0: PKGS.slice(0, 2), 2: PKGS.slice(2) }, 3);
 		expect(await syncCatalog(reg, dir)).toBe(3);
 		expect(existsSync(dbPath(dir))).toBe(true);

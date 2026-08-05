@@ -10,8 +10,8 @@
  * always-"Updated"-regardless-of-outcome text, and assert the real on-disk
  * version diff is what actually drives reloadRequired/alreadyUpToDate.
  */
-import { describe, expect, it } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { afterEach, describe, expect, it } from "bun:test";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ExecInstaller } from "../src/packages/install.ts";
@@ -24,6 +24,16 @@ import { ExecInstaller } from "../src/packages/install.ts";
  * baked into the script file itself (not an env var) so it is immune to
  * Bun.spawn's default env snapshot not picking up late process.env writes.
  */
+const roots: string[] = [];
+afterEach(() => {
+	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function track(dir: string): string {
+	roots.push(dir);
+	return dir;
+}
+
 function writeFakePi(dir: string, rewrite?: { piHome: string; name: string; newVersion: string }): string {
 	const script = join(dir, "fake-pi");
 	const rewriteLine = rewrite
@@ -39,7 +49,7 @@ function writeFakePi(dir: string, rewrite?: { piHome: string; name: string; newV
 }
 
 function writePiHome(nodeModules: Record<string, string> = {}): string {
-	const dir = mkdtempSync(join(tmpdir(), "packed-exec-pihome-"));
+	const dir = track(mkdtempSync(join(tmpdir(), "packed-exec-pihome-")));
 	mkdirSync(join(dir, "npm"), { recursive: true });
 	for (const [name, version] of Object.entries(nodeModules)) {
 		const pkgDir = join(dir, "npm", "node_modules", name);
@@ -73,7 +83,7 @@ function writeFakeNpm(dir: string, logFile: string, rewrite?: { piHome: string; 
 
 describe("ExecInstaller.update() — honest reloadRequired despite pi's ambiguous exit-0 text", () => {
 	it("pinned source, version genuinely unchanged: alreadyUpToDate, reloadRequired false", async () => {
-		const scriptDir = mkdtempSync(join(tmpdir(), "packed-exec-bin-"));
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-bin-")));
 		const bin = writeFakePi(scriptDir);
 		const npmBin = writeFakeNpm(scriptDir, join(scriptDir, "npm.log"));
 		const piHome = writePiHome({ "@scope/pkg": "1.2.3" });
@@ -90,7 +100,7 @@ describe("ExecInstaller.update() — honest reloadRequired despite pi's ambiguou
 	});
 
 	it('unpinned source, already latest (pi still exits 0 and says "Updated"): alreadyUpToDate', async () => {
-		const scriptDir = mkdtempSync(join(tmpdir(), "packed-exec-bin-"));
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-bin-")));
 		const bin = writeFakePi(scriptDir);
 		const npmBin = writeFakeNpm(scriptDir, join(scriptDir, "npm.log"));
 		const piHome = writePiHome({ plain: "0.5.0" });
@@ -106,7 +116,7 @@ describe("ExecInstaller.update() — honest reloadRequired despite pi's ambiguou
 	});
 
 	it("unpinned source, a real version change happens: reloadRequired true", async () => {
-		const scriptDir = mkdtempSync(join(tmpdir(), "packed-exec-bin-"));
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-bin-")));
 		const piHome = writePiHome({ plain: "0.5.0" });
 		const bin = writeFakePi(scriptDir, { piHome, name: "plain", newVersion: "0.6.0" });
 		const npmBin = writeFakeNpm(scriptDir, join(scriptDir, "npm.log"));
@@ -122,7 +132,7 @@ describe("ExecInstaller.update() — honest reloadRequired despite pi's ambiguou
 	});
 
 	it("git: source (no npm resolution possible either side): conservatively assumes it may have changed", async () => {
-		const scriptDir = mkdtempSync(join(tmpdir(), "packed-exec-bin-"));
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-bin-")));
 		const bin = writeFakePi(scriptDir);
 		const npmBin = writeFakeNpm(scriptDir, join(scriptDir, "npm.log"));
 		const piHome = writePiHome();
@@ -141,7 +151,7 @@ describe("ExecInstaller.update() — honest reloadRequired despite pi's ambiguou
 
 describe("ExecInstaller — forces full dependency re-resolution, not just the target's own subtree", () => {
 	it("update() fixes a stale root-level sibling that the targeted pi update never touched", async () => {
-		const scriptDir = mkdtempSync(join(tmpdir(), "packed-exec-bin-"));
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-bin-")));
 		// Simulates the confirmed live defect: after `pi update npm:@scope/leaf`,
 		// the leaf's own version bumps, but a root-level sibling
 		// (@scope/shared) that the freshly-updated leaf now needs a newer
@@ -170,7 +180,7 @@ describe("ExecInstaller — forces full dependency re-resolution, not just the t
 	});
 
 	it("install() also forces a full re-resolution after a successful pi install", async () => {
-		const scriptDir = mkdtempSync(join(tmpdir(), "packed-exec-bin-"));
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-bin-")));
 		const piHome = writePiHome({ "@scope/shared": "1.0.0" });
 		const bin = writeFakePi(scriptDir);
 		const npmLog = join(scriptDir, "npm.log");
@@ -185,7 +195,7 @@ describe("ExecInstaller — forces full dependency re-resolution, not just the t
 	});
 
 	it("surfaces a failed re-resolution instead of silently reporting success", async () => {
-		const scriptDir = mkdtempSync(join(tmpdir(), "packed-exec-bin-"));
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-bin-")));
 		const piHome = writePiHome({ plain: "0.5.0" });
 		const bin = writeFakePi(scriptDir, { piHome, name: "plain", newVersion: "0.6.0" });
 		const failingNpm = join(scriptDir, "fake-npm-fail");

@@ -8,7 +8,7 @@
  * pass.
  */
 import { describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,6 +21,39 @@ const FIXTURES = join(__dirname, "fixtures/install-validation");
 const HEALTHY = join(FIXTURES, "healthy-package");
 const BROKEN = join(FIXTURES, "broken-package");
 const NO_MANIFEST = join(FIXTURES, "no-manifest-package");
+const DEP_PACKAGE = join(FIXTURES, "dep-package");
+
+/** Writes a fresh package into `dir` whose extension entry point has a real
+ * runtime import (`packed-fixture-dep`, a `file:` dependency resolvable
+ * fully offline) -- otherwise healthy, structurally identical to HEALTHY,
+ * except its one declared dependency must actually be installed into the
+ * staged tarball for its entry point to load at all. The file: target is
+ * an absolute path computed at test time (checkout-independent), so this
+ * can't be a static checked-in fixture the way HEALTHY/BROKEN are. */
+function writePackageWithRealDependency(dir: string): void {
+	mkdirSync(join(dir, "extension"), { recursive: true });
+	writeFileSync(
+		join(dir, "package.json"),
+		JSON.stringify({
+			name: "packed-install-validation-fixture-with-dependency",
+			version: "1.0.0",
+			private: true,
+			pi: { extensions: ["extension/index.ts"] },
+			dependencies: { "packed-fixture-dep": `file:${DEP_PACKAGE}` },
+		}),
+	);
+	writeFileSync(
+		join(dir, "extension/index.ts"),
+		[
+			'import { greet } from "packed-fixture-dep";',
+			"",
+			"export default function withDependencyFixtureExtension(pi: { registerCommand: (name: string, def: unknown) => void }) {",
+			'\tpi.registerCommand("with-dependency-fixture", { description: greet(), handler: async () => {} });',
+			"}",
+			"",
+		].join("\n"),
+	);
+}
 
 describe("bareNpmSpec", () => {
 	it("strips the npm: scheme", () => {
@@ -75,6 +108,31 @@ describe("HeadlessInstallValidator (real npm pack + tar extraction, no mocking)"
 		expect(result.ok).toBe(true);
 		expect(result.extensions).toEqual([{ path: "extension/index.ts", ok: true }]);
 	}, 20_000);
+});
+
+describe("HeadlessInstallValidator (bug repro, packed-headlessinstallvalidator-never-installs-the): staged tarball's own declared dependencies are never installed before the load check", () => {
+	it("approves an otherwise-healthy package whose entry point needs its one declared file: dependency", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "packed-install-validation-dep-fixture-"));
+		writePackageWithRealDependency(dir);
+
+		// Ground truth this isn't a broken fixture: a plain `bun install` in an
+		// identical staged copy resolves and loads it fine (mirrors the real
+		// @danypops/pi-pipes repro: `npm pack` + `tar -xzf` + `bun install`
+		// succeeds outside of HeadlessInstallValidator).
+		const install = await Bun.spawn(["bun", "install", "--no-save"], { cwd: dir, stdout: "pipe", stderr: "pipe" }).exited;
+		expect(install).toBe(0);
+		const directLoad = await validateExtensionLoadsHeadless(join(dir, "extension/index.ts"));
+		expect(directLoad.ok).toBe(true);
+
+		// The real bug: HeadlessInstallValidator stages its own fresh copy via
+		// npm pack + tar (never running bun/npm install in that copy), so the
+		// same otherwise-healthy package fails the load check purely because
+		// its declared dependency was never installed into *that* copy.
+		const validator = new HeadlessInstallValidator();
+		const result = await validator.validate(`npm:${dir}`);
+		expect(result.ok).toBe(true);
+		expect(result.extensions).toEqual([{ path: "extension/index.ts", ok: true }]);
+	}, 30_000);
 });
 
 describe("ExecInstaller.install() -- refuses before ever spawning the real pi binary", () => {

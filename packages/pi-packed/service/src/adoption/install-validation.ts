@@ -3,7 +3,8 @@
  * for ExecInstaller.install(), so a package that crashes at registration
  * time never gets fully wired into ~/.pi/npm and ~/.pi/agent in the first
  * place. Stages the real npm tarball into a throwaway temp dir (never the
- * live piHome), then runs @danypops/pi-extension-harness's own mock-pi-cli
+ * live piHome), installs its own declared dependencies there, then runs
+ * @danypops/pi-extension-harness's own mock-pi-cli
  * subprocess -- a real, isolated process exercising the same production
  * jiti load path Pi's own binary uses -- against every declared
  * pi.extensions entry.
@@ -33,6 +34,7 @@ export interface InstallValidator {
 const DEFAULT_LOAD_TIMEOUT_MS = 8_000;
 const MAX_LOAD_TIMEOUT_MS = 30_000;
 const PACK_TIMEOUT_MS = 30_000;
+const INSTALL_TIMEOUT_MS = 60_000;
 const MAX_EXTENSIONS = 20;
 
 function bounded(value: number | undefined, fallback: number, maximum: number): number {
@@ -94,6 +96,19 @@ async function stageNpmTarball(spec: string, stageDir: string): Promise<StageRes
 	const root = join(stageDir, "package"); // npm's own tarball layout convention
 	if (!existsSync(join(root, "package.json"))) return { ok: false, message: "extracted tarball has no package.json at its expected root" };
 	return { ok: true, root };
+}
+
+/** Installs the staged tarball's own declared dependencies -- npm pack +
+ * tar only extract the package's own files, never fetch what its
+ * package.json requires. --ignore-scripts keeps an untrusted candidate's
+ * lifecycle scripts from running during a headless check nobody explicitly
+ * approved; --omit=dev matches what the entry point actually needs at
+ * runtime (jiti loads its TS source directly, no separate build step). */
+async function installStagedDependencies(root: string): Promise<{ ok: true } | { ok: false; message: string }> {
+	const install = await runCommand(["npm", "install", "--ignore-scripts", "--omit=dev", "--no-audit", "--no-fund"], root, INSTALL_TIMEOUT_MS);
+	if (install.timedOut) return { ok: false, message: `npm install exceeded ${INSTALL_TIMEOUT_MS}ms installing the staged package's own dependencies` };
+	if (install.code !== 0) return { ok: false, message: (install.stderr.trim() || `npm install exited ${install.code}`).slice(0, 2_000) };
+	return { ok: true };
 }
 
 /** Runs pi-extension-harness's mock-pi-cli against one extension entry
@@ -164,6 +179,9 @@ export class HeadlessInstallValidator implements InstallValidator {
 				? pi.extensions.filter((entry): entry is string => typeof entry === "string").slice(0, MAX_EXTENSIONS)
 				: [];
 			if (declared.length === 0) return { ok: true, source, extensions: [] };
+
+			const installed = await installStagedDependencies(staged.root);
+			if (!installed.ok) return { ok: false, source, extensions: [], message: installed.message };
 
 			const extensions: ExtensionLoadResult[] = [];
 			for (const entry of declared) {

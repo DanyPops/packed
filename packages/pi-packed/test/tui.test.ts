@@ -290,8 +290,13 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 		expect(text).toContain("0.3.12 · installed");
 		expect(text).toContain("pi-lsp");
 		expect(text).toContain("1.0.0 · ↑1.1.0");
-		expect(rendered.filter((line) => line.includes("┌") && line.includes("┐"))).toHaveLength(2);
-		expect(rendered.filter((line) => line.includes("└") && line.includes("┘"))).toHaveLength(2);
+		// Counts glyph occurrences, not matching lines -- the grid layout can
+		// pack more than one card onto the same rendered line side by side, so
+		// "one card per line" is no longer a safe assumption to count by.
+		expect(text.match(/┌/g)).toHaveLength(2);
+		expect(text.match(/┐/g)).toHaveLength(2);
+		expect(text.match(/└/g)).toHaveLength(2);
+		expect(text.match(/┘/g)).toHaveLength(2);
 	});
 
 	it("keeps every rendered line at the exact same real (ANSI-stripped) width, under genuine theme styling, not a plain fake theme", async () => {
@@ -333,6 +338,159 @@ describe("showPackedPanel (/packed folds packages + settings into one panel)", (
 
 		const widths = new Set(rendered.map((line) => stripAnsi(line).length));
 		expect(widths).toEqual(new Set([90])); // every line, every column -- not a mix of 60/75/90
+	});
+
+	it("packs multiple cards side by side into a grid on a wide terminal, instead of one card per full-width line", async () => {
+		let rendered: string[] = [];
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom(
+					factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[] },
+				) {
+					return new Promise((resolve) => {
+						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
+						const component = factory({ requestRender() {} }, theme, {}, resolve);
+						rendered = component.render(120);
+						resolve(undefined);
+					});
+				},
+				notify() {},
+			},
+		} as unknown as ExtensionCommandContext;
+		const natives = {
+			async installed() {
+				return Array.from({ length: 8 }, (_, i) => ({ name: `pi-pkg-${i}`, installed: "1.0.0" }));
+			},
+			async updates() {
+				return [];
+			},
+		} as unknown as Natives;
+
+		await showPackedPanel(ctx, natives);
+
+		const text = rendered.join("\n");
+		// All 8 real cards render (nothing lost to the grid math) --
+		// every declared package name appears, and every card gets its own
+		// top/bottom border pair somewhere in the output.
+		for (let i = 0; i < 8; i++) expect(text).toContain(`pi-pkg-${i}`);
+		expect(text.match(/┌/g)).toHaveLength(8);
+		// The real point of the grid: at 120 columns, more than one card's own
+		// top border shares a single rendered line -- distinctly fewer lines
+		// carry a "┌" than there are cards, proving side-by-side packing
+		// rather than the old one-card-per-line stack.
+		const topBorderLines = rendered.filter((line) => line.includes("┌"));
+		expect(topBorderLines.length).toBeLessThan(8);
+		expect(topBorderLines.some((line) => (line.match(/┌/g)?.length ?? 0) > 1)).toBe(true);
+	});
+
+	it("falls back to a single column on a narrow terminal -- one card per line, same as before the grid", async () => {
+		let rendered: string[] = [];
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom(
+					factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[] },
+				) {
+					return new Promise((resolve) => {
+						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
+						const component = factory({ requestRender() {} }, theme, {}, resolve);
+						rendered = component.render(30);
+						resolve(undefined);
+					});
+				},
+				notify() {},
+			},
+		} as unknown as ExtensionCommandContext;
+		const natives = {
+			async installed() {
+				return [
+					{ name: "pi-a", installed: "1.0.0" },
+					{ name: "pi-b", installed: "2.0.0" },
+					{ name: "pi-c", installed: "3.0.0" },
+				];
+			},
+			async updates() {
+				return [];
+			},
+		} as unknown as Natives;
+
+		await showPackedPanel(ctx, natives);
+
+		const topBorderLines = rendered.filter((line) => line.includes("┌"));
+		expect(topBorderLines).toHaveLength(3); // one line per card -- width can't fit two side by side
+		expect(topBorderLines.every((line) => (line.match(/┌/g)?.length ?? 0) === 1)).toBe(true);
+	});
+
+	it("never allocates more grid columns than there are real packages, even on a wide terminal", async () => {
+		let rendered: string[] = [];
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom(
+					factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[] },
+				) {
+					return new Promise((resolve) => {
+						const theme = { fg: (_c: string, s: string) => s, bg: (_c: string, s: string) => s, bold: (s: string) => s };
+						const component = factory({ requestRender() {} }, theme, {}, resolve);
+						rendered = component.render(120); // fits 4 columns at MIN_CARD_WIDTH, but only 2 packages exist
+						resolve(undefined);
+					});
+				},
+				notify() {},
+			},
+		} as unknown as ExtensionCommandContext;
+		const natives = {
+			async installed() {
+				return [
+					{ name: "pi-a", installed: "1.0.0" },
+					{ name: "pi-b", installed: "2.0.0" },
+				];
+			},
+			async updates() {
+				return [];
+			},
+		} as unknown as Natives;
+
+		await showPackedPanel(ctx, natives);
+
+		// Both cards land on the very same grid row (2 columns, not 4) --
+		// exactly one rendered line carries both top borders.
+		const topBorderLines = rendered.filter((line) => line.includes("┌"));
+		expect(topBorderLines).toHaveLength(1);
+		expect(topBorderLines[0]?.match(/┌/g)).toHaveLength(2);
+	});
+
+	it("keeps every rendered line at the exact same real width in a multi-column, multi-row grid", async () => {
+		let rendered: string[] = [];
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async custom(
+					factory: (tui: unknown, theme: unknown, kb: unknown, done: (r: unknown) => void) => { render(width: number): string[] },
+				) {
+					return new Promise((resolve) => {
+						const component = factory({ requestRender() {} }, realishTheme, {}, resolve);
+						rendered = component.render(101); // deliberately not evenly divisible by any column count
+						resolve(undefined);
+					});
+				},
+				notify() {},
+			},
+		} as unknown as ExtensionCommandContext;
+		const natives = {
+			async installed() {
+				return Array.from({ length: 7 }, (_, i) => ({ name: `pi-pkg-${i}`, installed: "1.0.0" }));
+			},
+			async updates() {
+				return [];
+			},
+		} as unknown as Natives;
+
+		await showPackedPanel(ctx, natives);
+
+		const widths = new Set(rendered.map((line) => stripAnsi(line).length));
+		expect(widths).toEqual(new Set([101]));
 	});
 
 	it("renders the installer's own progress bar inline next to the updating row, without replacing the rest of the package list", async () => {

@@ -29,12 +29,13 @@
  * inline next to the row currently updating, settling into a real ✓/✗
  * plus a bounded tail of that row's own actual captured stdout/stderr
  * once it finishes, never a determinate bar (a single subprocess call has
- * no knowable percentage). Rows render through Malevich's Table (real
- * column-aligned Package/Version/status cells, per-row selection styling
- * baked into each cell since Table's own cellStyle is column-wide, not
- * row-wide) inside this tab's own scroll-window slice -- Table
- * deliberately owns no pagination of its own, so the visible-window-
- * around-selectedIndex math stays here. u/x/d and the Enter action menu
+ * no knowable percentage). Rows render as a column-major grid of
+ * Malevich Cards (computeCardColumns/renderCardGrid, below) -- one card
+ * per package, as many side by side as `width` allows above a fixed
+ * minimum card width, rather than one full-width card per line -- inside
+ * this tab's own scroll-window slice. No pagination baked into the grid
+ * helpers themselves, so the visible-window-around-selectedIndex math
+ * stays here. u/x/d and the Enter action menu
  * all run their whole approve+mutate+confirmReload flow inline, via the
  * shared TabHost's inlineCtx -- every confirm() along the way renders as
  * a real Malevich Dialog on this SAME overlay, dispatched by literal y/n
@@ -407,6 +408,87 @@ async function showActionMenu(ctx: ExtensionCommandContext, row: Row): Promise<"
 	);
 }
 
+/** A card narrower than this wastes more space on border/padding than it
+ * shows of a real scoped package name ("@scope/pi-longer-name") plus its
+ * version/status -- the floor `computeCardColumns` uses when deciding how
+ * many side-by-side columns actually fit `width`, rather than guessing a
+ * fixed row/page count independent of the panel's real width. */
+const MIN_CARD_WIDTH = 28;
+const CARD_GRID_GAP = 1;
+
+/** How many side-by-side card columns fit `width` without any of them
+ * dropping below MIN_CARD_WIDTH, capped at `itemCount` -- never more
+ * columns than there are real items to fill them (a wide terminal with
+ * only 2 packages installed gets 2 columns, not 4 mostly-empty ones). */
+function computeCardColumns(width: number, itemCount: number): number {
+	if (itemCount <= 0) return 1;
+	const fits = Math.floor((width + CARD_GRID_GAP) / (MIN_CARD_WIDTH + CARD_GRID_GAP));
+	return Math.max(1, Math.min(fits, itemCount));
+}
+
+/** Exact per-column widths for `columns` side-by-side cards inside `width`,
+ * every gap included -- sums (with CARD_GRID_GAP between each) to exactly
+ * `width`, distributing any remainder across the leading columns instead
+ * of leaving it as slack nobody renders into (the same exact-width
+ * contract every other line in this panel already holds, verified by this
+ * file's own "every rendered line at the exact same real width" test). */
+function distributeColumnWidths(width: number, columns: number): number[] {
+	const available = width - CARD_GRID_GAP * (columns - 1);
+	const base = Math.floor(available / columns);
+	const remainder = available - base * columns;
+	return Array.from({ length: columns }, (_, i) => base + (i < remainder ? 1 : 0));
+}
+
+/** Lays `items` into a column-major grid of exactly `columns` columns
+ * (column 0 filled top-to-bottom first, then column 1, ...) -- the same
+ * fill order `ls -C` uses, so a flat Up/Down cycle through `items` moves
+ * down one column at a time instead of snaking left-to-right through a
+ * row-major grid, with no new keybinding needed (Left/Right stay reserved
+ * for the panel's own tab-cycling -- see this file's own header comment).
+ * `columns` is always the caller's own already-computed computeCardColumns
+ * result, never re-derived here from `items.length` -- a caller windowing
+ * `items` into a page shorter than its full list must still render that
+ * page at the same column count the rest of the list uses, or the grid
+ * would reflow mid-scroll. `selectedIndex` is an index into `items`
+ * itself, or -1 when nothing in this grid is selected. */
+function renderCardGrid<T>(
+	items: T[],
+	columns: number,
+	width: number,
+	selectedIndex: number,
+	renderCard: (item: T, columnWidth: number, selected: boolean) => string[],
+): string[] {
+	if (items.length === 0) return [];
+	const columnWidths = distributeColumnWidths(width, columns);
+	const rowsPerColumn = Math.ceil(items.length / columns);
+	const rendered: string[][] = [];
+	for (let c = 0; c < columns; c++) {
+		const columnWidth = columnWidths[c] ?? MIN_CARD_WIDTH;
+		const lines: string[] = [];
+		for (let r = 0; r < rowsPerColumn; r++) {
+			const index = c * rowsPerColumn + r;
+			const item = items[index];
+			if (item === undefined) break;
+			lines.push(...renderCard(item, columnWidth, index === selectedIndex));
+		}
+		rendered.push(lines);
+	}
+	const height = Math.max(0, ...rendered.map((lines) => lines.length));
+	const out: string[] = [];
+	for (let row = 0; row < height; row++) {
+		out.push(
+			rendered
+				.map((lines, c) => {
+					const line = lines[row] ?? "";
+					const pad = Math.max(0, (columnWidths[c] ?? MIN_CARD_WIDTH) - visibleWidth(line));
+					return line + " ".repeat(pad);
+				})
+				.join(" ".repeat(CARD_GRID_GAP)),
+		);
+	}
+	return out;
+}
+
 /** Packages -- the panel's default/"home" tab. A real Component (not the
  * panel's own top-level ctx.ui.custom owner anymore); the shared TabHost
  * gives it inline approval/reload dialogs and a way to signal the overlay
@@ -509,33 +591,42 @@ export class PackagesTab implements Component {
 			lines.push(theme.fg("muted", "  No packages"));
 			return lines;
 		}
-		// No scrolling of its own (Malevich's Table is deliberately
-		// unopinionated about pagination) -- the visible window around
-		// selectedIndex stays this tab's own job.
-		const start = Math.max(0, Math.min(this.selectedIndex - Math.floor(this.maxVisible / 2), this.filtered.length - this.maxVisible));
-		const end = Math.min(start + this.maxVisible, this.filtered.length);
-		for (const [offset, row] of this.filtered.slice(start, end).entries()) {
-			const selected = start + offset === this.selectedIndex;
-			// A settled row shows its real outcome even for the instant before
-			// the next row's "start" event moves updatingRowName off it.
-			const rowSettled = this.settled.get(row.name);
-			const isUpdating = !rowSettled && this.updatingRowName === row.name;
-			const status = isUpdating
-				? theme.fg("accent", `${this.spinner.glyph()} updating…`)
-				: rowSettled
-					? theme.fg(rowSettled.ok ? "success" : "error", `${rowSettled.ok ? "✓" : "✗"}${rowSettled.tail ? ` ${rowSettled.tail}` : ""}`)
-					: row.hasUpdate
-						? theme.fg("warning", `↑${row.latest}`)
-						: theme.fg("muted", "installed");
-			const card = new Card({
-				title: theme.bold(row.name),
-				content: [`${theme.fg("dim", row.version)} · ${status}`],
-				selected,
-				theme: cardTheme(theme),
-				measure: this.measure,
-			});
-			lines.push(...card.render(width));
-		}
+		// Column count is derived from `width` (and the total item count, so a
+		// short list never gets more columns than it has items) once per
+		// render, then held fixed across the whole page -- otherwise scrolling
+		// through a filtered list would reflow the grid mid-scroll. No
+		// scrolling of its own beyond that: the visible-window-around-
+		// selectedIndex math stays this tab's own job, same as before, just
+		// now counting grid rows (maxVisible) times columns instead of a flat
+		// one-card-per-line count.
+		const columns = computeCardColumns(width, this.filtered.length);
+		const pageSize = columns * this.maxVisible;
+		const start = Math.max(0, Math.min(this.selectedIndex - Math.floor(pageSize / 2), this.filtered.length - pageSize));
+		const end = Math.min(start + pageSize, this.filtered.length);
+		const page = this.filtered.slice(start, end);
+		lines.push(
+			...renderCardGrid(page, columns, width, this.selectedIndex - start, (row, columnWidth, selected) => {
+				// A settled row shows its real outcome even for the instant before
+				// the next row's "start" event moves updatingRowName off it.
+				const rowSettled = this.settled.get(row.name);
+				const isUpdating = !rowSettled && this.updatingRowName === row.name;
+				const status = isUpdating
+					? theme.fg("accent", `${this.spinner.glyph()} updating…`)
+					: rowSettled
+						? theme.fg(rowSettled.ok ? "success" : "error", `${rowSettled.ok ? "✓" : "✗"}${rowSettled.tail ? ` ${rowSettled.tail}` : ""}`)
+						: row.hasUpdate
+							? theme.fg("warning", `↑${row.latest}`)
+							: theme.fg("muted", "installed");
+				const card = new Card({
+					title: theme.bold(row.name),
+					content: [`${theme.fg("dim", row.version)} · ${status}`],
+					selected,
+					theme: cardTheme(theme),
+					measure: this.measure,
+				});
+				return card.render(columnWidth);
+			}),
+		);
 		const hasScroll = start > 0 || end < this.filtered.length;
 		lines.push(theme.fg("dim", `  ${hasScroll ? `${this.selectedIndex + 1}/${this.filtered.length} ` : ""}${this.mode}`));
 		return lines;

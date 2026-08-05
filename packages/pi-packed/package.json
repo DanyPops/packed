@@ -1,6 +1,6 @@
 {
   "name": "@danypops/pi-packed",
-  "version": "0.21.10",
+  "version": "0.21.11",
   "description": "Pi package lifecycle, validation, daemon, tools, profiles, and TUI",
   "type": "module",
   "bin": {

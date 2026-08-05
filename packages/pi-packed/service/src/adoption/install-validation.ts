@@ -7,7 +7,10 @@
  * @danypops/pi-extension-harness's own mock-pi-cli
  * subprocess -- a real, isolated process exercising the same production
  * jiti load path Pi's own binary uses -- against every declared
- * pi.extensions entry.
+ * pi.extensions entry. Also runs @danypops/vehicle-client-pi's
+ * pi-load-harness (native ESM, jiti tryNative:false) in its own isolated
+ * subprocess as non-gating, observational evidence alongside that gating
+ * check -- see ExtensionLoadResult.additionalLoadPaths.
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -18,6 +21,26 @@ export interface ExtensionLoadResult {
 	path: string;
 	ok: boolean;
 	message?: string;
+	/** Non-gating: @danypops/vehicle-client-pi's pi-load-harness checks two
+	 * further Pi extension load paths (native ESM, jiti tryNative:false)
+	 * beyond the one path above (jiti tryNative:true) already gates install.
+	 * Surfaced as observational evidence only, for two independent reasons:
+	 * (1) native-esm can legitimately fail for a perfectly loadable extension
+	 * on an older Node without TS type-stripping support, with no real-world
+	 * signal yet on how often that's a false alarm; (2) this check only
+	 * verifies the module *imports* cleanly -- unlike the gating check above,
+	 * it never calls the extension's exported factory, so it cannot catch a
+	 * factory that throws once actually registered (confirmed directly: the
+	 * BROKEN test fixture, whose factory always throws, reports ok:true on
+	 * every one of these paths). Complementary evidence for an import-time
+	 * failure class, not a broader replacement for the gating check. */
+	additionalLoadPaths?: PiLoadPathResult[];
+}
+
+export interface PiLoadPathResult {
+	path: "native-esm" | "jiti-try-native-false" | "jiti-try-native-true";
+	ok: boolean;
+	error?: string;
 }
 
 export interface InstallValidationResult {
@@ -151,6 +174,28 @@ export async function validateExtensionLoadsHeadless(entryPath: string, timeoutM
 	};
 }
 
+/** Runs the extra two Pi extension load paths @danypops/vehicle-client-pi's
+ * pi-load-harness knows about (native ESM, jiti tryNative:false) against
+ * one entry point, in their own isolated subprocess -- same trust boundary
+ * as validateExtensionLoadsHeadless, never inside the daemon process.
+ * Returns undefined (not a failure) when the probe subprocess itself
+ * couldn't run at all -- vehicle-client-pi is an optional enrichment here,
+ * not a hard requirement the way pi-extension-harness is. */
+async function verifyAllLoadPathsHeadless(entryPath: string, timeoutMs?: number): Promise<PiLoadPathResult[] | undefined> {
+	const bound = bounded(timeoutMs, DEFAULT_LOAD_TIMEOUT_MS, MAX_LOAD_TIMEOUT_MS);
+	const childPath = new URL("verify-load-paths-child.mjs", import.meta.url).pathname;
+	const result = await runCommand(["node", childPath, "--extension", entryPath], tmpdir(), bound);
+	if (result.timedOut) return undefined;
+	const lastLine = result.stdout.trim().split("\n").at(-1);
+	if (!lastLine) return undefined;
+	try {
+		const parsed = JSON.parse(lastLine) as { results?: PiLoadPathResult[]; error?: string };
+		return Array.isArray(parsed.results) ? parsed.results : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /** Stages the real npm tarball in isolation and headlessly load-checks
  * every pi.extensions entry it declares. A package with no pi.extensions
  * (most npm packages) or a non-npm source has nothing to validate and
@@ -194,7 +239,8 @@ export class HeadlessInstallValidator implements InstallValidator {
 				// path into a throwaway temp stage dir -- meaningful to a caller,
 				// matches what package.json itself says.
 				const loadResult = await validateExtensionLoadsHeadless(entryPath, this.timeoutMs);
-				extensions.push({ ...loadResult, path: entry });
+				const additionalLoadPaths = await verifyAllLoadPathsHeadless(entryPath, this.timeoutMs);
+				extensions.push({ ...loadResult, path: entry, ...(additionalLoadPaths ? { additionalLoadPaths } : {}) });
 			}
 			const ok = extensions.every((extension) => extension.ok);
 			return { ok, source, extensions, ...(ok ? {} : { message: "one or more declared extensions failed a headless load check" }) };

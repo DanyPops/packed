@@ -106,7 +106,40 @@ describe("HeadlessInstallValidator (real npm pack + tar extraction, no mocking)"
 		const validator = new HeadlessInstallValidator();
 		const result = await validator.validate(`npm:${HEALTHY}`);
 		expect(result.ok).toBe(true);
-		expect(result.extensions).toEqual([{ path: "extension/index.ts", ok: true }]);
+		expect(result.extensions).toHaveLength(1);
+		expect(result.extensions[0]).toMatchObject({ path: "extension/index.ts", ok: true });
+	}, 20_000);
+});
+
+describe("HeadlessInstallValidator (vehicle-client-pi pi-load-harness, non-gating diagnostic)", () => {
+	it("attaches all-three-path evidence for a real healthy package without changing its ok:true verdict", async () => {
+		const validator = new HeadlessInstallValidator();
+		const result = await validator.validate(`npm:${HEALTHY}`);
+		expect(result.ok).toBe(true);
+		expect(result.extensions).toHaveLength(1);
+		const paths = result.extensions[0]?.additionalLoadPaths;
+		expect(paths).toBeDefined();
+		expect(paths?.map((p) => p.path).sort()).toEqual(["jiti-try-native-false", "jiti-try-native-true", "native-esm"]);
+		expect(paths?.every((p) => p.ok)).toBe(true);
+	}, 20_000);
+
+	it("reports the broken fixture's additional paths as ok:true -- documents a real, deliberate difference in what's checked, not a bug", async () => {
+		// verifyLoadableUnderPi only checks that *importing* the module succeeds;
+		// it never calls the extension's exported factory the way mock-pi-cli's
+		// gating check does. BROKEN's factory only throws once invoked, so
+		// merely importing it succeeds on every path -- confirmed directly
+		// against the real child process, not assumed. The two checks answer
+		// genuinely different questions (import-time vs. factory-execution-time
+		// failure) and are complementary for exactly that reason; this test
+		// exists so a future change that makes them silently agree (e.g. an
+		// accidental factory invocation creeping into the load-path check)
+		// gets caught as a real behavior change.
+		const validator = new HeadlessInstallValidator();
+		const result = await validator.validate(`npm:${BROKEN}`);
+		expect(result.ok).toBe(false); // the gating check still refuses it
+		const paths = result.extensions[0]?.additionalLoadPaths;
+		expect(paths).toBeDefined();
+		expect(paths?.every((p) => p.ok === true)).toBe(true);
 	}, 20_000);
 });
 
@@ -131,7 +164,8 @@ describe("HeadlessInstallValidator (bug repro, packed-headlessinstallvalidator-n
 		const validator = new HeadlessInstallValidator();
 		const result = await validator.validate(`npm:${dir}`);
 		expect(result.ok).toBe(true);
-		expect(result.extensions).toEqual([{ path: "extension/index.ts", ok: true }]);
+		expect(result.extensions).toHaveLength(1);
+		expect(result.extensions[0]).toMatchObject({ path: "extension/index.ts", ok: true });
 	}, 30_000);
 });
 

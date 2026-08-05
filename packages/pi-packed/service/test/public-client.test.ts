@@ -1,5 +1,8 @@
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "bun:test";
-import { ensureClient } from "../src/public/client.ts";
+import { ensureClient, resolvePiBinForSpawn } from "../src/public/client.ts";
 
 describe("ensureClient (packed daemon auto-spawn-or-wait decision)", () => {
 	it("connects immediately without ever checking for a service or spawning, when already reachable", async () => {
@@ -130,5 +133,43 @@ describe("ensureClient (packed daemon auto-spawn-or-wait decision)", () => {
 			retryDelayMs: 0,
 		});
 		expect(serviceChecks).toBe(1);
+	});
+});
+
+describe("resolvePiBinForSpawn", () => {
+	it("leaves an explicit PI_PACKED_PI_BIN untouched", () => {
+		expect(resolvePiBinForSpawn({ PI_PACKED_PI_BIN: "/somewhere/pi", PATH: "/usr/bin" })).toBeUndefined();
+	});
+
+	it("leaves an explicit PI_BIN untouched", () => {
+		expect(resolvePiBinForSpawn({ PI_BIN: "/somewhere/pi", PATH: "/usr/bin" })).toBeUndefined();
+	});
+
+	it("returns undefined when PATH is missing", () => {
+		expect(resolvePiBinForSpawn({})).toBeUndefined();
+	});
+
+	it("returns undefined when no PATH directory has an executable `pi`", () => {
+		const dir = mkdtempSync(join(tmpdir(), "packed-resolve-pi-bin-"));
+		expect(resolvePiBinForSpawn({ PATH: dir })).toBeUndefined();
+	});
+
+	it("resolves the absolute path to an executable `pi` on PATH", () => {
+		const dir = mkdtempSync(join(tmpdir(), "packed-resolve-pi-bin-"));
+		const piPath = join(dir, "pi");
+		writeFileSync(piPath, "#!/bin/sh\necho pi\n");
+		chmodSync(piPath, 0o755);
+		expect(resolvePiBinForSpawn({ PATH: dir })).toBe(piPath);
+	});
+
+	it("skips a non-executable `pi` earlier on PATH and resolves a later one", () => {
+		const deadDir = mkdtempSync(join(tmpdir(), "packed-resolve-pi-bin-dead-"));
+		const liveDir = mkdtempSync(join(tmpdir(), "packed-resolve-pi-bin-live-"));
+		writeFileSync(join(deadDir, "pi"), "not executable");
+		chmodSync(join(deadDir, "pi"), 0o644);
+		const livePi = join(liveDir, "pi");
+		writeFileSync(livePi, "#!/bin/sh\necho pi\n");
+		chmodSync(livePi, 0o755);
+		expect(resolvePiBinForSpawn({ PATH: `${deadDir}:${liveDir}` })).toBe(livePi);
 	});
 });

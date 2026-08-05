@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { accessSync, constants as fsConstants, readFileSync } from "node:fs";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AuthenticatedRpcClient } from "@danypops/vehicle-client/rpc-client";
 import { readDaemonHandle, resolveDaemonPaths } from "@danypops/vehicle-server/paths";
@@ -244,6 +244,30 @@ export async function ensureClient(deps: EnsureClientDeps): Promise<PackedClient
 	);
 }
 
+/**
+ * An auto-spawned daemon is detached and long-lived, so it keeps whatever
+ * PATH its host process had at spawn time forever. Resolve `pi`'s absolute
+ * path now and pin it, rather than trust a bare "pi" to keep resolving in
+ * that frozen PATH. Leaves an explicit PI_PACKED_PI_BIN/PI_BIN untouched.
+ */
+export function resolvePiBinForSpawn(env: NodeJS.ProcessEnv = process.env): string | undefined {
+	if (env.PI_PACKED_PI_BIN || env.PI_BIN) return undefined; // explicit override already present; nothing to pin
+	const path = env.PATH;
+	if (!path) return undefined;
+	const names = process.platform === "win32" ? ["pi.exe", "pi.cmd", "pi.bat", "pi"] : ["pi"];
+	for (const dir of path.split(delimiter)) {
+		if (!dir) continue;
+		for (const name of names) {
+			const candidate = join(dir, name);
+			try {
+				accessSync(candidate, fsConstants.X_OK);
+				return candidate;
+			} catch {}
+		}
+	}
+	return undefined;
+}
+
 export async function ensurePackedClient(paths = resolvePackedClientPaths(), transport: FetchTransport = fetch): Promise<PackedClient> {
 	return ensureClient({
 		connect: () => connectPackedClient(paths, transport),
@@ -252,10 +276,15 @@ export async function ensurePackedClient(paths = resolvePackedClientPaths(), tra
 			const override = process.env.PI_PACKED_BIN;
 			const command = override ?? process.env.PI_PACKED_BUN ?? "bun";
 			const args = override ? ["serve"] : [join(dirname(fileURLToPath(import.meta.url)), "../service/src/cli/cli.ts"), "serve"];
+			const resolvedPiBin = resolvePiBinForSpawn();
 			const child = spawn(command, args, {
 				detached: true,
 				stdio: "ignore",
-				env: { ...process.env, DAEMON_KIT_LAUNCH_PROVENANCE: "auto-spawn" },
+				env: {
+					...process.env,
+					DAEMON_KIT_LAUNCH_PROVENANCE: "auto-spawn",
+					...(resolvedPiBin ? { PI_BIN: resolvedPiBin } : {}),
+				},
 			});
 			child.once("error", () => {});
 			child.unref();

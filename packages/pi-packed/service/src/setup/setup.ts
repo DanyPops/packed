@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
 import { Compile } from "typebox/compile";
 import type { Diagnostic } from "../adoption/check.ts";
+import { assertInstallValidationOk } from "../adoption/install-validation.ts";
 import { npmPackageName, readResolvedIntegrity, readResolvedVersion } from "../packages/installed.ts";
 import type { Installer, Registry } from "../packages/package.ts";
 import { writeJsonAtomic } from "../shared/atomic-json.ts";
@@ -644,9 +645,33 @@ export class SetupManager {
 				(item): item is Extract<SetupOperation, { kind: "install-package" | "update-package" }> =>
 					item.kind === "install-package" || item.kind === "update-package",
 			);
-		for (const operation of packageChanges) {
+		// Batch mode requires all three -- see Installer.validate/installOnly/reresolveDependencyTree's
+		// own doc comments. Any Installer missing even one (e.g. a remote daemon proxy that only ever
+		// implements the plain install()) falls all the way back to today's exact per-package install()
+		// loop below, never a partial mix of the two strategies.
+		const batch = this.installer.validate && this.installer.installOnly && this.installer.reresolveDependencyTree;
+		// Phase 1 (batch mode only): validate every package change CONCURRENTLY. Each call stages
+		// into its own throwaway temp directory with zero shared state between packages -- unlike
+		// the actual `pi install` mutation below, which must stay sequential (a real, confirmed
+		// race: concurrent `pi install` calls against one piHome silently lose entries from BOTH
+		// settings.json and npm/package.json, leaving node_modules with untracked "phantom" installs
+		// a later reresolveDependencyTree() would then prune).
+		const validations = batch
+			? await Promise.allSettled(packageChanges.map((operation) => this.installer.validate!(operation.source)))
+			: undefined;
+		// Phase 2: sequential commit -- unavoidable while `pi install` itself owns unlocked,
+		// shared-file mutation of piHome's settings.json and npm project. In batch mode this calls
+		// installOnly() (no per-package reresolve); otherwise the original install() (validates,
+		// installs, AND re-resolves the whole tree, all per package) exactly as before.
+		for (const [index, operation] of packageChanges.entries()) {
 			try {
-				const output = await this.installer.install(operation.source, { local: operation.scope === "project" });
+				const validation = validations?.[index];
+				if (validation?.status === "rejected") throw validation.reason;
+				if (validation?.status === "fulfilled") assertInstallValidationOk(validation.value);
+				const output =
+					batch && this.installer.installOnly
+						? await this.installer.installOnly(operation.source, { local: operation.scope === "project" })
+						: await this.installer.install(operation.source, { local: operation.scope === "project" });
 				outcomes.push({
 					kind: operation.kind,
 					target: operation.source,
@@ -671,6 +696,29 @@ export class SetupManager {
 							"error",
 							operation.packageName,
 							"package operation failed; profile writes and removals were not started",
+						),
+					],
+				};
+			}
+		}
+		// Phase 3 (batch mode only): re-resolve ONCE for the whole batch instead of once per
+		// package. Only reached once every packageChanges entry has already succeeded above (a
+		// failure already returned early) -- never runs on a partially-applied batch.
+		if (batch && this.installer.reresolveDependencyTree && packageChanges.length > 0) {
+			try {
+				await this.installer.reresolveDependencyTree();
+			} catch (error) {
+				return {
+					ok: false,
+					manifestPath: plan.manifestPath,
+					operations: outcomes,
+					reloadRequired: true,
+					diagnostics: [
+						diagnostic(
+							"SETUP_APPLY_FAILED",
+							"error",
+							"reresolveDependencyTree",
+							`batch dependency re-resolution failed after every package installed/updated successfully: ${error instanceof Error ? error.message : String(error)}`,
 						),
 					],
 				};

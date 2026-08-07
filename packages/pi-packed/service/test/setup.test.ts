@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { InstallValidationResult } from "../src/adoption/install-validation.ts";
 import type { Installer, PkgInfo, Registry, SearchPage, UpdateOutcome } from "../src/packages/package.ts";
 import {
 	bundledEcosystemManifestPath,
@@ -44,6 +45,53 @@ class InstallerFixture implements Installer {
 	async remove(source: string) {
 		this.removed.push(source);
 		return `Removed ${source}`;
+	}
+}
+
+/**
+ * Implements validate()/installOnly()/reresolveDependencyTree() (see Installer's own doc
+ * comment) in addition to the legacy install()/update()/remove() -- SetupManager.apply() only
+ * enters batch mode when all three are present. install() itself is kept real (not throwing) so
+ * a test can positively assert it's never called once the batch trio exists, rather than only
+ * ever seeing it absent from a call log.
+ */
+class BatchInstallerFixture implements Installer {
+	events: string[] = [];
+	reresolveCalls = 0;
+	validateDelayMs = 0;
+	failValidate = new Set<string>();
+	failInstallOnly = new Set<string>();
+	failReresolve = false;
+
+	async install(source: string) {
+		this.events.push(`install:${source}`);
+		return `Installed ${source}`;
+	}
+	async update(source: string): Promise<UpdateOutcome> {
+		this.events.push(`update:${source}`);
+		return { output: `Updated ${source}`, reloadRequired: true, alreadyUpToDate: false, pinned: true };
+	}
+	async remove(source: string) {
+		this.events.push(`remove:${source}`);
+		return `Removed ${source}`;
+	}
+	async validate(source: string): Promise<InstallValidationResult> {
+		if (this.validateDelayMs > 0) await Bun.sleep(this.validateDelayMs);
+		this.events.push(`validate:${source}`);
+		return this.failValidate.has(source)
+			? { ok: false, source, extensions: [], message: "validation refused" }
+			: { ok: true, source, extensions: [] };
+	}
+	async installOnly(source: string): Promise<string> {
+		this.events.push(`installOnly:${source}`);
+		if (this.failInstallOnly.has(source)) throw new Error(`installOnly failed for ${source}`);
+		return `Installed ${source}`;
+	}
+	async reresolveDependencyTree(): Promise<string> {
+		this.reresolveCalls++;
+		this.events.push("reresolve");
+		if (this.failReresolve) throw new Error("reresolve failed");
+		return "resolved";
 	}
 }
 
@@ -381,5 +429,117 @@ describe("Pi setup manifest walking skeleton", () => {
 		await new SetupManager(new RegistryFixture(), new InstallerFixture(), home).apply(join(root, "pi-setup.json"));
 		expect(JSON.parse(readFileSync(join(root, ".pi/profiles.json"), "utf8"))).toEqual({ project: { theme: "dark" } });
 		expect(existsSync(join(home, "profiles.json"))).toBe(false);
+	});
+});
+
+function threePackageManifest(): SetupManifest {
+	return {
+		$schema: "./schema/pi-setup-v1.schema.json",
+		schemaVersion: 1,
+		packages: [
+			{ kind: "npm", scope: "global", source: "npm:pkg-a@1.0.0", resolved: "1.0.0", integrity: "sha512-demo" },
+			{ kind: "npm", scope: "global", source: "npm:pkg-b@1.0.0", resolved: "1.0.0", integrity: "sha512-demo" },
+			{ kind: "npm", scope: "global", source: "npm:pkg-c@1.0.0", resolved: "1.0.0", integrity: "sha512-demo" },
+		],
+		profiles: {},
+	};
+}
+
+describe("SetupManager.apply() batch mode -- validate() concurrently, installOnly() sequentially, reresolveDependencyTree() once", () => {
+	it("never calls the legacy install() once validate/installOnly/reresolveDependencyTree all exist", async () => {
+		const home = piHome(false);
+		const root = project();
+		writeFileSync(join(root, "pi-setup.json"), JSON.stringify(threePackageManifest()));
+		const installer = new BatchInstallerFixture();
+		const result = await new SetupManager(new RegistryFixture(), installer, home).apply(join(root, "pi-setup.json"));
+
+		expect(result.ok).toBe(true);
+		expect(installer.events.some((event) => event.startsWith("install:"))).toBe(false);
+	});
+
+	it("validates every package CONCURRENTLY, not one at a time -- wall clock proves overlap, not just call order", async () => {
+		const home = piHome(false);
+		const root = project();
+		writeFileSync(join(root, "pi-setup.json"), JSON.stringify(threePackageManifest()));
+		const installer = new BatchInstallerFixture();
+		installer.validateDelayMs = 50;
+		const manager = new SetupManager(new RegistryFixture(), installer, home);
+
+		const start = performance.now();
+		const result = await manager.apply(join(root, "pi-setup.json"));
+		const elapsedMs = performance.now() - start;
+
+		expect(result.ok).toBe(true);
+		// Three sequential 50ms validations would take >=150ms; three CONCURRENT ones take ~50ms
+		// plus scheduling noise. 100ms sits with a comfortable margin below the sequential floor
+		// without being tight enough to flake on a loaded CI box.
+		expect(elapsedMs).toBeLessThan(100);
+	});
+
+	it("validates every package before committing ANY of them, then commits sequentially, then reresolves exactly once", async () => {
+		const home = piHome(false);
+		const root = project();
+		writeFileSync(join(root, "pi-setup.json"), JSON.stringify(threePackageManifest()));
+		const installer = new BatchInstallerFixture();
+		const result = await new SetupManager(new RegistryFixture(), installer, home).apply(join(root, "pi-setup.json"));
+
+		expect(result.ok).toBe(true);
+		expect(installer.reresolveCalls).toBe(1);
+		const lastValidateIndex = installer.events.reduce((last, event, i) => (event.startsWith("validate:") ? i : last), -1);
+		const firstInstallOnlyIndex = installer.events.findIndex((event) => event.startsWith("installOnly:"));
+		expect(firstInstallOnlyIndex).toBeGreaterThan(lastValidateIndex);
+		// reresolve is genuinely last -- after every installOnly(), not interleaved between them.
+		expect(installer.events.at(-1)).toBe("reresolve");
+		expect(installer.events.filter((event) => event.startsWith("installOnly:"))).toHaveLength(3);
+	});
+
+	it("a validation failure stops the batch at that package -- earlier ones already committed, later ones never attempted, reresolve never runs", async () => {
+		const home = piHome(false);
+		const root = project();
+		writeFileSync(join(root, "pi-setup.json"), JSON.stringify(threePackageManifest()));
+		const installer = new BatchInstallerFixture();
+		installer.failValidate.add("npm:pkg-b@1.0.0");
+		const result = await new SetupManager(new RegistryFixture(), installer, home).apply(join(root, "pi-setup.json"));
+
+		expect(result.ok).toBe(false);
+		expect(result.diagnostics[0]?.code).toBe("SETUP_APPLY_FAILED");
+		expect(result.operations.map((op) => [op.target, op.status])).toEqual([
+			["npm:pkg-a@1.0.0", "succeeded"],
+			["npm:pkg-b@1.0.0", "failed"],
+		]);
+		// Validation itself still runs concurrently for every package up front (pkg-c's validate
+		// call already happened before the commit loop reached pkg-b) -- what never happens is
+		// COMMITTING pkg-c once the loop hits pkg-b's own failure.
+		expect(installer.events).toContain("validate:npm:pkg-c@1.0.0");
+		expect(installer.events).not.toContain("installOnly:npm:pkg-c@1.0.0");
+		expect(installer.reresolveCalls).toBe(0);
+	});
+
+	it("an installOnly() failure (not a validation failure) also stops the batch and skips reresolve", async () => {
+		const home = piHome(false);
+		const root = project();
+		writeFileSync(join(root, "pi-setup.json"), JSON.stringify(threePackageManifest()));
+		const installer = new BatchInstallerFixture();
+		installer.failInstallOnly.add("npm:pkg-a@1.0.0");
+		const result = await new SetupManager(new RegistryFixture(), installer, home).apply(join(root, "pi-setup.json"));
+
+		expect(result.ok).toBe(false);
+		expect(result.operations.map((op) => op.status)).toEqual(["failed"]);
+		expect(installer.reresolveCalls).toBe(0);
+	});
+
+	it("reports a reresolveDependencyTree() failure distinctly, after every package already installed/updated successfully", async () => {
+		const home = piHome(false);
+		const root = project();
+		writeFileSync(join(root, "pi-setup.json"), JSON.stringify(threePackageManifest()));
+		const installer = new BatchInstallerFixture();
+		installer.failReresolve = true;
+		const result = await new SetupManager(new RegistryFixture(), installer, home).apply(join(root, "pi-setup.json"));
+
+		expect(result.ok).toBe(false);
+		expect(result.reloadRequired).toBe(true);
+		expect(result.operations.every((op) => op.status === "succeeded")).toBe(true);
+		expect(result.diagnostics[0]).toMatchObject({ code: "SETUP_APPLY_FAILED", path: "reresolveDependencyTree" });
+		expect(result.diagnostics[0]?.message).toContain("reresolve failed");
 	});
 });

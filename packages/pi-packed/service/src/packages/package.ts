@@ -5,6 +5,13 @@
  * shells out to pi).
  */
 
+// InstallValidationResult is a plain, adapter-neutral DTO (ok/source/extensions/message) --
+// imported type-only (erased at compile time) from the one adapter that currently produces it
+// (HeadlessInstallValidator) rather than duplicating its shape here and risking drift. Installer
+// itself stays a pure port: nothing here creates a runtime dependency on install-validation.ts's
+// own npm-pack/tar/subprocess machinery.
+import type { InstallValidationResult } from "../adoption/install-validation.ts";
+
 export type PackageVerification = "keyword-only" | "manifest" | "conventional";
 
 export interface PackageEvidence {
@@ -30,6 +37,10 @@ export interface Pkg {
 	version: string;
 	description?: string;
 	date?: string;
+	/** From npm's own search API response (each hit already carries this inline -- no extra
+	 * request per result, unlike PkgInfo.downloads, which needs its own dedicated fetch for a
+	 * single already-known package). See HttpRegistry.searchPage(). */
+	downloads?: DownloadObservations;
 	packageEvidence?: PackageEvidence;
 	publication?: PublicationEvidence;
 }
@@ -104,6 +115,30 @@ export interface Installer {
 	install(source: string, options?: { approved?: boolean; local?: boolean }): Promise<string>;
 	remove(source: string, options?: { approved?: boolean; local?: boolean }): Promise<string>;
 	update(source: string, options?: { approved?: boolean; local?: boolean }): Promise<UpdateOutcome>;
+	/**
+	 * Optional batch-oriented split of install(), for a caller installing several packages
+	 * together (see SetupManager.apply()) -- a single ad hoc install() still does all three
+	 * steps itself and needs none of this; every existing Installer implementation that omits
+	 * these three keeps compiling and behaving exactly as before.
+	 *
+	 * validate() is safe to run CONCURRENTLY across many sources: each call stages into its own
+	 * throwaway temp directory (see HeadlessInstallValidator) with zero shared state between
+	 * packages. installOnly() does the real `pi install` mutation WITHOUT install()'s own
+	 * trailing full-tree reresolve, so a batch caller can defer that to
+	 * reresolveDependencyTree(), called ONCE after every package in the batch instead of once
+	 * per package.
+	 *
+	 * installOnly() itself must stay SEQUENTIAL across a batch, never fanned out the way
+	 * validate() can be: `pi install` does its own non-atomic read-modify-write of both
+	 * settings.json and the npm project's package.json/package-lock.json in the single shared
+	 * piHome, with no locking on either side (confirmed empirically -- three concurrent `pi
+	 * install` calls against one piHome silently lost two of three entries from settings.json
+	 * and npm/package.json, while all three packages' node_modules ended up physically present
+	 * but untracked, exactly the state a later reresolveDependencyTree() would then prune).
+	 */
+	validate?(source: string): Promise<InstallValidationResult>;
+	installOnly?(source: string, options?: { approved?: boolean; local?: boolean }): Promise<string>;
+	reresolveDependencyTree?(): Promise<string>;
 }
 
 export interface InstalledPkg {

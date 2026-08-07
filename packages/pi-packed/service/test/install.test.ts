@@ -15,14 +15,24 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ExecInstaller } from "../src/packages/install.ts";
+import { createLogger } from "../src/shared/log.ts";
 
 /**
  * A fake `pi` binary: always prints "Updated <source>" and exits 0 (matching
  * real `pi`'s observed behavior for a no-op). When `rewrite` is given, it
  * additionally overwrites that exact package's on-disk version -- letting a
  * test simulate a genuine version change on demand. The rewrite target is
- * baked into the script file itself (not an env var) so it is immune to
- * Bun.spawn's default env snapshot not picking up late process.env writes.
+ * baked into the script file itself (not an env var) rather than read from
+ * process.env at spawn time, keeping these fixtures independent of whichever
+ * way ExecInstaller happens to thread its own env through -- see the
+ * `run()`/`reresolveDependencyTree() thread env explicitly` describe block
+ * below for a dedicated test of that env-threading behavior itself, added
+ * after service/test/perf/multi-install.perf.test.ts caught it live: a
+ * runtime process.env mutation (redirecting Pi's home directory) silently
+ * never reached the spawned `pi`/`npm` children because Bun.spawn's own
+ * default env inheritance doesn't pick up a mutation made after this
+ * process's own startup snapshot -- only an explicit `env: process.env`
+ * option re-reads the current object.
  */
 const roots: string[] = [];
 afterEach(() => {
@@ -204,5 +214,102 @@ describe("ExecInstaller — forces full dependency re-resolution, not just the t
 		const installer = new ExecInstaller(bin, piHome, undefined, failingNpm);
 
 		await expect(installer.update("npm:plain")).rejects.toThrow(/npm install failed to re-resolve/);
+	});
+});
+
+describe("ExecInstaller — timing instrumentation (see service/test/perf/multi-install.perf.test.ts for a real multi-package measurement)", () => {
+	it("install() logs a validateMs/installMs/reresolveMs/totalMs breakdown, not just a pass/fail result", async () => {
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-bin-")));
+		const bin = writeFakePi(scriptDir);
+		const npmBin = writeFakeNpm(scriptDir, join(scriptDir, "npm.log"));
+		const piHome = writePiHome();
+		const lines: string[] = [];
+		const logger = createLogger("test", (line) => lines.push(line), "debug");
+		const installer = new ExecInstaller(bin, piHome, { validate: async (source) => ({ ok: true, source, extensions: [] }) }, npmBin, logger);
+
+		await installer.install("npm:plain");
+
+		const timing = lines.map((line) => JSON.parse(line)).find((entry) => entry.msg === "install timing");
+		expect(timing).toBeDefined();
+		expect(timing.source).toBe("npm:plain");
+		for (const field of ["validateMs", "installMs", "reresolveMs", "totalMs"]) {
+			expect(typeof timing[field]).toBe("number");
+			expect(timing[field]).toBeGreaterThanOrEqual(0);
+		}
+		// totalMs is the whole call's own wall clock, not just one phase re-labeled --
+		// bounded above by itself plus a small scheduling-noise allowance, never equal to
+		// a single phase alone once every phase is genuinely counted once.
+		expect(timing.totalMs).toBeGreaterThanOrEqual(timing.validateMs + timing.installMs + timing.reresolveMs - 1);
+	});
+
+	it("update() logs an updateMs/reresolveMs/totalMs breakdown", async () => {
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-bin-")));
+		const bin = writeFakePi(scriptDir);
+		const npmBin = writeFakeNpm(scriptDir, join(scriptDir, "npm.log"));
+		const piHome = writePiHome({ plain: "0.5.0" });
+		const lines: string[] = [];
+		const logger = createLogger("test", (line) => lines.push(line), "debug");
+		const installer = new ExecInstaller(bin, piHome, undefined, npmBin, logger);
+
+		await installer.update("npm:plain");
+
+		const timing = lines.map((line) => JSON.parse(line)).find((entry) => entry.msg === "update timing");
+		expect(timing).toBeDefined();
+		expect(timing.source).toBe("npm:plain");
+		for (const field of ["updateMs", "reresolveMs", "totalMs"]) {
+			expect(typeof timing[field]).toBe("number");
+			expect(timing[field]).toBeGreaterThanOrEqual(0);
+		}
+	});
+});
+
+/**
+ * A fake binary that dumps one specific env var's CURRENT value to `logFile` -- proves a
+ * process.env mutation made at runtime (after this test process's own startup, the exact shape
+ * of a caller redirecting Pi's home directory) actually reaches the spawned child, rather than
+ * whatever snapshot Bun.spawn's own default env inheritance captured earlier.
+ */
+function writeEnvDumpBinary(dir: string, name: string, varName: string, logFile: string): string {
+	const script = join(dir, name);
+	writeFileSync(script, ["#!/usr/bin/env bash", `printf '%s' "\$${varName}" > '${logFile}'`, "exit 0"].join("\n"));
+	chmodSync(script, 0o755);
+	return script;
+}
+
+describe("ExecInstaller — run()/reresolveDependencyTree() thread the CURRENT process.env through explicitly", () => {
+	const MARKER = "PACKED_TEST_ENV_MARKER";
+
+	afterEach(() => {
+		delete process.env[MARKER];
+	});
+
+	it("install()'s pi spawn sees an env var set on process.env after this process already started", async () => {
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-env-")));
+		const piLog = join(scriptDir, "pi-env.log");
+		const bin = writeEnvDumpBinary(scriptDir, "fake-pi-env", MARKER, piLog);
+		const npmBin = writeFakeNpm(scriptDir, join(scriptDir, "npm.log"));
+		const piHome = writePiHome();
+		const installer = new ExecInstaller(bin, piHome, { validate: async (source) => ({ ok: true, source, extensions: [] }) }, npmBin);
+
+		// Mutated well after this test process's own startup -- exactly what redirecting Pi's home
+		// via PI_CODING_AGENT_DIR at runtime looks like from ExecInstaller's own point of view.
+		process.env[MARKER] = "set-after-startup";
+		await installer.install("npm:plain");
+
+		expect(readFileSync(piLog, "utf8")).toBe("set-after-startup");
+	});
+
+	it("reresolveDependencyTree()'s npm spawn sees the same runtime env mutation", async () => {
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-env-")));
+		const bin = writeFakePi(scriptDir);
+		const npmLog = join(scriptDir, "npm-env.log");
+		const npmBin = writeEnvDumpBinary(scriptDir, "fake-npm-env", MARKER, npmLog);
+		const piHome = writePiHome();
+		const installer = new ExecInstaller(bin, piHome, { validate: async (source) => ({ ok: true, source, extensions: [] }) }, npmBin);
+
+		process.env[MARKER] = "reresolve-sees-this-too";
+		await installer.install("npm:plain");
+
+		expect(readFileSync(npmLog, "utf8")).toBe("reresolve-sees-this-too");
 	});
 });

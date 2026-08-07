@@ -54,6 +54,21 @@ export interface InstallValidator {
 	validate(source: string): Promise<InstallValidationResult>;
 }
 
+/**
+ * Shared with ExecInstaller.install() (the single ad hoc path, which validates then commits
+ * itself) and SetupManager.apply() (the batch path, which validates every package change
+ * concurrently via Installer.validate() before ever calling installOnly() on any of them) --
+ * one formatting rule for "why was this install refused", not two copies that could drift.
+ */
+export function assertInstallValidationOk(validation: InstallValidationResult): void {
+	if (validation.ok) return;
+	const detail = validation.extensions
+		.filter((extension) => !extension.ok)
+		.map((extension) => `${extension.path}: ${extension.message}`)
+		.join("; ");
+	throw new Error(`install refused -- ${detail || validation.message || "extension failed a headless load check"}`);
+}
+
 const DEFAULT_LOAD_TIMEOUT_MS = 8_000;
 const MAX_LOAD_TIMEOUT_MS = 30_000;
 const PACK_TIMEOUT_MS = 30_000;
@@ -81,7 +96,10 @@ interface CommandResult {
 }
 
 async function runCommand(command: string[], cwd: string, timeoutMs: number): Promise<CommandResult> {
-	const proc = Bun.spawn(command, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+	// env explicit, not Bun.spawn's own default-inherited env -- see install.ts's ExecInstaller.run()
+	// for why a runtime process.env mutation (e.g. a caller redirecting Pi's home directory) must be
+	// threaded through explicitly rather than trusted to Bun's own default inheritance.
+	const proc = Bun.spawn(command, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", env: process.env });
 	let timedOut = false;
 	const timer = setTimeout(() => {
 		timedOut = true;

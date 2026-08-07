@@ -16,6 +16,7 @@ import { handleSetupCommand } from "./setup-command.js";
 import { handleResourceConfigCommand } from "./tabs/resource-config.js";
 import { registerTools } from "./tools.js";
 import { showPackedPanel } from "./tui.js";
+import { registerPackedVehicle } from "./vehicle-tools.js";
 
 // Async factory (pi awaits it): the seam creates authenticated daemon
 // clients lazily. It never executes Bun-only adapters or opens SQLite.
@@ -34,8 +35,15 @@ export default async function (pi: ExtensionAPI) {
 		},
 	});
 
-	// Update check against the local mirror, on Pi's own lifecycle event.
+	// registerVehicleTools() (inside registerPackedVehicle) needs
+	// pi.getAllTools()/getActiveTools()/setActiveTools() -- Pi's extension runtime only finishes
+	// initializing after every extension's top-level factory (this one included) has resolved, so
+	// calling it directly from there throws "Extension runtime not initialized" (confirmed live in
+	// the identical pi-papyrus/pi-tickets bug). session_start fires only after that initialization
+	// completes, and Pi awaits every session_start handler before the model's first turn, so
+	// registering here is both safe and still visible on turn one.
 	pi.on("session_start", async (_event, ctx) => {
+		await registerPackedVehicle(pi);
 		if (!ctx.hasUI) return;
 		try {
 			const updates = await natives.updates();

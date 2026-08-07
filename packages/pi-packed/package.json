@@ -31,7 +31,7 @@
     "@danypops/packed": "^0.7.0",
     "@danypops/pi-extension-harness": "^0.2.0",
     "@danypops/vehicle-client": "^0.5.2",
-    "@danypops/vehicle-client-pi": "^0.16.9",
+    "@danypops/vehicle-client-pi": "^0.18.4",
     "@danypops/vehicle-core": "^0.12.3",
     "@danypops/vehicle-server": "^0.17.1",
     "jiti": "^2.7.0",

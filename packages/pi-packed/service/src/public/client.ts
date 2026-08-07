@@ -89,6 +89,35 @@ export function resolvePackedClientPaths(options: PackedPathOptions = {}): Packe
 	return { token: paths.token, handle: paths.handle, serviceDescriptor: paths.serviceDescriptor };
 }
 
+export interface PackedVehicleClientTarget {
+	/** Base URL for the daemon's Vehicle-projected surface (see service.ts's createApp, which mounts
+	 * createVehicleHttpApp() at /vehicle/* on this same port, alongside /api/v1/ops) -- @danypops/
+	 * vehicle-client's RemoteVehicleClient mounts its own /vehicle/manifest, /vehicle/invoke,
+	 * /vehicle/cancel routes under this. */
+	baseUrl: string;
+	token: string;
+}
+
+/**
+ * Narrow surface for a Vehicle-projected operation consumer -- same daemon, same handle file, same
+ * Bearer token every other Packed RPC call already uses (connectPackedClient reads both the same
+ * way). Returns undefined rather than throwing when the daemon has never started -- no handle/token
+ * on disk yet -- matching resolvePushChannelTarget/resolveVehicleClientTarget's own tolerance in
+ * @danypops/papyrus for the identical condition.
+ */
+export function resolveVehicleClientTarget(paths = resolvePackedClientPaths()): PackedVehicleClientTarget | undefined {
+	const handle = readDaemonHandle(paths.handle);
+	if (!handle) return undefined;
+	let token: string;
+	try {
+		token = readFileSync(paths.token, "utf8").trim();
+	} catch {
+		return undefined;
+	}
+	if (!/^[a-f0-9]{64}$/.test(token)) return undefined;
+	return { baseUrl: `http://${handle.host}:${handle.port}`, token };
+}
+
 /** Checks Armada's authoritative desired fleet rather than native descriptor files. */
 function isPackedServiceInstalled(): boolean {
 	return vehicleIsServiceInstalled(SERVICE_NAME, createNodeServiceInstallDeps());

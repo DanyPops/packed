@@ -112,14 +112,18 @@ export async function removePackageWithPolicy(name: string, natives: Pick<Native
 export function registerTools(pi: ExtensionAPI, natives: Natives): void {
 	pi.registerTool({
 		name: "pkg_search",
-		label: "Pi Package Search",
-		description: "Search Pi packages on npm. Bounded read operation; defaults to 10 results and caps at 50.",
+		label: "Pi Extension Search",
+		description:
+			"Find Pi extensions -- npm packages that add tools, skills, prompt templates, or themes to the Pi coding agent -- by keyword. This is NOT a general-purpose npm/software search: it only makes sense for 'is there a Pi extension for X' questions (e.g. an LSP integration, a Telegram tool, a new theme). Matches are npm keyword-search candidates only, not yet confirmed to be real Pi extensions -- use pkg_info on a result to verify it actually declares Pi resources before installing. Bounded read operation; defaults to 10 results and caps at 50.",
 		parameters: Type.Object({
-			query: Type.String({ description: "Search terms, e.g. 'lsp' or 'telegram'" }),
+			query: Type.String({
+				description:
+					"Keywords describing the Pi extension/capability you want, e.g. 'lsp' or 'telegram' -- not a generic npm package search",
+			}),
 			limit: Type.Optional(Type.Number({ description: "Max results (default 10, max 50)" })),
 		}),
 		renderCall(args, theme) {
-			return renderPackageToolCall("Search packages", args, theme);
+			return renderPackageToolCall("Search Pi extensions", args, theme);
 		},
 		renderResult(result, options, theme, context) {
 			return renderPackageToolResult(result, options, theme, context);
@@ -139,11 +143,11 @@ export function registerTools(pi: ExtensionAPI, natives: Natives): void {
 
 	pi.registerTool({
 		name: "pkg_info",
-		label: "Pi Package Info",
-		description: `Show bounded metadata and declared Pi resources for one package. Special case: querying ${PI_COMMAND_NAME} (Pi itself) also reports the locally running version against the latest published release -- a different question from, and in addition to, the generic npm registry metadata every other package gets.`,
-		parameters: Type.Object({ name: Type.String({ description: "npm package name" }) }),
+		label: "Pi Extension Info",
+		description: `Show bounded metadata and declared Pi resources (extensions, skills, prompts, themes) for one Pi extension package -- the way to confirm a pkg_search hit is a genuine Pi extension, not just a coincidental keyword match, before installing it. Special case: querying ${PI_COMMAND_NAME} (Pi itself) also reports the locally running version against the latest published release -- a different question from, and in addition to, the generic npm registry metadata every other package gets.`,
+		parameters: Type.Object({ name: Type.String({ description: "npm package name of the Pi extension (or 'pi' itself)" }) }),
 		renderCall(args, theme) {
-			return renderPackageToolCall("Package info", args, theme);
+			return renderPackageToolCall("Pi extension info", args, theme);
 		},
 		renderResult(result, options, theme, context) {
 			return renderPackageToolResult(result, options, theme, context);
@@ -185,11 +189,12 @@ export function registerTools(pi: ExtensionAPI, natives: Natives): void {
 
 	pi.registerTool({
 		name: "pkg_install",
-		label: "Pi Package Install",
-		description: "Install a Pi package through the authenticated daemon. Operation-aware approval is secure by default.",
-		parameters: Type.Object({ source: Type.String({ description: "npm:, git:, or https source" }) }),
+		label: "Pi Extension Install",
+		description:
+			"Install a Pi extension (a package that adds tools, skills, prompt templates, or a theme to the Pi coding agent) through the authenticated daemon. Not for installing arbitrary software/npm packages unrelated to Pi. Operation-aware approval is secure by default.",
+		parameters: Type.Object({ source: Type.String({ description: "npm:, git:, or https source of the Pi extension" }) }),
 		renderCall(args, theme) {
-			return renderPackageToolCall("Install package", args, theme);
+			return renderPackageToolCall("Install Pi extension", args, theme);
 		},
 		renderResult(result, options, theme, context) {
 			return renderPackageToolResult(result, options, theme, context);
@@ -201,11 +206,14 @@ export function registerTools(pi: ExtensionAPI, natives: Natives): void {
 
 	pi.registerTool({
 		name: "pkg_update",
-		label: "Pi Package Update",
-		description: "Update one configured Pi package through Pi's documented update command. Operation-aware approval is secure by default.",
-		parameters: Type.Object({ source: Type.String({ description: "configured npm:, git:, or https source" }) }),
+		label: "Pi Extension Update",
+		description:
+			"Update one already-installed Pi extension through Pi's documented update command. Operation-aware approval is secure by default.",
+		parameters: Type.Object({
+			source: Type.String({ description: "configured npm:, git:, or https source of the installed Pi extension" }),
+		}),
 		renderCall(args, theme) {
-			return renderPackageToolCall("Update package", args, theme);
+			return renderPackageToolCall("Update Pi extension", args, theme);
 		},
 		renderResult(result, options, theme, context) {
 			return renderPackageToolResult(result, options, theme, context);
@@ -217,11 +225,14 @@ export function registerTools(pi: ExtensionAPI, natives: Natives): void {
 
 	pi.registerTool({
 		name: "pkg_remove",
-		label: "Pi Package Remove",
-		description: "Remove an installed npm Pi package through the authenticated daemon. Operation-aware approval is secure by default.",
-		parameters: Type.Object({ name: Type.String({ description: "bare npm name, e.g. pi-lsp or @scope/pkg" }) }),
+		label: "Pi Extension Remove",
+		description:
+			"Remove an installed Pi extension (npm package) through the authenticated daemon. Operation-aware approval is secure by default.",
+		parameters: Type.Object({
+			name: Type.String({ description: "bare npm name of the installed Pi extension, e.g. pi-lsp or @scope/pkg" }),
+		}),
 		renderCall(args, theme) {
-			return renderPackageToolCall("Remove package", args, theme);
+			return renderPackageToolCall("Remove Pi extension", args, theme);
 		},
 		renderResult(result, options, theme, context) {
 			return renderPackageToolResult(result, options, theme, context);

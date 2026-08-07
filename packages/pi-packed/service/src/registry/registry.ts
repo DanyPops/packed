@@ -71,10 +71,20 @@ export class HttpRegistry implements Registry {
 		if (!res.ok) throw new Error(`npm search: HTTP ${res.status}`);
 		const doc = (await res.json()) as {
 			total?: number;
-			objects?: { package?: { name?: string; version?: string; description?: string; date?: string } }[];
+			objects?: {
+				package?: { name?: string; version?: string; description?: string; date?: string };
+				// Already inline on every search hit -- confirmed live against the real registry, no
+				// separate api.npmjs.org/downloads/point/* call needed the way PkgInfo.downloads (one
+				// already-known package) requires. Fetching that per search RESULT would be an N+1
+				// (20 results = 20 extra requests); this is free.
+				downloads?: { weekly?: number; monthly?: number };
+			}[];
 		};
+		const observedAt = new Date().toISOString();
 		const results: Pkg[] = (doc.objects ?? []).flatMap((o) => {
 			const p = o.package;
+			const weekly = boundedCount(o.downloads?.weekly);
+			const monthly = boundedCount(o.downloads?.monthly);
 			return p?.name
 				? [
 						{
@@ -82,6 +92,7 @@ export class HttpRegistry implements Registry {
 							version: boundedString(p.version, 128) ?? "",
 							description: boundedString(p.description, 512),
 							date: boundedString(p.date, 64),
+							...(weekly !== undefined || monthly !== undefined ? { downloads: { weekly, monthly, observedAt } } : {}),
 							packageEvidence: {
 								shape: "keyword-only" as const,
 								verified: false,
@@ -130,6 +141,14 @@ export class HttpRegistry implements Registry {
 			dist?: { unpackedSize?: number; integrity?: string; attestations?: { url?: string; provenance?: unknown } };
 		};
 		const manifestFields = v.pi ? Object.keys(v.pi).filter((key) => ["extensions", "skills", "prompts", "themes"].includes(key)) : [];
+		// Deliberately NOT modified/downloads here -- info() is shared by bulk callers
+		// (build-index.ts, score.ts, setup.ts's resolvePackage, cli.ts, publish.ts), and
+		// build-index.ts's own doc comment documents a real incident: calling downloads() per
+		// package at catalog scale (thousands of entries) hits npm's downloads API 429s within
+		// minutes. Those bulk callers already opt into modifiedAt() explicitly themselves when they
+		// want it, and never call downloads() at all. The single-package, user-facing enrichment
+		// (pkg_info / the Find tab's inspector) lives one layer up, at service.ts's own "package.info"
+		// handler -- the one call site that's genuinely one-package-at-a-time, never bulk.
 		const readme = await this.publishedReadme(encoded);
 		return {
 			name: boundedString(v.name, 214) ?? boundedString(name, 214)!,

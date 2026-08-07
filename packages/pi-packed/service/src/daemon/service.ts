@@ -322,7 +322,23 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			const name = url.searchParams.get("name") ?? "";
 			if (!name) return err(400, "missing name");
 			try {
-				return json(await deps.reg.info(name));
+				const info = await deps.reg.info(name);
+				// The one single-package, user-facing call site (pkg_info / the Find tab's "i"
+				// inspector) -- deliberately NOT inside Registry.info() itself, which every bulk
+				// caller (build-index.ts, score.ts, setup.ts, cli.ts, publish.ts) also shares.
+				// build-index.ts's own doc comment documents a real incident: calling downloads()
+				// per package at catalog scale (thousands of entries) hits npm's downloads API 429s
+				// within minutes -- exactly what baking this into info() itself would reintroduce
+				// for every bulk consumer. One package, on demand, interactively, is a fundamentally
+				// different volume of call than a background catalog scan. Both enrichments are
+				// individually tolerant of their own failure (same rule info()'s own README fetch
+				// already follows) -- a slow or unavailable api.npmjs.org must never fail the whole
+				// inspect.
+				const [modified, downloads] = await Promise.all([
+					deps.reg.modifiedAt?.(name).catch(() => undefined),
+					deps.reg.downloads?.(name).catch(() => undefined),
+				]);
+				return json({ ...info, modified: modified ?? info.modified, downloads: downloads ?? info.downloads });
 			} catch (e) {
 				return err(502, e instanceof Error ? e.message : String(e));
 			}

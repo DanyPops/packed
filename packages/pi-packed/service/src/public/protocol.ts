@@ -8,11 +8,17 @@ export interface PublicationEvidence {
 	provenanceUrl?: string;
 	trustedPublisher: "verified" | "not-verified" | "unknown";
 }
+export interface DownloadObservations {
+	weekly?: number;
+	monthly?: number;
+	observedAt: string;
+}
 export interface PackageSummary {
 	name: string;
 	version: string;
 	description?: string;
 	date?: string;
+	downloads?: DownloadObservations;
 	packageEvidence?: PackageEvidence;
 	publication?: PublicationEvidence;
 }

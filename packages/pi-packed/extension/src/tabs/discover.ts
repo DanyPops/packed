@@ -14,6 +14,7 @@ import { rawKeyHint } from "@earendil-works/pi-coding-agent";
 import { Input, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { Card, type Component } from "malevich-tui-components";
 import { cardTheme } from "../menu-theme.js";
+import { formatDownloadCount, formatRelativeDate } from "../model.js";
 import type { Natives, PackageSummary } from "../packed.js";
 import { InstallServiceError } from "../packed.js";
 import type { TabHost } from "../tab-host.js";
@@ -131,7 +132,7 @@ export class FindTab implements Component {
 			const selected = i === this.selectedIndex;
 			const card = new Card({
 				title: theme.bold(`${result.name}@${result.version}`),
-				content: [sanitizeTerminalText(result.description ?? "No description")],
+				content: [sanitizeTerminalText(result.description ?? "No description"), ...this.metaLine(result, theme)],
 				selected,
 				theme: cardTheme(theme),
 				measure: { visibleWidth, truncateToWidth },
@@ -139,6 +140,18 @@ export class FindTab implements Component {
 			lines.push(...card.render(width));
 		}
 		return lines;
+	}
+
+	/** "Released 5y ago · 166.1M/week" -- both derived from data the search API already returns
+	 * inline (see HttpRegistry.searchPage()), so no extra network round trip per result. Empty
+	 * array (no extra content line) when neither is available, rather than an empty muted line. */
+	private metaLine(result: PackageSummary, theme: Theme): string[] {
+		const parts: string[] = [];
+		const released = formatRelativeDate(result.date);
+		if (released) parts.push(`Released ${released}`);
+		const weekly = formatDownloadCount(result.downloads?.weekly);
+		if (weekly) parts.push(`${weekly}/week`);
+		return parts.length > 0 ? [theme.fg("muted", parts.join(" · "))] : [];
 	}
 
 	handleInput(data: string): void {

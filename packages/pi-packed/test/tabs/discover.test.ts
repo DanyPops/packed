@@ -54,6 +54,36 @@ describe("FindTab entity inspection", () => {
 		expect(lines[firstBottom + 1]).toStartWith("┌");
 	});
 
+	it("renders a release-date/downloads meta line when the search result carries it, using data npm's own search API already returns inline", async () => {
+		const host = { requestRender() {} } as unknown as TabHost;
+		const tab = new FindTab(
+			{
+				async search() {
+					return {
+						query: "demo",
+						total: 1,
+						results: [
+							{
+								name: "demo-one",
+								version: "1.0.0",
+								description: "First",
+								date: new Date(Date.now() - 40 * 86_400_000).toISOString(),
+								downloads: { weekly: 166_075_689, monthly: 718_531_784, observedAt: new Date().toISOString() },
+							},
+						],
+					};
+				},
+			} as unknown as Natives,
+			host,
+			{ fg: (_color: string, text: string) => text, bold: (text: string) => text } as Theme,
+		);
+		tab.handleInput("demo");
+		tab.handleInput("\r");
+		await tab.whenIdle();
+		const lines = tab.render(60);
+		expect(lines.some((line) => line.includes("Released 1mo ago") && line.includes("166.1M/week"))).toBe(true);
+	});
+
 	it("uses i to inspect the selected search-result Card after search settles", async () => {
 		let inspected: string | undefined;
 		const host = {

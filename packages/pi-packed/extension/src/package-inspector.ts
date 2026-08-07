@@ -1,6 +1,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { matchesKey, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { buildDetailLines, type Component, type TextMeasure } from "malevich-tui-components";
+import { formatDownloadCount, formatRelativeDate } from "./model.js";
 import type { Natives, PackageInfo } from "./packed.js";
 import { sanitizeTerminalText } from "./terminal-text.js";
 
@@ -60,9 +61,20 @@ export class PackageInspector implements Component {
 		const readmeTruncated = rawReadme.length > README_CHAR_LIMIT;
 		const readme = rawReadme.slice(0, README_CHAR_LIMIT);
 		const detailMeasure: TextMeasure = { ...this.measure, wrapTextWithAnsi };
+		const released = formatRelativeDate(info.modified);
+		const weekly = formatDownloadCount(info.downloads?.weekly);
+		const monthly = formatDownloadCount(info.downloads?.monthly);
 		const details = buildDetailLines(Math.max(1, width), {
 			fields: [
 				{ label: "Version", value: sanitizeTerminalText(info.version) },
+				// "Released" reflects the latest publish across ANY version (npm's own abbreviated-doc
+				// `modified` field -- see HttpRegistry.modifiedAt()), not necessarily this exact pinned
+				// version's own publish date; the Find tab's search-result Card shows the exact
+				// per-version date instead, since npm's search API already returns that for free.
+				...(released ? [{ label: "Released", value: released }] : []),
+				...(weekly || monthly
+					? [{ label: "Downloads", value: [weekly && `${weekly}/week`, monthly && `${monthly}/month`].filter(Boolean).join(" · ") }]
+					: []),
 				...(info.license ? [{ label: "License", value: sanitizeTerminalText(info.license) }] : []),
 				...(info.repository ? [{ label: "Repository", value: sanitizeTerminalText(info.repository) }] : []),
 			],

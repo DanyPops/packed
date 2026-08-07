@@ -2,7 +2,15 @@ import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { SetupApplyResult, SetupPlan } from "@danypops/pi-packed/protocol";
 import { verifyLoadableUnderPi } from "@danypops/vehicle-client-pi/pi-load-harness";
-import { filterRows, formatUpdateNotice, mergeRows, nextMode, visibleRows } from "../extension/src/model.ts";
+import {
+	filterRows,
+	formatDownloadCount,
+	formatRelativeDate,
+	formatUpdateNotice,
+	mergeRows,
+	nextMode,
+	visibleRows,
+} from "../extension/src/model.ts";
 import { createNatives, type PackageDaemonPort, type PackageInfo } from "../extension/src/packed.ts";
 
 const installed = [
@@ -58,6 +66,29 @@ describe("model (seam)", () => {
 			{ name: "d", installed: "1", latest: "2" },
 		];
 		expect(formatUpdateNotice(updates)).toBe("4 package update(s): a 1→2, b 1→2, c 1→2 +1 more");
+	});
+
+	it("formatRelativeDate buckets by day/month/year, injectable clock", () => {
+		const now = new Date("2024-01-31T00:00:00.000Z");
+		expect(formatRelativeDate(undefined, now)).toBeUndefined();
+		expect(formatRelativeDate("not a date", now)).toBeUndefined();
+		expect(formatRelativeDate("2024-01-31T00:00:00.000Z", now)).toBe("today");
+		expect(formatRelativeDate("2024-01-30T00:00:00.000Z", now)).toBe("1d ago");
+		expect(formatRelativeDate("2024-01-02T00:00:00.000Z", now)).toBe("29d ago");
+		expect(formatRelativeDate("2024-01-01T00:00:00.000Z", now)).toBe("1mo ago");
+		expect(formatRelativeDate("2023-08-01T00:00:00.000Z", now)).toBe("6mo ago");
+		expect(formatRelativeDate("2018-01-01T00:00:00.000Z", now)).toBe("6y ago");
+		// A future date (clock skew or bad upstream data) is never presented as a negative age.
+		expect(formatRelativeDate("2024-02-01T00:00:00.000Z", now)).toBeUndefined();
+	});
+
+	it("formatDownloadCount abbreviates K/M, rejects anything not a real non-negative number", () => {
+		expect(formatDownloadCount(undefined)).toBeUndefined();
+		expect(formatDownloadCount(Number.NaN)).toBeUndefined();
+		expect(formatDownloadCount(-5)).toBeUndefined();
+		expect(formatDownloadCount(950)).toBe("950");
+		expect(formatDownloadCount(166_075_689)).toBe("166.1M");
+		expect(formatDownloadCount(1_234)).toBe("1.2K");
 	});
 });
 

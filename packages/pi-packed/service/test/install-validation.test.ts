@@ -21,6 +21,7 @@ const FIXTURES = join(__dirname, "fixtures/install-validation");
 const HEALTHY = join(FIXTURES, "healthy-package");
 const BROKEN = join(FIXTURES, "broken-package");
 const NO_MANIFEST = join(FIXTURES, "no-manifest-package");
+const CONVENTION_ONLY = join(FIXTURES, "convention-only-package");
 const DEP_PACKAGE = join(FIXTURES, "dep-package");
 
 const roots: string[] = [];
@@ -96,10 +97,22 @@ describe("HeadlessInstallValidator (real npm pack + tar extraction, no mocking)"
 		expect(result).toEqual({ ok: true, source: "git:github.com/u/r@main", extensions: [] });
 	});
 
-	it("passes a package with no pi.extensions -- most npm packages, nothing to validate", async () => {
+	it("refuses a package with no pi manifest and no convention resource directory -- not a Pi package (the is-number/is-buffer shape)", async () => {
 		const validator = new HeadlessInstallValidator();
 		const result = await validator.validate(`npm:${NO_MANIFEST}`);
+		expect(result.ok).toBe(false);
+		expect(result.extensions).toEqual([]);
+		expect(result.message).toContain("not a Pi package");
+	}, 20_000);
+
+	it("passes a package with no pi manifest but a real convention extensions/ directory", async () => {
+		const validator = new HeadlessInstallValidator();
+		const result = await validator.validate(`npm:${CONVENTION_ONLY}`);
 		expect(result.ok).toBe(true);
+		// Convention-discovered extensions (no pi.extensions manifest entry) are
+		// not headless load-checked here -- only presence gates admission; the
+		// per-extension mock-pi-cli check only ever runs against manifest-
+		// declared pi.extensions entries.
 		expect(result.extensions).toEqual([]);
 	}, 20_000);
 

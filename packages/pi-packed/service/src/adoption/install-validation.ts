@@ -12,7 +12,7 @@
  * subprocess as non-gating, observational evidence alongside that gating
  * check -- see ExtensionLoadResult.additionalLoadPaths.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -74,6 +74,75 @@ const MAX_LOAD_TIMEOUT_MS = 30_000;
 const PACK_TIMEOUT_MS = 30_000;
 const INSTALL_TIMEOUT_MS = 60_000;
 const MAX_EXTENSIONS = 20;
+/** Bounds directoryHasMatchingFile's own recursive walk -- a real Pi package's
+ * resource directories are small; this only exists so an adversarial or
+ * accidentally enormous tarball can't make the convention-directory scan
+ * itself expensive. */
+const MAX_CONVENTION_SCAN_ENTRIES = 500;
+
+/** The four resource kinds a package.json's own `pi` manifest key, or (absent
+ * a manifest) pi's own convention directories, can declare -- see
+ * @earendil-works/pi-coding-agent's docs/packages.md "Package Structure". */
+const MANIFEST_RESOURCE_FIELDS = ["extensions", "skills", "prompts", "themes"] as const;
+
+/** Loosely mirrors (not a byte-for-byte port -- pi's own walker is
+ * .gitignore-aware via the `ignore` package, this isn't) pi's own
+ * convention-directory file matching from @earendil-works/pi-coding-agent's
+ * package-manager.js: extensions/ take .ts/.js recursively, skills/ take
+ * SKILL.md or any .md recursively, prompts/ and themes/ take top-level
+ * .md/.json respectively. Close enough to answer "would pi's own loader ever
+ * find anything to load here", which is all a pre-install admission check
+ * needs. */
+const CONVENTION_RESOURCE_DIRS: Record<string, { match: (name: string) => boolean; recursive: boolean }> = {
+	extensions: { match: (name) => name.endsWith(".ts") || name.endsWith(".js"), recursive: true },
+	skills: { match: (name) => name === "SKILL.md" || name.endsWith(".md"), recursive: true },
+	prompts: { match: (name) => name.endsWith(".md"), recursive: false },
+	themes: { match: (name) => name.endsWith(".json"), recursive: false },
+};
+
+function hasNonEmptyStringArray(value: unknown): boolean {
+	return Array.isArray(value) && value.some((entry) => typeof entry === "string" && entry.trim().length > 0);
+}
+
+/** True if the package's own `pi` manifest key declares at least one
+ * non-empty resource array of any of the four kinds -- not just
+ * `extensions`, which the caller already checked separately. */
+function hasAnyManifestResource(pi: Record<string, unknown> | undefined): boolean {
+	if (!pi) return false;
+	return MANIFEST_RESOURCE_FIELDS.some((field) => hasNonEmptyStringArray(pi[field]));
+}
+
+/** Bounded recursive scan for at least one file matching `match` under `dir`.
+ * `remaining` is a shared mutable budget across the whole call tree so a
+ * pathological directory structure can't make this unbounded work. */
+function directoryHasMatchingFile(dir: string, match: (name: string) => boolean, recursive: boolean, remaining: { count: number }): boolean {
+	if (!existsSync(dir) || remaining.count <= 0) return false;
+	let entries: import("node:fs").Dirent<string>[];
+	try {
+		entries = readdirSync(dir, { withFileTypes: true, encoding: "utf8" });
+	} catch {
+		return false;
+	}
+	for (const entry of entries) {
+		if (remaining.count-- <= 0) return false;
+		if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+		const full = join(dir, entry.name);
+		if (entry.isFile() && match(entry.name)) return true;
+		if (recursive && entry.isDirectory() && directoryHasMatchingFile(full, match, recursive, remaining)) return true;
+	}
+	return false;
+}
+
+/** True if the staged package root has any of pi's own convention resource
+ * directories (extensions/, skills/, prompts/, themes/) containing at least
+ * one file pi's own loader would actually pick up -- the fallback pi itself
+ * uses when a package declares no `pi` manifest at all. */
+function hasConventionResources(root: string): boolean {
+	const remaining = { count: MAX_CONVENTION_SCAN_ENTRIES };
+	return Object.entries(CONVENTION_RESOURCE_DIRS).some(([dirName, { match, recursive }]) =>
+		directoryHasMatchingFile(join(root, dirName), match, recursive, remaining),
+	);
+}
 
 function bounded(value: number | undefined, fallback: number, maximum: number): number {
 	if (!Number.isFinite(value) || value === undefined || value <= 0) return fallback;
@@ -215,9 +284,13 @@ async function verifyAllLoadPathsHeadless(entryPath: string, timeoutMs?: number)
 }
 
 /** Stages the real npm tarball in isolation and headlessly load-checks
- * every pi.extensions entry it declares. A package with no pi.extensions
- * (most npm packages) or a non-npm source has nothing to validate and
- * passes through as ok. */
+ * every pi.extensions entry it declares. A non-npm source has nothing to
+ * stage and passes through as ok. A package with no pi.extensions passes
+ * only if it declares some other pi manifest resource (skills/prompts/
+ * themes) or has a matching pi convention directory on disk -- otherwise
+ * it isn't a Pi package at all (a plain npm dependency like is-number or
+ * is-buffer) and is refused rather than silently admitted as a dead
+ * `packages` entry pi itself would never load anything from. */
 export class HeadlessInstallValidator implements InstallValidator {
 	constructor(private readonly timeoutMs?: number) {}
 
@@ -241,7 +314,26 @@ export class HeadlessInstallValidator implements InstallValidator {
 			const declared = Array.isArray(pi?.extensions)
 				? pi.extensions.filter((entry): entry is string => typeof entry === "string").slice(0, MAX_EXTENSIONS)
 				: [];
-			if (declared.length === 0) return { ok: true, source, extensions: [] };
+			if (declared.length === 0) {
+				// No pi.extensions to headlessly load-check -- but that alone isn't
+				// license to wave the package through. A real Pi package with only
+				// skills/prompts/themes (declared in the manifest or found via pi's
+				// own convention directories) still passes here unexamined; a
+				// package that is neither -- e.g. `is-number`, `is-buffer`, any
+				// plain leaf npm dependency someone points `pkg_install` at
+				// directly -- gets refused instead of silently becoming a dead
+				// `packages` entry that pi itself will never load anything from.
+				if (hasAnyManifestResource(pi) || hasConventionResources(staged.root)) {
+					return { ok: true, source, extensions: [] };
+				}
+				return {
+					ok: false,
+					source,
+					extensions: [],
+					message:
+						"package declares no pi.extensions/skills/prompts/themes and has no extensions/skills/prompts/themes directory -- not a Pi package",
+				};
+			}
 
 			const installed = await installStagedDependencies(staged.root);
 			if (!installed.ok) return { ok: false, source, extensions: [], message: installed.message };

@@ -13,6 +13,7 @@ import type { ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-a
 import { rawKeyHint } from "@earendil-works/pi-coding-agent";
 import { Input, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { Card, type Component } from "malevich-tui-components";
+import { targetsPackedItself } from "../approval/reload.js";
 import { cardTheme } from "../menu-theme.js";
 import { formatDownloadCount, formatRelativeDate } from "../model.js";
 import type { Natives, PackageSummary } from "../packed.js";
@@ -32,7 +33,8 @@ export type InstallOutcome = "installed" | "cancelled" | "failed";
  * path (installPackageWithPolicy) -- most packages aren't daemons at all. */
 export async function applyInstall(result: PackageSummary, natives: Natives, ctx: ExtensionCommandContext): Promise<InstallOutcome> {
 	const source = `npm:${result.name}`;
-	const approval = await approvePackageOperation("install", `pi install ${source}`, natives, ctx);
+	const restartRequired = targetsPackedItself(result.name);
+	const approval = await approvePackageOperation("install", `pi install ${source}`, natives, ctx, restartRequired);
 	if (!approval.allowed) {
 		ctx.ui.notify(approval.message ?? "install denied", "warning");
 		return "cancelled";
@@ -46,7 +48,16 @@ export async function applyInstall(result: PackageSummary, natives: Natives, ctx
 				ctx.ui.notify(`note: could not register a persistent service for ${result.name}: ${e instanceof Error ? e.message : e}`, "warning");
 			}
 		}
-		ctx.ui.notify(`${output}; reloading Pi resources.`, "info");
+		// ctx.reload() re-evaluates this extension's own entry file, same as /reload -- harmless to
+		// call either way, but it cannot bust an already-loaded copy of Packed's own client module,
+		// so a self-install/update needs the stronger, honest wording instead of implying reload alone
+		// finished the job (see approval/reload.ts's targetsPackedItself()).
+		ctx.ui.notify(
+			restartRequired
+				? `${output}; restart Pi (exit and relaunch) to activate -- /reload alone will not pick up Packed's own updated code.`
+				: `${output}; reloading Pi resources.`,
+			"info",
+		);
 		await ctx.reload();
 		return "installed";
 	} catch (e) {

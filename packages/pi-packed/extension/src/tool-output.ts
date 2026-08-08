@@ -1,6 +1,7 @@
 import type { PackageSummary as Pkg, PackageInfo as PkgInfo } from "@danypops/pi-packed/protocol";
 import type { AgentToolResult, Theme } from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth } from "@earendil-works/pi-tui";
+import { targetsPackedItself } from "./approval/reload.js";
 import {
 	TOOL_COLLAPSED_PACKAGE_PREVIEW,
 	TOOL_DETAILS_MAX_CAPABILITIES,
@@ -59,6 +60,11 @@ export interface MutationToolDetails {
 	status: "succeeded" | "cancelled" | "denied";
 	output: string;
 	reloadRequired: boolean;
+	/** Optional (not version-gated) -- see approval/reload.ts's targetsPackedItself().
+	 * Absent on details serialized before this field existed; the renderer treats
+	 * absent the same as false, so an older persisted tool result still renders
+	 * exactly as it always did. */
+	restartRequired?: boolean;
 }
 
 export type PackageToolDetails = SearchToolDetails | InfoToolDetails | MutationToolDetails;
@@ -181,6 +187,10 @@ export function createMutationDetails(
 		status,
 		output: safeDisplayText(output, TOOL_DETAILS_MAX_OUTPUT_CHARACTERS),
 		reloadRequired,
+		// Derived from the raw (pre-sanitized) target -- targetsPackedItself only ever matches a
+		// plain npm name/source, never affected by safePackageTarget's URL-credential redaction.
+		// Only meaningful when a reload/restart is actually pending at all.
+		...(status === "succeeded" && targetsPackedItself(target) ? { restartRequired: true } : {}),
 	};
 }
 
@@ -235,6 +245,7 @@ export function parsePackageToolDetails(value: unknown): PackageToolDetails | un
 			if (typeof candidate.status !== "string" || !MUTATION_STATUSES.has(candidate.status)) return undefined;
 			if (!isShortString(candidate.target) || !isShortString(candidate.output) || typeof candidate.reloadRequired !== "boolean")
 				return undefined;
+			if (candidate.restartRequired !== undefined && typeof candidate.restartRequired !== "boolean") return undefined;
 			return value as MutationToolDetails;
 		}
 	} catch {
@@ -312,7 +323,9 @@ export function renderPackageToolResult(
 			const statusColor = details.status === "succeeded" ? "success" : "warning";
 			const lines = [`${theme.fg(statusColor, details.status === "succeeded" ? "✓" : "○")} ${details.operation} ${details.target}`];
 			if (options.expanded && details.output) lines.push(details.output);
-			if (details.reloadRequired) lines.push(theme.fg("warning", "Reload Pi with /reload to activate the update."));
+			if (details.restartRequired)
+				lines.push(theme.fg("warning", "Restart Pi (exit and relaunch) to activate -- Packed's own running code can't hot-reload itself."));
+			else if (details.reloadRequired) lines.push(theme.fg("warning", "Reload Pi with /reload to activate the update."));
 			return lines.map((line) => truncateToWidth(line, safeWidth));
 		},
 		invalidate() {},

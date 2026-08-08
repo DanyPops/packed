@@ -133,6 +133,35 @@ describe("applyInstall (/packed find's install action)", () => {
 		expect(reloads.count).toBe(1);
 	});
 
+	it("installing Packed's own package through the Find tab warns and notifies with restart wording, not plain reload -- /reload cannot fix this (confirmed live)", async () => {
+		const notices: string[] = [];
+		const reloads = { count: 0 };
+		const selfResult: PackageSummary = { name: "@danypops/pi-packed", version: "0.21.14", description: "Packed itself" };
+		const natives = {
+			async security() {
+				return { mutationApproval: "always" as const };
+			},
+			async install() {
+				return "Installed npm:@danypops/pi-packed";
+			},
+			async installService() {
+				throw new InstallServiceError("not a daemon", true);
+			},
+		} as unknown as Natives;
+
+		const outcome = await applyInstall(selfResult, natives, fakeCtx(true, notices, reloads));
+
+		expect(outcome).toBe("installed");
+		const confirmMessage = notices.find((n) => n.startsWith("confirm:"));
+		expect(confirmMessage).toContain("restart");
+		expect(confirmMessage).toContain("exit and relaunch");
+		const finalNotice = notices.find((n) => n.includes("Installed npm:@danypops/pi-packed"));
+		expect(finalNotice).toContain("restart Pi (exit and relaunch)");
+		expect(finalNotice).not.toContain("reloading Pi resources");
+		// ctx.reload() is still called -- harmless, just not sufficient on its own.
+		expect(reloads.count).toBe(1);
+	});
+
 	it("never installs or reloads when approval is declined", async () => {
 		const reloads = { count: 0 };
 		let installCalled = false;

@@ -74,6 +74,100 @@ describe("native package mutation permission policy", () => {
 		expect(result.content[0]?.text).toContain("/reload");
 	});
 
+	it("escalates install/update/remove of Packed's own package to restart wording, both in the approval dialog and the final message -- /reload cannot fix this (confirmed live)", async () => {
+		const security = async () => ({ mutationApproval: "always" as const });
+		const confirmMessages: string[] = [];
+		const ctx = {
+			hasUI: true,
+			ui: {
+				async confirm(_title: string, message: string) {
+					confirmMessages.push(message);
+					return true;
+				},
+			},
+		};
+
+		const installResult = await installPackageWithPolicy(
+			"npm:@danypops/pi-packed",
+			{
+				security,
+				async install() {
+					return "";
+				},
+				async installService() {
+					throw new InstallServiceError("n/a", true);
+				},
+			},
+			ctx,
+		);
+		if (installResult.details.kind !== "mutation") throw new Error("expected mutation details");
+		expect(installResult.details.restartRequired).toBe(true);
+		expect(installResult.content[0]?.text).toContain("Restart Pi");
+		expect(installResult.content[0]?.text).not.toContain("/reload");
+
+		const updateResult = await updatePackageWithPolicy(
+			"npm:@danypops/pi-packed",
+			{
+				security,
+				async update() {
+					return {
+						output: "updated",
+						reloadRequired: true,
+						alreadyUpToDate: false,
+						pinned: false,
+						previousVersion: "0.21.13",
+						currentVersion: "0.21.14",
+					};
+				},
+			},
+			ctx,
+		);
+		if (updateResult.details.kind !== "mutation") throw new Error("expected mutation details");
+		expect(updateResult.details.restartRequired).toBe(true);
+		expect(updateResult.content[0]?.text).toContain("Restart Pi");
+		expect(updateResult.content[0]?.text).not.toContain("Reload with /reload");
+
+		const removeResult = await removePackageWithPolicy(
+			"@danypops/pi-packed",
+			{
+				security,
+				async remove() {
+					return "";
+				},
+			},
+			ctx,
+		);
+		if (removeResult.details.kind !== "mutation") throw new Error("expected mutation details");
+		expect(removeResult.details.restartRequired).toBe(true);
+		expect(removeResult.content[0]?.text).toContain("Restart Pi");
+		expect(removeResult.content[0]?.text).not.toContain("/reload");
+
+		// Every one of the three pre-confirmation dialogs said restart, not reload.
+		expect(confirmMessages).toHaveLength(3);
+		for (const message of confirmMessages) {
+			expect(message).toContain("restart");
+			expect(message).toContain("exit and relaunch");
+		}
+
+		// An ordinary package's mutations are completely unaffected.
+		const ordinary = await installPackageWithPolicy(
+			"npm:pkg",
+			{
+				security,
+				async install() {
+					return "";
+				},
+				async installService() {
+					throw new InstallServiceError("n/a", true);
+				},
+			},
+			ctx,
+		);
+		if (ordinary.details.kind !== "mutation") throw new Error("expected mutation details");
+		expect(ordinary.details.restartRequired).toBeUndefined();
+		expect(ordinary.content[0]?.text).toContain("/reload");
+	});
+
 	it("requires the same confirmation for remove", async () => {
 		let removes = 0;
 		const result = await removePackageWithPolicy(

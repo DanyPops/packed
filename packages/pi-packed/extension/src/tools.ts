@@ -2,7 +2,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { type PackageOperation, packagePermissionDecision } from "./approval/permission.js";
-import { reloadWarning } from "./approval/reload.js";
+import { reloadWarning, targetsPackedItself } from "./approval/reload.js";
 import { InstallServiceError, type Natives, PI_COMMAND_NAME } from "./packed.js";
 import {
 	createInfoDetails,
@@ -28,6 +28,10 @@ export async function approvePackageOperation(
 	command: string,
 	natives: Pick<Natives, "security">,
 	ctx: ApprovalContext,
+	// True only for a source/name that resolves to Packed's own npm package -- see
+	// targetsPackedItself(). Every caller below computes this from the exact string it's
+	// about to mutate, so the warning always reflects the real target.
+	restartRequired = false,
 ): Promise<{ allowed: boolean; approved: boolean; reason?: "cancelled" | "denied"; message?: string }> {
 	const settings = await natives.security();
 	const decision = packagePermissionDecision(settings, operation);
@@ -42,7 +46,7 @@ export async function approvePackageOperation(
 	}
 	const approved = await ctx.ui.confirm(
 		`${operation[0]!.toUpperCase()}${operation.slice(1)} Pi package`,
-		`Run: ${command}\n\nThis operation can execute package code or mutate Pi settings/install roots. ${reloadWarning(operation)} Continue?`,
+		`Run: ${command}\n\nThis operation can execute package code or mutate Pi settings/install roots. ${reloadWarning(operation, { restartRequired })} Continue?`,
 	);
 	return approved
 		? { allowed: true, approved: true }
@@ -54,12 +58,16 @@ export async function installPackageWithPolicy(
 	natives: Pick<Natives, "security" | "install" | "installService">,
 	ctx: ApprovalContext,
 ) {
-	const approval = await approvePackageOperation("install", `pi install ${source}`, natives, ctx);
+	const restartRequired = targetsPackedItself(source);
+	const approval = await approvePackageOperation("install", `pi install ${source}`, natives, ctx, restartRequired);
 	if (!approval.allowed) {
 		const output = approval.message ?? "install denied";
 		return text(output, createMutationDetails("install", source, approval.reason ?? "denied", output));
 	}
-	let output = (await natives.install(source, approval.approved)) || `Installed ${source}. Reload with /reload to activate.`;
+	const activateNote = restartRequired
+		? "Restart Pi (exit and relaunch) to activate -- Packed's own running code can't hot-reload itself."
+		: "Reload with /reload to activate.";
+	let output = (await natives.install(source, approval.approved)) || `Installed ${source}. ${activateNote}`;
 	// Piggybacks on the same approval already granted for install -- both are
 	// the same code-execution mutation tier, not a new consent surface. Silent
 	// for the overwhelmingly common case (most Pi packages aren't daemons at
@@ -80,7 +88,8 @@ export async function installPackageWithPolicy(
 }
 
 export async function updatePackageWithPolicy(source: string, natives: Pick<Natives, "security" | "update">, ctx: ApprovalContext) {
-	const approval = await approvePackageOperation("update", `pi update --extension ${source}`, natives, ctx);
+	const restartRequired = targetsPackedItself(source);
+	const approval = await approvePackageOperation("update", `pi update --extension ${source}`, natives, ctx, restartRequired);
 	if (!approval.allowed) {
 		const output = approval.message ?? "update denied";
 		return text(output, createMutationDetails("update", source, approval.reason ?? "denied", output));
@@ -95,17 +104,24 @@ export async function updatePackageWithPolicy(source: string, natives: Pick<Nati
 		return text(message, createMutationDetails("update", source, "succeeded", outcome.output || message, false));
 	}
 	const transition = outcome.previousVersion && outcome.currentVersion ? ` (${outcome.previousVersion} → ${outcome.currentVersion})` : "";
-	const message = `${outcome.output || `Updated ${source}.`}${transition} Reload with /reload to activate.`;
+	const activateNote = restartRequired
+		? "Restart Pi (exit and relaunch) to activate -- Packed's own running code can't hot-reload itself."
+		: "Reload with /reload to activate.";
+	const message = `${outcome.output || `Updated ${source}.`}${transition} ${activateNote}`;
 	return text(message, createMutationDetails("update", source, "succeeded", outcome.output || message, true));
 }
 
 export async function removePackageWithPolicy(name: string, natives: Pick<Natives, "security" | "remove">, ctx: ApprovalContext) {
-	const approval = await approvePackageOperation("remove", `pi remove npm:${name}`, natives, ctx);
+	const restartRequired = targetsPackedItself(name);
+	const approval = await approvePackageOperation("remove", `pi remove npm:${name}`, natives, ctx, restartRequired);
 	if (!approval.allowed) {
 		const output = approval.message ?? "remove denied";
 		return text(output, createMutationDetails("remove", name, approval.reason ?? "denied", output));
 	}
-	const output = (await natives.remove(name, approval.approved)) || `Removed ${name}. Reload with /reload to deactivate.`;
+	const deactivateNote = restartRequired
+		? "Restart Pi (exit and relaunch) to deactivate -- Packed's own running code can't hot-reload itself."
+		: "Reload with /reload to deactivate.";
+	const output = (await natives.remove(name, approval.approved)) || `Removed ${name}. ${deactivateNote}`;
 	return text(output, createMutationDetails("remove", name, "succeeded", output));
 }
 

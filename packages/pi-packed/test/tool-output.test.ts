@@ -103,4 +103,33 @@ describe("pi-packed dual-channel tool output", () => {
 		oversizedInfo.package.repository = "x".repeat(2_000);
 		expect(parsePackageToolDetails(oversizedInfo)).toBeUndefined();
 	});
+
+	it("flags restartRequired for a successful mutation targeting Packed's own package, never for an ordinary one", () => {
+		const selfInstall = createMutationDetails("install", "npm:@danypops/pi-packed", "succeeded", "installed");
+		expect(selfInstall.restartRequired).toBe(true);
+		const selfRemove = createMutationDetails("remove", "@danypops/pi-packed", "succeeded", "removed");
+		expect(selfRemove.restartRequired).toBe(true);
+
+		const ordinary = createMutationDetails("install", "npm:pkg", "succeeded", "installed");
+		expect(ordinary.restartRequired).toBeUndefined();
+
+		// Never set on a non-succeeded outcome -- nothing to restart for yet.
+		const denied = createMutationDetails("install", "npm:@danypops/pi-packed", "denied", "denied");
+		expect(denied.restartRequired).toBeUndefined();
+	});
+
+	it("round-trips restartRequired through parsePackageToolDetails and renders the restart line instead of the reload line", () => {
+		const details = createMutationDetails("update", "npm:@danypops/pi-packed", "succeeded", "updated", true);
+		expect(parsePackageToolDetails(details)).toEqual(details);
+
+		const result = { content: [{ type: "text" as const, text: "unused" }], details };
+		const rendered = renderPackageToolResult(result, { expanded: false, isPartial: false }, theme, context).render(120).join("\n");
+		expect(rendered).toContain("Restart Pi (exit and relaunch)");
+		expect(rendered).not.toContain("Reload Pi with /reload");
+	});
+
+	it("rejects a restartRequired field of the wrong type instead of trusting it", () => {
+		const details = createMutationDetails("install", "npm:pkg", "succeeded", "installed");
+		expect(parsePackageToolDetails({ ...details, restartRequired: "yes" })).toBeUndefined();
+	});
 });

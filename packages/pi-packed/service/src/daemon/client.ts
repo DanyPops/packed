@@ -275,6 +275,7 @@ export class PackageDaemonClient implements PackageDaemonPort {
 			pinned: result.pinned ?? false,
 			previousVersion: result.previousVersion,
 			currentVersion: result.currentVersion,
+			outOfRangeUpdateAvailable: result.outOfRangeUpdateAvailable,
 		};
 	}
 }

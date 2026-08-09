@@ -56,9 +56,13 @@ export function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOpt
 	if (options.migrateLegacy ?? options.paths === undefined) migrateLegacyPackedState(paths, legacyPackedStateDirectory());
 	const token = ensureAuthToken(paths.token, "Packed");
 	const reg = options.reg ?? new HttpRegistry();
-	const inst = options.inst ?? new ExecInstaller();
 	const piHome = options.piHome ?? defaultPiHome();
 	const database = openDb(paths.database);
+	// Wires ExecInstaller.update()'s own out-of-range cross-check to the exact
+	// same registry-mirror source of truth the package-update-check task below
+	// already uses via checkUpdates() -- one mirror, two consumers, never two
+	// notions of "the real latest version".
+	const inst = options.inst ?? new ExecInstaller(undefined, piHome, undefined, undefined, undefined, (name) => latestVersion(database, name));
 	const daemonServiceInstaller = options.daemonServiceInstaller ?? new RealDaemonServiceInstaller();
 	const configuredMaintenanceTasks = options.maintenanceTasks ?? [
 		{

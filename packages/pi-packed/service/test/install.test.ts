@@ -159,6 +159,64 @@ describe("ExecInstaller.update() — honest reloadRequired despite pi's ambiguou
 	});
 });
 
+describe("ExecInstaller.update() — out-of-range update detection (confirmed live: a 0.x package past its own caret boundary reported a bare 'already up to date')", () => {
+	it("alreadyUpToDate but a real newer version exists outside the declared range: reports outOfRangeUpdateAvailable", async () => {
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-bin-")));
+		const bin = writeFakePi(scriptDir); // no rewrite: `pi update` genuinely no-ops, bound by ^0.9.8
+		const npmBin = writeFakeNpm(scriptDir, join(scriptDir, "npm.log"));
+		const piHome = writePiHome({ "@scope/pkg": "0.9.8" });
+		const installer = new ExecInstaller(bin, piHome, undefined, npmBin, undefined, (name) =>
+			name === "@scope/pkg" ? "0.10.0" : undefined,
+		);
+
+		const outcome = await installer.update("npm:@scope/pkg@0.9.8");
+
+		expect(outcome.alreadyUpToDate).toBe(true);
+		expect(outcome.reloadRequired).toBe(false);
+		expect(outcome.outOfRangeUpdateAvailable).toBe("0.10.0");
+	});
+
+	it("alreadyUpToDate and genuinely current against the mirror too: no outOfRangeUpdateAvailable", async () => {
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-bin-")));
+		const bin = writeFakePi(scriptDir);
+		const npmBin = writeFakeNpm(scriptDir, join(scriptDir, "npm.log"));
+		const piHome = writePiHome({ plain: "0.5.0" });
+		const installer = new ExecInstaller(bin, piHome, undefined, npmBin, undefined, () => "0.5.0");
+
+		const outcome = await installer.update("npm:plain");
+
+		expect(outcome.alreadyUpToDate).toBe(true);
+		expect(outcome.outOfRangeUpdateAvailable).toBeUndefined();
+	});
+
+	it("no latestOf wired in at all: behaves exactly as before (no cross-check attempted)", async () => {
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-bin-")));
+		const bin = writeFakePi(scriptDir);
+		const npmBin = writeFakeNpm(scriptDir, join(scriptDir, "npm.log"));
+		const piHome = writePiHome({ "@scope/pkg": "0.9.8" });
+		const installer = new ExecInstaller(bin, piHome, undefined, npmBin);
+
+		const outcome = await installer.update("npm:@scope/pkg@0.9.8");
+
+		expect(outcome.alreadyUpToDate).toBe(true);
+		expect(outcome.outOfRangeUpdateAvailable).toBeUndefined();
+	});
+
+	it("a real version change happened: never reports outOfRangeUpdateAvailable even if the mirror knows a still-newer version", async () => {
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-bin-")));
+		const piHome = writePiHome({ plain: "0.5.0" });
+		const bin = writeFakePi(scriptDir, { piHome, name: "plain", newVersion: "0.6.0" });
+		const npmBin = writeFakeNpm(scriptDir, join(scriptDir, "npm.log"));
+		const installer = new ExecInstaller(bin, piHome, undefined, npmBin, undefined, () => "0.7.0");
+
+		const outcome = await installer.update("npm:plain");
+
+		expect(outcome.alreadyUpToDate).toBe(false);
+		expect(outcome.reloadRequired).toBe(true);
+		expect(outcome.outOfRangeUpdateAvailable).toBeUndefined();
+	});
+});
+
 describe("ExecInstaller — forces full dependency re-resolution, not just the target's own subtree", () => {
 	it("update() fixes a stale root-level sibling that the targeted pi update never touched", async () => {
 		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-bin-")));

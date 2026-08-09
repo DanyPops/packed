@@ -53,6 +53,7 @@ export interface UpdateOutcome {
 	pinned: boolean;
 	previousVersion?: string;
 	currentVersion?: string;
+	outOfRangeUpdateAvailable?: string;
 }
 export interface Diagnostic {
 	code: string;
@@ -165,6 +166,7 @@ export interface ExtensionOperationOutputs {
 		pinned?: boolean;
 		previousVersion?: string;
 		currentVersion?: string;
+		outOfRangeUpdateAvailable?: string;
 	};
 	"setup.plan": SetupPlan;
 	"setup.apply": SetupApplyResult;

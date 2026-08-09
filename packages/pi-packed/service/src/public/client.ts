@@ -186,6 +186,7 @@ export class PackedClient implements PackedExtensionClient {
 			pinned: result.pinned ?? false,
 			previousVersion: result.previousVersion,
 			currentVersion: result.currentVersion,
+			outOfRangeUpdateAvailable: result.outOfRangeUpdateAvailable,
 		};
 	}
 	setupPlan(manifestPath: string, prune = false) {

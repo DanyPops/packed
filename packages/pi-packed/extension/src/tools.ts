@@ -100,7 +100,10 @@ export async function updatePackageWithPolicy(source: string, natives: Pick<Nati
 		const reason = outcome.pinned
 			? `pinned to ${version ?? "an exact version"} -- pi update intentionally leaves pinned packages unchanged; reinstall with a different (or no) version to move off the pin`
 			: `already up to date${version ? ` at ${version}` : ""}`;
-		const message = `${source} is ${reason}.`;
+		const outOfRangeNote = outcome.outOfRangeUpdateAvailable
+			? ` A newer version, ${outcome.outOfRangeUpdateAvailable}, exists outside the declared range -- widen it to update.`
+			: "";
+		const message = `${source} is ${reason}.${outOfRangeNote}`;
 		return text(message, createMutationDetails("update", source, "succeeded", outcome.output || message, false));
 	}
 	const transition = outcome.previousVersion && outcome.currentVersion ? ` (${outcome.previousVersion} → ${outcome.currentVersion})` : "";

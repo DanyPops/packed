@@ -5,12 +5,12 @@
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { gt, valid } from "semver";
 import { UPDATES_FILE } from "../shared/constants.ts";
 import { createLogger } from "../shared/log.ts";
 
 const log = createLogger("watcher");
 
+import { isNewer } from "../packages/package.ts";
 import type { InstalledPkg, UpdateEntry, UpdatesSnapshot } from "../packages/package.ts";
 
 function updatesPath(dir: string): string {
@@ -28,23 +28,6 @@ export async function loadUpdates(dir: string): Promise<UpdatesSnapshot | undefi
 	} catch {
 		return undefined;
 	}
-}
-
-/**
- * True drift only: mirrored latest is a real semver step *ahead* of what's
- * installed, never merely different from it. A plain !== check (this
- * function's own bug until fixed) cannot distinguish "installed is behind
- * latest" from "installed is already ahead of a stale/wrong mirrored
- * latest" -- confirmed live: an installed package whose version had
- * already passed the daemon's own mirrored dist-tags.latest kept showing
- * a permanent, un-clearable "update available" badge pointing at an
- * *older* version. Falls back to the old inequality only when either side
- * isn't parseable semver (a git ref, a literal "latest" tag, etc.) --
- * those aren't comparable at all, so "different" is the only signal left.
- */
-function isNewer(latest: string, have: string): boolean {
-	if (valid(latest, { loose: true }) && valid(have, { loose: true })) return gt(latest, have, { loose: true });
-	return latest !== have;
 }
 
 /** Pure diff against the local mirror (apt list --upgradable semantics):

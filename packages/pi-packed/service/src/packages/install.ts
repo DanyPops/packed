@@ -9,7 +9,8 @@ import {
 	type InstallValidator,
 } from "../adoption/install-validation.ts";
 import { createLogger } from "../shared/log.ts";
-import { defaultPiHome, isPinnedNpmSource, readResolvedVersion } from "./installed.ts";
+import { defaultPiHome, isPinnedNpmSource, npmPackageName, readResolvedVersion } from "./installed.ts";
+import { isNewer } from "./package.ts";
 import type { Installer, UpdateOutcome } from "./package.ts";
 
 function round1(ms: number): number {
@@ -44,6 +45,14 @@ export class ExecInstaller implements Installer {
 		 * against a real daemon instead of guessing from wall-clock totals alone.
 		 */
 		private readonly logger: Logger = createLogger("install"),
+		/**
+		 * Optional real registry-mirror lookup (see daemon/watcher.ts's own
+		 * checkUpdates(), which this shares its cross-check logic with via
+		 * package.ts's isNewer) -- undefined by default so every existing
+		 * caller/test keeps its old "already up to date means nothing to
+		 * report" behavior unless a daemon explicitly wires its own mirror in.
+		 */
+		private readonly latestOf?: (name: string) => string | undefined,
 	) {}
 
 	private async run(args: string[]): Promise<string> {
@@ -165,6 +174,21 @@ export class ExecInstaller implements Installer {
 		// have changed" signal instead of falsely claiming it didn't.
 		const knowsBoth = previousVersion !== undefined && currentVersion !== undefined;
 		const changed = !knowsBoth || previousVersion !== currentVersion;
-		return { output, reloadRequired: changed, alreadyUpToDate: !changed, pinned, previousVersion, currentVersion };
+		const alreadyUpToDate = !changed;
+		// Only worth cross-checking when there's actually a "nothing changed"
+		// conclusion to double-check, a real mirror lookup was wired in, and
+		// there's a real bare npm name + resolved version to compare against.
+		const name = alreadyUpToDate && this.latestOf ? npmPackageName(source) : undefined;
+		const latest = name && currentVersion ? this.latestOf?.(name) : undefined;
+		const outOfRangeUpdateAvailable = latest && currentVersion && isNewer(latest, currentVersion) ? latest : undefined;
+		return {
+			output,
+			reloadRequired: changed,
+			alreadyUpToDate,
+			pinned,
+			previousVersion,
+			currentVersion,
+			...(outOfRangeUpdateAvailable ? { outOfRangeUpdateAvailable } : {}),
+		};
 	}
 }

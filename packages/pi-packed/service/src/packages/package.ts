@@ -11,6 +11,27 @@
 // itself stays a pure port: nothing here creates a runtime dependency on install-validation.ts's
 // own npm-pack/tar/subprocess machinery.
 import type { InstallValidationResult } from "../adoption/install-validation.ts";
+import { gt, valid } from "semver";
+
+/**
+ * True drift only: `latest` is a real semver step *ahead* of `have`, never
+ * merely different from it. A plain !== check cannot distinguish "have is
+ * behind latest" from "have is already ahead of a stale/wrong latest" --
+ * confirmed live via the watcher's own version of this bug: an installed
+ * package whose version had already passed the daemon's mirrored
+ * dist-tags.latest kept showing a permanent, un-clearable "update
+ * available" badge pointing at an *older* version. Falls back to the old
+ * inequality only when either side isn't parseable semver (a git ref, a
+ * literal "latest" tag, etc.) -- those aren't comparable at all, so
+ * "different" is the only signal left. Lives here (not watcher.ts, its
+ * original home) so both the daemon's watcher and ExecInstaller.update()'s
+ * own out-of-range check share one implementation without packages/
+ * reaching into daemon/ (the dependency already runs the other way).
+ */
+export function isNewer(latest: string, have: string): boolean {
+	if (valid(latest, { loose: true }) && valid(have, { loose: true })) return gt(latest, have, { loose: true });
+	return latest !== have;
+}
 
 export type PackageVerification = "keyword-only" | "manifest" | "conventional";
 
@@ -108,6 +129,19 @@ export interface UpdateOutcome {
 	pinned: boolean;
 	previousVersion?: string;
 	currentVersion?: string;
+	/**
+	 * Set only when alreadyUpToDate is true AND a real registry version
+	 * newer than currentVersion exists outside the source's own declared
+	 * caret/range -- confirmed live: a 0.x package (e.g. ^0.9.8) that
+	 * crossed its own minor boundary (0.10.0 published) reported a bare
+	 * "already up to date" with no clue a newer version existed at all.
+	 * `pi update --extension` is itself bound by the declared range, so
+	 * "nothing changed" alone can't distinguish "genuinely current" from
+	 * "current within a range that's now stale" -- this cross-checks
+	 * against the same registry-mirror source of truth checkUpdates()
+	 * already uses, independent of the declared range.
+	 */
+	outOfRangeUpdateAvailable?: string;
 }
 
 /** Driven port: pi CLI mutations. */

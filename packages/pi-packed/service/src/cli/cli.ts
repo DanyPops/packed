@@ -674,7 +674,10 @@ const commands: Record<string, { usage: string; run: Command }> = {
 					const reason = outcome.pinned
 						? `is pinned to ${version ?? "an exact version"} — pi update intentionally leaves pinned packages unchanged; run \`packed install npm:${npmPackageName(source) ?? source}\` to move off the pin`
 						: `is already up to date${version ? ` at ${version}` : ""}`;
-					return ok(`${source} ${reason}\n`);
+					const outOfRangeNote = outcome.outOfRangeUpdateAvailable
+						? ` (a newer version, ${outcome.outOfRangeUpdateAvailable}, exists outside the declared range -- widen it to update)`
+						: "";
+					return ok(`${source} ${reason}${outOfRangeNote}\n`);
 				}
 				if (flags.json) return ok(`${JSON.stringify({ ok: true, source, ...outcome })}\n`);
 				const transition =

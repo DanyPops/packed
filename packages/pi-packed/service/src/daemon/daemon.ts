@@ -1,4 +1,5 @@
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	type MaintenanceTask,
 	type RunningDaemon,
@@ -7,6 +8,7 @@ import {
 	startDaemon,
 } from "@danypops/vehicle-server/daemon";
 import { ensureAuthToken } from "@danypops/vehicle-server/paths";
+import { captureLoadedModules, checkModuleFreshnessAll, ownRuntimeDependencyNames } from "../adoption/module-freshness.ts";
 import { type DaemonServiceInstaller, RealDaemonServiceInstaller, reconcileAllDaemonServices } from "./daemon-service.ts";
 import { generateIndex, indexPath, indexStatus } from "../index/build-index.ts";
 import { catalogStatus, syncCatalog } from "../packages/catalog.ts";
@@ -51,6 +53,21 @@ function configuredIdleBudgetMs(options: StartPackedDaemonOptions): number | und
 	return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1_000 : undefined;
 }
 
+/**
+ * Captured exactly once, here at daemon startup (daemonOptions() itself
+ * runs once per process -- see vehicle-server/daemon.js's own single
+ * `buildApp()` call site) -- see module-freshness.ts's own header comment
+ * for why this specific moment is what makes the later comparison
+ * meaningful: this is the instant this process's own static imports last
+ * actually loaded these files into memory.
+ */
+function captureOwnModuleSnapshot() {
+	const serviceRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+	const packageDirectory = dirname(serviceRoot);
+	const ownPackageJsonPath = join(packageDirectory, "package.json");
+	return captureLoadedModules(packageDirectory, ownRuntimeDependencyNames(ownPackageJsonPath));
+}
+
 export function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOptions {
 	const paths = options.paths ?? resolvePackedPaths();
 	if (options.migrateLegacy ?? options.paths === undefined) migrateLegacyPackedState(paths, legacyPackedStateDirectory());
@@ -58,6 +75,7 @@ export function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOpt
 	const reg = options.reg ?? new HttpRegistry();
 	const piHome = options.piHome ?? defaultPiHome();
 	const database = openDb(paths.database);
+	const moduleSnapshot = captureOwnModuleSnapshot();
 	// Wires ExecInstaller.update()'s own out-of-range cross-check to the exact
 	// same registry-mirror source of truth the package-update-check task below
 	// already uses via checkUpdates() -- one mirror, two consumers, never two
@@ -120,7 +138,17 @@ export function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOpt
 		maintenanceTasks,
 		...(idleBudgetMs === undefined ? {} : { idleBudgetMs }),
 		idleTickMs: WATCHDOG_TICK_MS,
-		buildApp: () => createApp({ reg, inst, token, stateDir: paths.stateDirectory, dataDir: dirname(paths.database), piHome, daemonServiceInstaller }),
+		buildApp: () =>
+			createApp({
+				reg,
+				inst,
+				token,
+				stateDir: paths.stateDirectory,
+				dataDir: dirname(paths.database),
+				piHome,
+				daemonServiceInstaller,
+				moduleFreshness: () => checkModuleFreshnessAll(moduleSnapshot),
+			}),
 		onShutdown: () => database.close(),
 	};
 }

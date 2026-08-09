@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthenticatedRpcClient } from "@danypops/vehicle-client/rpc-client";
-import { runDoctor } from "../src/adoption/doctor.ts";
+import { formatDoctorReport, runDoctor } from "../src/adoption/doctor.ts";
 import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/daemon/service.ts";
 import type { Installer, PkgInfo, Registry, SearchPage } from "../src/packages/package.ts";
 
@@ -235,5 +235,108 @@ describeIfSandboxed("doctor.run (daemon RPC wiring)", () => {
 		expect(result).toEqual(await runDoctor(home));
 		expect(result.ok).toBe(false);
 		expect(result.conflicts).toHaveLength(1);
+	});
+});
+
+describe("doctor.run — module freshness (a long-running daemon process's own stale in-memory dependency, see module-freshness.ts)", () => {
+	it("merges in moduleFreshness and flips ok:false when the injected checker reports a stale dependency", async () => {
+		const home = piHome([]);
+		const app = createApp({
+			reg: new NoopRegistry(),
+			inst: new NoopInstaller(),
+			token: "test-token",
+			stateDir: track(mkdtempSync(join(tmpdir(), "packed-doctor-state-"))),
+			dataDir: track(mkdtempSync(join(tmpdir(), "packed-doctor-data-"))),
+			piHome: home,
+			moduleFreshness: () => [
+				{ name: "stale-dep", loadedVersion: "1.0.0", currentVersion: "2.0.0", stale: true },
+				{ name: "fresh-dep", loadedVersion: "1.0.0", currentVersion: "1.0.0", stale: false },
+			],
+		});
+		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", {
+			label: "Packed",
+			transport: (request) => app.fetch(request),
+		});
+
+		const result = await client.call("doctor.run", {});
+
+		expect(result.moduleFreshness).toEqual([
+			{ name: "stale-dep", loadedVersion: "1.0.0", currentVersion: "2.0.0", stale: true },
+			{ name: "fresh-dep", loadedVersion: "1.0.0", currentVersion: "1.0.0", stale: false },
+		]);
+		// The base doctor report (no extensions installed) would otherwise be ok:true.
+		expect(result.ok).toBe(false);
+	});
+
+	it("stays ok:true and reports no stale entries when the injected checker finds nothing stale", async () => {
+		const home = piHome([]);
+		const app = createApp({
+			reg: new NoopRegistry(),
+			inst: new NoopInstaller(),
+			token: "test-token",
+			stateDir: track(mkdtempSync(join(tmpdir(), "packed-doctor-state-"))),
+			dataDir: track(mkdtempSync(join(tmpdir(), "packed-doctor-data-"))),
+			piHome: home,
+			moduleFreshness: () => [{ name: "fresh-dep", loadedVersion: "1.0.0", currentVersion: "1.0.0", stale: false }],
+		});
+		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", {
+			label: "Packed",
+			transport: (request) => app.fetch(request),
+		});
+
+		const result = await client.call("doctor.run", {});
+
+		expect(result.moduleFreshness).toEqual([{ name: "fresh-dep", loadedVersion: "1.0.0", currentVersion: "1.0.0", stale: false }]);
+		expect(result.ok).toBe(true);
+	});
+
+	it("omits moduleFreshness entirely when nothing injects it -- a standalone runDoctor() call has no snapshot to compare against", async () => {
+		const home = piHome([]);
+		const app = createApp({
+			reg: new NoopRegistry(),
+			inst: new NoopInstaller(),
+			token: "test-token",
+			stateDir: track(mkdtempSync(join(tmpdir(), "packed-doctor-state-"))),
+			dataDir: track(mkdtempSync(join(tmpdir(), "packed-doctor-data-"))),
+			piHome: home,
+		});
+		const client = new AuthenticatedRpcClient<OperationName, OperationInputs, OperationOutputs>("http://packed.test", "test-token", {
+			label: "Packed",
+			transport: (request) => app.fetch(request),
+		});
+
+		const result = await client.call("doctor.run", {});
+
+		expect(result.moduleFreshness).toBeUndefined();
+		expect(result.ok).toBe(true);
+	});
+});
+
+describe("formatDoctorReport — module freshness rendering", () => {
+	const base = { ok: true, conflicts: [], extensions: [], scanned: 0, truncated: false, serviceUnits: [] };
+
+	it("prints a STALE_MODULE_CACHE line with an actionable restart hint for each stale entry, and nothing for a fresh one", () => {
+		const text = formatDoctorReport(
+			{
+				...base,
+				ok: false,
+				moduleFreshness: [
+					{ name: "stale-dep", loadedVersion: "1.0.0", currentVersion: "2.0.0", stale: true },
+					{ name: "fresh-dep", loadedVersion: "1.0.0", currentVersion: "1.0.0", stale: false },
+				],
+			},
+			false,
+		);
+
+		expect(text).toContain("STALE_MODULE_CACHE stale-dep");
+		expect(text).toContain("loaded 1.0.0 at startup");
+		expect(text).toContain("2.0.0 is now on disk");
+		expect(text).toContain("systemctl --user restart pi-packed.service");
+		expect(text).not.toContain("fresh-dep");
+	});
+
+	it("prints nothing extra when moduleFreshness is absent or empty", () => {
+		expect(formatDoctorReport(base, false)).not.toContain("STALE_MODULE_CACHE");
+		expect(formatDoctorReport({ ...base, moduleFreshness: [] }, false)).not.toContain("STALE_MODULE_CACHE");
 	});
 });

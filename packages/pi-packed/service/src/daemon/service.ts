@@ -13,6 +13,7 @@ import { registerPackedVehicleOperations } from "./vehicle-registration.ts";
 import { type AdvisoryReport, resolveInstalledVersions, scanInstalledPackages } from "../adoption/advisories.ts";
 import { type CheckReport, type PackageChecker, StaticPackageChecker } from "../adoption/check.ts";
 import { type DoctorReport, runDoctor } from "../adoption/doctor.ts";
+import type { ModuleFreshnessDiagnostic } from "../adoption/module-freshness.ts";
 import { NpmPackVerifier, type PackReport } from "../adoption/pack.ts";
 import { type AdoptionReport, scoreTarget } from "../adoption/score.ts";
 import { buildIndex, indexPath, type PackageIndex, readIndex, writeIndex } from "../index/build-index.ts";
@@ -68,6 +69,15 @@ export interface Deps {
 		apply(manifestPath: string, options?: { prune?: boolean }): Promise<SetupApplyResult>;
 	};
 	daemonServiceInstaller?: DaemonServiceInstaller;
+	/**
+	 * Re-checks this exact running process's own captured startup snapshot
+	 * of its runtime dependencies against their current on-disk state --
+	 * see module-freshness.ts. Sync (a handful of small file stats/reads),
+	 * injected by daemon.ts once at process start; undefined for any Deps
+	 * built without a real running process behind it (a standalone `packed
+	 * doctor` never has a snapshot to compare against at all).
+	 */
+	moduleFreshness?: () => ModuleFreshnessDiagnostic[];
 	piVersion?: { check(options?: { timeoutMs?: number }): Promise<PiVersionReport> };
 	advisories?: { scan(installed: Record<string, string>): Promise<AdvisoryReport> };
 }
@@ -598,7 +608,11 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			const value = input as OperationInputs["doctor.run"];
 			if (value.projectRoot !== undefined && (typeof value.projectRoot !== "string" || value.projectRoot.length > 4_096))
 				throw new PackageOperationError("projectRoot must be a string up to 4096 characters", 400);
-			return (await runDoctor(deps.piHome ?? defaultPiHome(), value.projectRoot)) as OperationOutputs[Name];
+			const report = await runDoctor(deps.piHome ?? defaultPiHome(), value.projectRoot);
+			const moduleFreshness = deps.moduleFreshness?.();
+			if (moduleFreshness === undefined) return report as OperationOutputs[Name];
+			const anyStale = moduleFreshness.some((diagnostic) => diagnostic.stale);
+			return { ...report, moduleFreshness, ok: report.ok && !anyStale } as OperationOutputs[Name];
 		}
 		if (op === "package.updates.project") {
 			const value = input as OperationInputs["package.updates.project"];

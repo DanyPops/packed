@@ -10,6 +10,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { createNodeServiceInstallDeps } from "@danypops/vehicle-server/service";
 import { listPackageResources, type PackageResources, resolveInstalledDir } from "../packages/resources.ts";
+import type { ModuleFreshnessDiagnostic } from "./module-freshness.ts";
 import { checkServiceUnitPaths, type ServiceUnitDiagnostic } from "./service-doctor.ts";
 import { runExtensionSmoke, type SmokeOptions, type SmokeRegistrations } from "./smoke.ts";
 
@@ -55,6 +56,16 @@ export interface DoctorReport {
 	truncated: boolean;
 	/** A daemon-backed package's systemd --user unit referencing a path that no longer exists on disk -- see service-doctor.ts. Empty (not omitted) on a platform without systemd --user coverage. */
 	serviceUnits: ServiceUnitDiagnostic[];
+	/**
+	 * Whether THIS running process still holds a stale in-memory copy of one
+	 * of its own runtime dependencies, loaded once at startup -- see
+	 * module-freshness.ts. Only meaningful for a long-running daemon process
+	 * (the one thing that can actually go stale); omitted entirely for a
+	 * standalone `packed doctor` invocation (a fresh CLI process has nothing
+	 * of its own to compare against). Populated by the daemon's own
+	 * doctor.run route, never by runDoctor() itself.
+	 */
+	moduleFreshness?: ModuleFreshnessDiagnostic[];
 }
 
 interface ScanJob {
@@ -149,6 +160,10 @@ export function formatDoctorReport(report: DoctorReport, json: boolean): string 
 	}
 	for (const diagnostic of report.serviceUnits) {
 		out += `\n${diagnostic.severity.toUpperCase()} ${diagnostic.code} ${diagnostic.package} (${diagnostic.unitName}.service): ${diagnostic.message}\n`;
+	}
+	for (const module of report.moduleFreshness ?? []) {
+		if (!module.stale) continue;
+		out += `\nSTALE_MODULE_CACHE ${module.name}: the daemon loaded ${module.loadedVersion ?? "an unknown version"} at startup, but ${module.currentVersion ?? "a different version"} is now on disk -- restart the daemon (systemctl --user restart pi-packed.service) to pick it up.\n`;
 	}
 	if (report.truncated) out += "\nOutput truncated: more enabled extensions exist than this run's bound.\n";
 	return out;

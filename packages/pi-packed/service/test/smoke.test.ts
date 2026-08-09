@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkPackage } from "../src/adoption/check.ts";
-import { runExtensionSmoke } from "../src/adoption/smoke.ts";
+import { resolveDependencyModulesDir, runExtensionSmoke } from "../src/adoption/smoke.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -46,6 +46,53 @@ function extension(source: string): { root: string; path: string } {
 	);
 	return { root, path };
 }
+
+/** A minimal fake dependency package.json -- no "exports" map, so a bare
+ * `require.resolve("<name>/package.json")` subpath is allowed by Node's
+ * default (no-exports-map) resolution rules without needing to replicate
+ * the real jiti package's own exports field. */
+function writeFakeDependency(nodeModulesDir: string, name: string): void {
+	const dir = join(nodeModulesDir, name);
+	mkdirSync(dir, { recursive: true });
+	writeFileSync(join(dir, "package.json"), JSON.stringify({ name, version: "0.0.0-fixture" }));
+}
+
+describe("resolveDependencyModulesDir (packed doctor's real-layout dependency resolution)", () => {
+	it("resolves a dependency nested directly under the package's own node_modules", () => {
+		const root = mkdtempSync(join(tmpdir(), "packed-resolve-nested-"));
+		roots.push(root);
+		writeFileSync(join(root, "package.json"), JSON.stringify({ name: "pkg", version: "1.0.0" }));
+		writeFakeDependency(join(root, "node_modules"), "fake-loader");
+
+		const resolved = resolveDependencyModulesDir(root, "fake-loader");
+
+		expect(resolved).toBe(realpathSync(join(root, "node_modules", "fake-loader")));
+	});
+
+	it("resolves a dependency hoisted to a shared ancestor node_modules -- confirmed live bug: packed doctor --json crashed assuming a fixed nested-only path", () => {
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "packed-resolve-hoisted-"));
+		roots.push(workspaceRoot);
+		const packageDir = join(workspaceRoot, "node_modules", "@danypops", "pi-packed");
+		mkdirSync(packageDir, { recursive: true });
+		writeFileSync(join(packageDir, "package.json"), JSON.stringify({ name: "@danypops/pi-packed", version: "1.0.0" }));
+		// The dependency sits in the WORKSPACE's node_modules, never nested
+		// under the package's own -- exactly what npm's hoisting produces
+		// when another package in the tree also depends on it.
+		writeFakeDependency(join(workspaceRoot, "node_modules"), "fake-loader");
+
+		const resolved = resolveDependencyModulesDir(packageDir, "fake-loader");
+
+		expect(resolved).toBe(realpathSync(join(workspaceRoot, "node_modules", "fake-loader")));
+	});
+
+	it("returns undefined (never throws) when the dependency is genuinely unresolvable from here", () => {
+		const root = mkdtempSync(join(tmpdir(), "packed-resolve-missing-"));
+		roots.push(root);
+		writeFileSync(join(root, "package.json"), JSON.stringify({ name: "pkg", version: "1.0.0" }));
+
+		expect(resolveDependencyModulesDir(root, "does-not-exist-anywhere")).toBeUndefined();
+	});
+});
 
 describeIfSandboxed("isolated extension smoke runner", () => {
 	it("captures bounded registrations without a model", async () => {

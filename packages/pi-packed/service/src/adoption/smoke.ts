@@ -1,4 +1,5 @@
 import { existsSync, realpathSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -53,13 +54,36 @@ function addReadOnlyBind(args: string[], path: string): void {
 	if (existsSync(path)) args.push("--ro-bind", path, path);
 }
 
+/**
+ * Resolves an installed dependency's real on-disk package directory via
+ * Node's own module-resolution algorithm (require.resolve against its
+ * package.json), starting from `fromDir` -- correct regardless of whether
+ * the package manager nested it under fromDir's own node_modules or
+ * hoisted it to a shared ancestor node_modules (npm's own hoisting
+ * decision, driven by what else in the tree also depends on it).
+ * Confirmed live: `packed doctor --json` crashed hard reconstructing a
+ * fixed nested-only path (`<packageDirectory>/node_modules/jiti`) that
+ * doesn't exist once jiti is hoisted to Pi's own npm prefix instead of
+ * pi-packed's own node_modules. Never executes the resolved module --
+ * require.resolve only locates a path, it never runs anything. undefined
+ * (not a throw) when genuinely unresolvable from here.
+ */
+export function resolveDependencyModulesDir(fromDir: string, name: string): string | undefined {
+	try {
+		const req = createRequire(join(fromDir, "package.json"));
+		return realpathSync(dirname(req.resolve(`${name}/package.json`)));
+	} catch {
+		return undefined;
+	}
+}
+
 function sandboxCommand(packageRoot: string, extensionPath: string, maxProcesses: number): string[] | undefined {
 	if (process.platform !== "linux" || !existsSync("/usr/bin/bwrap") || !existsSync("/usr/bin/prlimit")) return undefined;
 	const serviceRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 	const packageDirectory = dirname(serviceRoot);
 	const childHarness = join(serviceRoot, "src/adoption/smoke-child.ts");
-	const runnerModules = join(packageDirectory, "node_modules");
-	const jitiModules = realpathSync(join(runnerModules, "jiti"));
+	const jitiModules = resolveDependencyModulesDir(packageDirectory, "jiti");
+	if (!jitiModules) return undefined;
 	const bun = realpathSync(process.execPath);
 	const relativeExtension = relative(packageRoot, extensionPath).split(sep).join("/");
 	const args = [

@@ -2,10 +2,20 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { CardTheme, DialogTheme, MenuTheme, TabBarTheme } from "malevich-tui-components";
 
 /** Maps Pi's own Theme onto Malevich's Menu -- the one place this mapping
- * exists, shared by every ctx.ui.custom overlay menu in this extension. */
-export function cardTheme(theme: Theme): CardTheme {
+ * exists, shared by every ctx.ui.custom overlay menu in this extension.
+ *
+ * `updateAvailable` gives an unselected Card's *frame only* a distinct
+ * `warning` color -- the same semantic color already used for a row's own
+ * `↑<latest>` status text -- so a package with an update sitting available
+ * stands out in the grid without scanning every card's body text. Body
+ * content is left untouched (`content` stays a passthrough) so the
+ * already-styled status/version spans inside render exactly as before.
+ * Selected state still wins outright (accent, unchanged) so focus stays
+ * visually distinct from the update highlight -- only the unselected
+ * border picks up the warning treatment. */
+export function cardTheme(theme: Theme, options?: { updateAvailable?: boolean }): CardTheme {
 	return {
-		border: (s) => theme.fg("border", s),
+		border: options?.updateAvailable ? (s) => theme.fg("warning", s) : (s) => theme.fg("border", s),
 		selectedBorder: (s) => theme.fg("accent", s),
 		content: (s) => s,
 		selectedContent: (s) => theme.fg("accent", s),

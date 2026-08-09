@@ -610,18 +610,22 @@ export class PackagesTab implements Component {
 				// the next row's "start" event moves updatingRowName off it.
 				const rowSettled = this.settled.get(row.name);
 				const isUpdating = !rowSettled && this.updatingRowName === row.name;
+				// Same idle+hasUpdate condition the status text below already
+				// gates on -- an updating or just-settled row shows its own
+				// transient outcome instead, so the frame doesn't also flag it.
+				const updateAvailable = !isUpdating && !rowSettled && row.hasUpdate;
 				const status = isUpdating
 					? theme.fg("accent", `${this.spinner.glyph()} updating…`)
 					: rowSettled
 						? theme.fg(rowSettled.ok ? "success" : "error", `${rowSettled.ok ? "✓" : "✗"}${rowSettled.tail ? ` ${rowSettled.tail}` : ""}`)
-						: row.hasUpdate
+						: updateAvailable
 							? theme.fg("warning", `↑${row.latest}`)
 							: theme.fg("muted", "installed");
 				const card = new Card({
 					title: theme.bold(row.name),
 					content: [`${theme.fg("dim", row.version)} · ${status}`],
 					selected,
-					theme: cardTheme(theme),
+					theme: cardTheme(theme, { updateAvailable }),
 					measure: this.measure,
 				});
 				return card.render(columnWidth);

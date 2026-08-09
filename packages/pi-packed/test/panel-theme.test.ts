@@ -39,6 +39,7 @@ async function renderPanel(
 	activeTab: PackedTabKey,
 	installed: Array<{ name: string; installed: string }> = [],
 	width = WIDTH,
+	updates: Array<{ name: string; installed: string; latest: string }> = [],
 ): Promise<string[]> {
 	let frame: string[] = [];
 	const ctx = {
@@ -63,7 +64,7 @@ async function renderPanel(
 			return installed;
 		},
 		async updates() {
-			return [];
+			return updates;
 		},
 		async security() {
 			return { mutationApproval: "always" as const };
@@ -123,6 +124,42 @@ describe("/packed panel theme rendering through a real VT parser", () => {
 			expect(terminal.cellAt(topRow, right)?.fgPaletteIndex).toBe(6);
 			expect(terminal.cellAt(topRow + 1, left + 1)?.fgPaletteIndex).toBe(6);
 			expect(terminal.cellAt(topRow + 1, left + 1)?.inverse).toBe(false);
+		} finally {
+			terminal.dispose();
+		}
+	});
+
+	it("gives an outdated, unselected Card's frame a warning color distinct from both the default border and the focus/accent highlight", async () => {
+		// mergeRows sorts alphabetically, so "aaa-current" lands at index 0
+		// (selected by default) and "zzz-outdated" at index 1 (unselected) --
+		// two columns fit side by side at WIDTH=80 (MIN_CARD_WIDTH=28), so
+		// both cards' top borders land on the same rendered line.
+		const frame = await renderPanel(
+			"dark",
+			"packages",
+			[
+				{ name: "aaa-current", installed: "1.0.0" },
+				{ name: "zzz-outdated", installed: "1.0.0" },
+			],
+			WIDTH,
+			[{ name: "zzz-outdated", installed: "1.0.0", latest: "2.0.0" }],
+		);
+		const terminal = await renderToTerminal(frame, { cols: WIDTH, rows: frame.length });
+		try {
+			const lines = terminal.plainLines();
+			const topRow = lines.findIndex((line) => line.includes("┌") && line.includes("┐"));
+			const topLine = lines[topRow]!;
+			const firstOpen = topLine.indexOf("┌");
+			const firstClose = topLine.indexOf("┐", firstOpen);
+			const secondOpen = topLine.indexOf("┌", firstClose);
+			expect(secondOpen).toBeGreaterThan(-1);
+			// Selected card (aaa-current, no update): unchanged accent frame.
+			expect(terminal.cellAt(topRow, firstOpen)?.fgPaletteIndex).toBe(6); // accent
+			// Unselected card with an update available (zzz-outdated): warning
+			// frame, distinct from both the default border color and accent.
+			expect(terminal.cellAt(topRow, secondOpen)?.fgPaletteIndex).toBe(3); // warning
+			expect(terminal.cellAt(topRow, secondOpen)?.fgPaletteIndex).not.toBe(6); // not accent
+			expect(terminal.cellAt(topRow, secondOpen)?.fgPaletteIndex).not.toBe(4); // not plain border
 		} finally {
 			terminal.dispose();
 		}

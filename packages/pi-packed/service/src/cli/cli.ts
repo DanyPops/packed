@@ -13,6 +13,7 @@ import { checkUpdates } from "../daemon/watcher.ts";
 import { generateIndex, indexPath, readIndex } from "../index/build-index.ts";
 import { syncCatalog } from "../packages/catalog.ts";
 import { catalogList, dbPath, getSyncMeta, latestVersion, openDb, searchLocal } from "../packages/db.ts";
+import { formatDeployVerification, verifyDeploy } from "../packages/deploy-verify.ts";
 import { defaultPiBin, NAME_RE } from "../packages/install.ts";
 import { npmPackageName, readInstalledPackages, readInstalledPackagesAcrossScopes } from "../packages/installed.ts";
 import type { Installer, Pkg, Registry, UpdateEntry } from "../packages/package.ts";
@@ -93,6 +94,7 @@ usage:
   packed index status [--json]                 report the local static index's generatedAt and package count
   packed check [path] [--smoke] [--json]       diagnose a Pi package; smoke is isolated and opt-in
   packed doctor [--project <path>] [--json]    smoke-test every enabled extension (global + project scope) and report tool/command/shortcut/flag name collisions before pi has to
+  packed verify-deploy <name> [--version <v>] [--json] diff a package's on-disk version across every known install location plus stale node_modules shadow copies
   packed pack [path] [--json]                  verify exact npm tarball contents without lifecycle scripts
   packed score [path|name] [--json]            report adoption-readiness evidence by dimension
   packed publish setup [path] [--force] [--json] generate an OIDC staged-publish workflow
@@ -169,6 +171,7 @@ interface Flags {
 	ecosystem: boolean;
 	self: boolean;
 	project?: string;
+	version?: string;
 }
 
 function parseFlags(rest: string[]): { flags: Flags; pos: string[] } {
@@ -202,6 +205,8 @@ function parseFlags(rest: string[]): { flags: Flags; pos: string[] } {
 		else if (a.startsWith("--limit=")) flags.limit = Number(a.slice(8)) || SEARCH_DEFAULT_LIMIT;
 		else if (a === "--project" && i + 1 < rest.length) flags.project = rest[++i];
 		else if (a.startsWith("--project=")) flags.project = a.slice(10);
+		else if (a === "--version" && i + 1 < rest.length) flags.version = rest[++i];
+		else if (a.startsWith("--version=")) flags.version = a.slice(10);
 		else pos.push(a);
 	}
 	return { flags, pos };
@@ -354,6 +359,17 @@ const commands: Record<string, { usage: string; run: Command }> = {
 		async run(_rest, d, flags) {
 			const report = d.daemon ? await d.daemon.doctor(flags.project) : await runDoctor(d.piHome, flags.project);
 			const output = formatDoctorReport(report, flags.json);
+			return report.ok ? ok(output) : fail(output);
+		},
+	},
+
+	"verify-deploy": {
+		usage: "packed verify-deploy <name> [--version <v>] [--json]  (diff a package's on-disk version across every known install location plus stale node_modules shadow copies)",
+		async run(_rest, d, flags, pos) {
+			const name = pos[0] ?? "";
+			if (!NAME_RE.test(name)) return usageErr(`usage: ${commands["verify-deploy"]!.usage}\n`);
+			const report = verifyDeploy(d.piHome, name, flags.version);
+			const output = formatDeployVerification(report, flags.json);
 			return report.ok ? ok(output) : fail(output);
 		},
 	},

@@ -947,6 +947,32 @@ describe("CLI", () => {
 		]);
 	});
 
+	it("verify-deploy runs standalone without a daemon, reporting stale/missing/shadow locations for a real on-disk layout", async () => {
+		const piHome = track(mkdtempSync(join(tmpdir(), "packed-verify-deploy-cli-")));
+		const pkgDir = join(piHome, "npm", "node_modules", "@scope", "pkg");
+		mkdirSync(pkgDir, { recursive: true });
+		writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ name: "@scope/pkg", version: "1.2.3" }));
+		const d = deps({ piHome });
+
+		const jsonResult = await cliRun(["verify-deploy", "@scope/pkg", "--json"], d);
+		expect(jsonResult.code).toBe(0);
+		const parsed = JSON.parse(jsonResult.out);
+		expect(parsed.ok).toBe(true);
+		expect(parsed.packageName).toBe("@scope/pkg");
+		expect(parsed.expectedVersion).toBe("1.2.3");
+
+		const human = await cliRun(["verify-deploy", "@scope/pkg"], d);
+		expect(human.out).toContain("PASS");
+		expect(human.code).toBe(0);
+
+		const stale = await cliRun(["verify-deploy", "@scope/pkg", "--version", "9.9.9"], d);
+		expect(stale.code).toBe(1);
+		expect(stale.out).toContain("FAIL");
+		expect(stale.out).toContain("STALE (1.2.3)");
+
+		expect((await cliRun(["verify-deploy", "not a valid name!"], d)).code).toBe(2);
+	});
+
 	it("advisories runs standalone without a daemon and degrades to zero findings, never a real network call, when nothing is installed", async () => {
 		const d = deps({ piHome: track(mkdtempSync(join(tmpdir(), "packed-advisories-cli-"))) });
 		const result = await cliRun(["advisories", "--json"], d);

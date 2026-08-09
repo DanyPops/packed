@@ -51,7 +51,7 @@ export interface PackageDaemonPort {
 	restartService(source: string, approved?: boolean): Promise<{ output: string; restarted?: boolean; spec?: ServiceSummary }>;
 	reconcileServices(approved?: boolean, projectRoot?: string): Promise<OperationOutputs["package.reconcile_services"]>;
 	remove(name: string, approved?: boolean): Promise<string>;
-	update(source: string, approved?: boolean): Promise<UpdateOutcome>;
+	update(source: string, approved?: boolean, target?: string): Promise<UpdateOutcome>;
 	piStatus(): Promise<PiVersionReport>;
 	resourcesList(projectRoot?: string): Promise<{ global: PackageResources[]; project: PackageResources[] }>;
 	resourcesToggle(
@@ -265,8 +265,8 @@ export class PackageDaemonClient implements PackageDaemonPort {
 		return result.output;
 	}
 
-	async update(source: string, approved = false): Promise<UpdateOutcome> {
-		const result = await this.call("package.update", { source, approved });
+	async update(source: string, approved = false, target?: string): Promise<UpdateOutcome> {
+		const result = await this.call("package.update", { source, approved, target });
 		if (!result.ok) throw new PackageDaemonError(result.output || `failed to update ${source}`, "package.update");
 		return {
 			output: result.output,
@@ -276,6 +276,11 @@ export class PackageDaemonClient implements PackageDaemonPort {
 			previousVersion: result.previousVersion,
 			currentVersion: result.currentVersion,
 			outOfRangeUpdateAvailable: result.outOfRangeUpdateAvailable,
+			pinnedSourceRequiresTarget: result.pinnedSourceRequiresTarget,
+			replaced: result.replaced,
+			before: result.before,
+			after: result.after,
+			rollback: result.rollback,
 		};
 	}
 }
@@ -290,8 +295,8 @@ export class PackageDaemonInstaller implements Installer {
 			throw new PackageDaemonError("daemon package removal requires an npm: source", "package.remove");
 		return this.client.remove(source.slice(4), options?.approved);
 	}
-	update(source: string, options?: { approved?: boolean; local?: boolean }): Promise<UpdateOutcome> {
-		return this.client.update(source, options?.approved);
+	update(source: string, options?: { approved?: boolean; local?: boolean; target?: string }): Promise<UpdateOutcome> {
+		return this.client.update(source, options?.approved, options?.target);
 	}
 }
 
@@ -313,8 +318,8 @@ export class DaemonBackedInstaller implements Installer {
 	async remove(source: string, options?: { approved?: boolean }): Promise<string> {
 		return new PackageDaemonInstaller(await connectPackageDaemon(this.paths)).remove(source, options);
 	}
-	async update(source: string, options?: { approved?: boolean }): Promise<UpdateOutcome> {
-		return (await connectPackageDaemon(this.paths)).update(source, options?.approved);
+	async update(source: string, options?: { approved?: boolean; target?: string }): Promise<UpdateOutcome> {
+		return (await connectPackageDaemon(this.paths)).update(source, options?.approved, options?.target);
 	}
 }
 

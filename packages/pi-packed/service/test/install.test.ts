@@ -217,6 +217,177 @@ describe("ExecInstaller.update() — out-of-range update detection (confirmed li
 	});
 });
 
+/**
+ * A real, general-purpose fake `pi` binary for replace() tests -- unlike
+ * writeFakePi/writeFakeNpm above (each tailored to one specific pre-baked
+ * rewrite), this one genuinely implements `install <source>`/`remove
+ * <source>` against a real piHome: writes/removes the real
+ * node_modules/<name>/package.json entry AND the real settings.json
+ * packages[] entry, exactly like the two-step remove+install sequence
+ * replace() actually drives. A plain bun script (not bash) so exact-pin
+ * name/version parsing (scoped packages, the LAST "@" only) is real JS,
+ * not fragile shell string splitting.
+ */
+function writeFakeReplacePi(dir: string, piHome: string, options: { failInstallFor?: string } = {}): string {
+	const script = join(dir, "fake-replace-pi");
+	const body = `
+const piHome = ${JSON.stringify(piHome)};
+const failInstallFor = ${JSON.stringify(options.failInstallFor ?? null)};
+const fs = require("node:fs");
+const path = require("node:path");
+
+function bareName(source) {
+	const spec = source.startsWith("npm:") ? source.slice(4) : source;
+	const at = spec.lastIndexOf("@");
+	return at > 0 ? spec.slice(0, at) : spec;
+}
+function versionOf(source) {
+	const spec = source.startsWith("npm:") ? source.slice(4) : source;
+	const at = spec.lastIndexOf("@");
+	return at > 0 ? spec.slice(at + 1) : undefined;
+}
+function readSettings() {
+	try {
+		return JSON.parse(fs.readFileSync(path.join(piHome, "settings.json"), "utf8"));
+	} catch {
+		return { packages: [] };
+	}
+}
+function writeSettings(settings) {
+	fs.writeFileSync(path.join(piHome, "settings.json"), JSON.stringify(settings, null, 2));
+}
+function entrySource(entry) {
+	return typeof entry === "string" ? entry : entry && typeof entry === "object" ? entry.source : undefined;
+}
+
+const [cmd, ...rest] = process.argv.slice(2);
+const args = rest.filter((a) => a !== "-l");
+const source = args[args.length - 1];
+const name = bareName(source);
+
+if (cmd === "install") {
+	if (failInstallFor && source === failInstallFor) {
+		process.stderr.write("simulated install failure for " + source + "\\n");
+		process.exit(1);
+	}
+	const version = versionOf(source) ?? "0.0.0";
+	const pkgDir = path.join(piHome, "npm", "node_modules", name);
+	fs.mkdirSync(pkgDir, { recursive: true });
+	fs.writeFileSync(path.join(pkgDir, "package.json"), JSON.stringify({ name, version }));
+	const settings = readSettings();
+	const packages = (settings.packages ?? []).filter((e) => bareName(entrySource(e) ?? "") !== name);
+	packages.push(source);
+	writeSettings({ ...settings, packages });
+	process.stdout.write("Installed " + source + "\\n");
+	process.exit(0);
+}
+if (cmd === "remove") {
+	const pkgDir = path.join(piHome, "npm", "node_modules", name);
+	fs.rmSync(pkgDir, { recursive: true, force: true });
+	const settings = readSettings();
+	const packages = (settings.packages ?? []).filter((e) => bareName(entrySource(e) ?? "") !== name);
+	writeSettings({ ...settings, packages });
+	process.stdout.write("Removed " + source + "\\n");
+	process.exit(0);
+}
+process.stderr.write("unsupported command: " + cmd + "\\n");
+process.exit(1);
+`;
+	writeFileSync(script, `#!/usr/bin/env bun\n${body}`);
+	chmodSync(script, 0o755);
+	return script;
+}
+
+describe("ExecInstaller.update({ target }) — the supervised replace() workflow for moving an exact pin", () => {
+	function setup(options: { failInstallFor?: string } = {}) {
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-replace-bin-")));
+		const piHome = writePiHome();
+		mkdirSync(piHome, { recursive: true });
+		writeFileSync(join(piHome, "settings.json"), JSON.stringify({ packages: [] }));
+		const bin = writeFakeReplacePi(scriptDir, piHome, options);
+		const npmBin = writeFakeNpm(scriptDir, join(scriptDir, "npm.log"));
+		const validator = { validate: async (source: string) => ({ ok: true as const, source, extensions: [] }) };
+		const installer = new ExecInstaller(bin, piHome, validator, npmBin);
+		return { piHome, installer };
+	}
+
+	function configurePinned(piHome: string, entry: unknown): void {
+		writeFileSync(join(piHome, "settings.json"), JSON.stringify({ packages: [entry] }));
+	}
+
+	it("replaces an exact pin end to end: removes the old entry, installs the new one, verifies both postconditions", async () => {
+		const { piHome, installer } = setup();
+		configurePinned(piHome, "npm:@scope/pkg@1.0.0");
+		mkdirSync(join(piHome, "npm", "node_modules", "@scope", "pkg"), { recursive: true });
+		writeFileSync(join(piHome, "npm", "node_modules", "@scope", "pkg", "package.json"), JSON.stringify({ version: "1.0.0" }));
+
+		const outcome = await installer.update("npm:@scope/pkg@1.0.0", { target: "npm:@scope/pkg@2.0.0" });
+
+		expect(outcome.replaced).toBe(true);
+		expect(outcome.before).toEqual({ source: "npm:@scope/pkg@1.0.0", version: "1.0.0" });
+		expect(outcome.after).toEqual({ source: "npm:@scope/pkg@2.0.0", version: "2.0.0" });
+		expect(outcome.reloadRequired).toBe(true);
+		expect(outcome.alreadyUpToDate).toBe(false);
+		expect(outcome.currentVersion).toBe("2.0.0");
+		const settings = JSON.parse(readFileSync(join(piHome, "settings.json"), "utf8"));
+		expect(settings.packages).toEqual(["npm:@scope/pkg@2.0.0"]);
+	});
+
+	it("rejects a target that names a different package, before mutating anything", async () => {
+		const { piHome, installer } = setup();
+		configurePinned(piHome, "npm:@scope/pkg@1.0.0");
+
+		await expect(installer.update("npm:@scope/pkg@1.0.0", { target: "npm:@scope/other@1.0.0" })).rejects.toThrow(
+			/same package/,
+		);
+		const settings = JSON.parse(readFileSync(join(piHome, "settings.json"), "utf8"));
+		expect(settings.packages).toEqual(["npm:@scope/pkg@1.0.0"]);
+	});
+
+	it("rolls back to the original pin when installing the new target fails", async () => {
+		const { piHome, installer } = setup({ failInstallFor: "npm:@scope/pkg@2.0.0" });
+		configurePinned(piHome, "npm:@scope/pkg@1.0.0");
+		mkdirSync(join(piHome, "npm", "node_modules", "@scope", "pkg"), { recursive: true });
+		writeFileSync(join(piHome, "npm", "node_modules", "@scope", "pkg", "package.json"), JSON.stringify({ version: "1.0.0" }));
+
+		await expect(installer.update("npm:@scope/pkg@1.0.0", { target: "npm:@scope/pkg@2.0.0" })).rejects.toThrow(
+			/rolled back to npm:@scope\/pkg@1\.0\.0/,
+		);
+		const settings = JSON.parse(readFileSync(join(piHome, "settings.json"), "utf8"));
+		expect(settings.packages).toEqual(["npm:@scope/pkg@1.0.0"]);
+		expect(JSON.parse(readFileSync(join(piHome, "npm", "node_modules", "@scope", "pkg", "package.json"), "utf8")).version).toBe("1.0.0");
+	});
+
+	it("preserves the old entry's own filter overrides onto the freshly-installed replacement entry", async () => {
+		const { piHome, installer } = setup();
+		configurePinned(piHome, { source: "npm:@scope/pkg@1.0.0", extensions: ["-extensions/one.ts"] });
+		mkdirSync(join(piHome, "npm", "node_modules", "@scope", "pkg"), { recursive: true });
+		writeFileSync(join(piHome, "npm", "node_modules", "@scope", "pkg", "package.json"), JSON.stringify({ version: "1.0.0" }));
+
+		await installer.update("npm:@scope/pkg@1.0.0", { target: "npm:@scope/pkg@2.0.0" });
+
+		const settings = JSON.parse(readFileSync(join(piHome, "settings.json"), "utf8"));
+		expect(settings.packages).toEqual([{ source: "npm:@scope/pkg@2.0.0", extensions: ["-extensions/one.ts"] }]);
+	});
+
+	it("reports pinnedSourceRequiresTarget on a plain update() call against an unchanged exact pin, with no target given", async () => {
+		// This scenario needs the ORIGINAL "always prints Updated, changes
+		// nothing for a pin" fake pi -- writeFakeReplacePi only implements
+		// install/remove, not update --extension.
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-replace-bin-")));
+		const piHome = writePiHome({ "@scope/pkg": "1.0.0" });
+		const bin = writeFakePi(scriptDir);
+		const npmBin = writeFakeNpm(scriptDir, join(scriptDir, "npm.log"));
+		const plainInstaller = new ExecInstaller(bin, piHome, undefined, npmBin);
+
+		const outcome = await plainInstaller.update("npm:@scope/pkg@1.0.0");
+
+		expect(outcome.pinned).toBe(true);
+		expect(outcome.alreadyUpToDate).toBe(true);
+		expect(outcome.pinnedSourceRequiresTarget).toBe(true);
+	});
+});
+
 describe("ExecInstaller — forces full dependency re-resolution, not just the target's own subtree", () => {
 	it("update() fixes a stale root-level sibling that the targeted pi update never touched", async () => {
 		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-bin-")));

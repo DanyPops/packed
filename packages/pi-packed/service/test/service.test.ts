@@ -52,8 +52,10 @@ class FakeInstaller implements Installer {
 		return this.output;
 	}
 	updateOutcome: Partial<UpdateOutcome> = {};
-	async update(source: string): Promise<UpdateOutcome> {
+	gotTarget: string | undefined;
+	async update(source: string, options?: { target?: string }): Promise<UpdateOutcome> {
 		this.updated = source;
+		this.gotTarget = options?.target;
 		return { output: this.output, reloadRequired: true, alreadyUpToDate: false, pinned: false, ...this.updateOutcome };
 	}
 }
@@ -536,6 +538,71 @@ describe("service app", () => {
 			pinned: true,
 			previousVersion: "1.0.0",
 			currentVersion: "1.0.0",
+		});
+	});
+
+	it("POST /update threads target through to the installer and validates it the same way as source", async () => {
+		const inst = new FakeInstaller();
+		const app = createApp(deps({ inst }));
+		const invalidTarget = await app.fetch(
+			new Request("http://x/update", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ source: "npm:@scope/pkg@1.0.0", target: "not a valid source!", approved: true }),
+			}),
+		);
+		expect(invalidTarget.status).toBe(400);
+		expect(inst.updated).toBe("");
+
+		const valid = await app.fetch(
+			new Request("http://x/update", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ source: "npm:@scope/pkg@1.0.0", target: "npm:@scope/pkg@2.0.0", approved: true }),
+			}),
+		);
+		expect(valid.status).toBe(200);
+		expect(inst.updated).toBe("npm:@scope/pkg@1.0.0");
+		expect(inst.gotTarget).toBe("npm:@scope/pkg@2.0.0");
+	});
+
+	it("POST /update reconciles the Vehicle under the NEW (target) source after a replace, not the removed one", async () => {
+		const svc = new FakeDaemonServiceInstaller();
+		const inst = new FakeInstaller();
+		const piHome = track(mkdtempSync(join(tmpdir(), "packed-update-vehicle-replace-")));
+		const app = createApp(deps({ inst, daemonServiceInstaller: svc, piHome }));
+		const response = await app.fetch(
+			new Request("http://x/update", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ source: "npm:@scope/pkg@1.0.0", target: "npm:@scope/pkg@2.0.0", approved: true }),
+			}),
+		);
+		expect(await response.json()).toMatchObject({ ok: true, serviceReconciled: true });
+		expect(svc.restartGotSource).toBe("npm:@scope/pkg@2.0.0");
+	});
+
+	it("POST /update surfaces pinnedSourceRequiresTarget/replaced/before/after/rollback through the wire response", async () => {
+		const inst = new FakeInstaller();
+		inst.updateOutcome = {
+			replaced: true,
+			before: { source: "npm:@scope/pkg@1.0.0", version: "1.0.0" },
+			after: { source: "npm:@scope/pkg@2.0.0", version: "2.0.0" },
+			rollback: { attempted: false, ok: true },
+		};
+		const app = createApp(deps({ inst }));
+		const response = await app.fetch(
+			new Request("http://x/update", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ source: "npm:@scope/pkg@1.0.0", target: "npm:@scope/pkg@2.0.0", approved: true }),
+			}),
+		);
+		expect(await response.json()).toMatchObject({
+			replaced: true,
+			before: { source: "npm:@scope/pkg@1.0.0", version: "1.0.0" },
+			after: { source: "npm:@scope/pkg@2.0.0", version: "2.0.0" },
+			rollback: { attempted: false, ok: true },
 		});
 	});
 

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { AuthenticatedRpcClient } from "@danypops/vehicle-client/rpc-client";
 import { createApp, type OperationInputs, type OperationName, type OperationOutputs } from "../src/daemon/service.ts";
 import type { Installer, PkgInfo, Registry, SearchPage } from "../src/packages/package.ts";
-import { listPackageResources, toggleResource } from "../src/packages/resources.ts";
+import { applyEntryFilters, captureEntryFilters, listPackageResources, toggleResource } from "../src/packages/resources.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -256,5 +256,70 @@ describe("toggleResource", () => {
 		});
 		expect(result.ok).toBe(false);
 		expect(result.error).toContain("not found");
+	});
+});
+
+describe("captureEntryFilters / applyEntryFilters (preserving a pinned package's own filter overrides across a replace)", () => {
+	it("captures every filter field an object-form entry declares", () => {
+		const home = piHome([{ source: "npm:pi-demo@1.0.0", extensions: ["-extensions/one.ts"], skills: ["+skills/two.md"] }]);
+
+		const filters = captureEntryFilters(join(home, "settings.json"), "npm:pi-demo@1.0.0");
+
+		expect(filters).toEqual({ extensions: ["-extensions/one.ts"], skills: ["+skills/two.md"] });
+	});
+
+	it("returns undefined for a bare string entry -- nothing to preserve", () => {
+		const home = piHome(["npm:pi-demo@1.0.0"]);
+		expect(captureEntryFilters(join(home, "settings.json"), "npm:pi-demo@1.0.0")).toBeUndefined();
+	});
+
+	it("returns undefined when the source isn't found at all", () => {
+		const home = piHome(["npm:other"]);
+		expect(captureEntryFilters(join(home, "settings.json"), "npm:pi-demo@1.0.0")).toBeUndefined();
+	});
+
+	it("re-applies captured filters onto the new source's own freshly-installed bare-string entry", async () => {
+		const home = piHome(["npm:pi-demo@2.0.0"]);
+		const settingsPath = join(home, "settings.json");
+
+		const ok = await applyEntryFilters(settingsPath, "npm:pi-demo@2.0.0", { extensions: ["-extensions/one.ts"] });
+
+		expect(ok).toBe(true);
+		const written = JSON.parse(readFileSync(settingsPath, "utf8"));
+		expect(written.packages).toEqual([{ source: "npm:pi-demo@2.0.0", extensions: ["-extensions/one.ts"] }]);
+	});
+
+	it("is a no-op (still ok:true) when there are no filters to preserve", async () => {
+		const home = piHome(["npm:pi-demo@2.0.0"]);
+		const settingsPath = join(home, "settings.json");
+
+		expect(await applyEntryFilters(settingsPath, "npm:pi-demo@2.0.0", undefined)).toBe(true);
+		const written = JSON.parse(readFileSync(settingsPath, "utf8"));
+		expect(written.packages).toEqual(["npm:pi-demo@2.0.0"]);
+	});
+
+	it("reports failure (never throws) when the target entry doesn't exist yet -- e.g. install itself failed", async () => {
+		const home = piHome(["npm:unrelated"]);
+		const settingsPath = join(home, "settings.json");
+
+		const ok = await applyEntryFilters(settingsPath, "npm:pi-demo@2.0.0", { extensions: ["-extensions/one.ts"] });
+
+		expect(ok).toBe(false);
+	});
+
+	it("round-trips through a real capture-then-apply replace simulation", async () => {
+		const home = piHome([{ source: "npm:pi-demo@1.0.0", extensions: ["-extensions/one.ts"] }]);
+		const settingsPath = join(home, "settings.json");
+		const filters = captureEntryFilters(settingsPath, "npm:pi-demo@1.0.0");
+
+		// Simulate remove()+install(): the old entry is gone, a fresh bare-string
+		// entry exists for the new pinned version.
+		writeFileSync(settingsPath, JSON.stringify({ packages: ["npm:pi-demo@2.0.0"] }));
+
+		const ok = await applyEntryFilters(settingsPath, "npm:pi-demo@2.0.0", filters);
+
+		expect(ok).toBe(true);
+		const written = JSON.parse(readFileSync(settingsPath, "utf8"));
+		expect(written.packages).toEqual([{ source: "npm:pi-demo@2.0.0", extensions: ["-extensions/one.ts"] }]);
 	});
 });

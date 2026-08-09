@@ -136,7 +136,7 @@ export interface OperationInputs {
 	"package.restart_service": { source: string; approved?: boolean };
 	"package.reconcile_services": { approved?: boolean; projectRoot?: string };
 	"package.remove": { name: string; approved?: boolean };
-	"package.update": { source: string; approved?: boolean };
+	"package.update": { source: string; approved?: boolean; target?: string };
 	"resources.list": { projectRoot?: string };
 	"resources.toggle": { source: string; field: ResourceField; path: string; enabled: boolean; projectRoot?: string; approved?: boolean };
 	"pi.status": Record<string, never>;
@@ -496,22 +496,32 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 		if (path === "/update" && req.method === "POST") {
 			let source = "";
 			let approved = false;
+			let target: string | undefined;
 			try {
-				const body = (await req.json()) as { source?: unknown; approved?: unknown };
+				const body = (await req.json()) as { source?: unknown; approved?: unknown; target?: unknown };
 				source = String(body.source ?? "");
 				approved = body.approved === true;
+				target = typeof body.target === "string" && body.target.length > 0 ? body.target : undefined;
 			} catch {
 				/* fall through to validation */
 			}
 			if (!SOURCE_RE.test(source)) {
 				return err(400, "invalid source; want a configured npm:, git:, or https package source");
 			}
+			if (target !== undefined && !SOURCE_RE.test(target)) {
+				return err(400, "invalid target; want a configured npm:, git:, or https package source");
+			}
 			const denied = authorize("update", approved);
 			if (denied) return denied;
+			// A successful replace re-identifies the package under `target`, not
+			// `source` -- a daemon-backed package's own service restart (below)
+			// must reconcile against the NEW installed source, never the one that
+			// was just removed.
+			const restartSource = target ?? source;
 			try {
-				const outcome = await deps.inst.update(source, { approved });
-				if (!source.startsWith("npm:") || outcome.alreadyUpToDate) return json({ ok: true, source, ...outcome });
-				const service = await daemonServiceInstaller.restart(piHomeForServiceInstall, source);
+				const outcome = await deps.inst.update(source, { approved, target });
+				if (!restartSource.startsWith("npm:") || outcome.alreadyUpToDate) return json({ ok: true, source, ...outcome });
+				const service = await daemonServiceInstaller.restart(piHomeForServiceInstall, restartSource);
 				if (!service.ok) {
 					if (service.notADaemon) return json({ ok: true, source, ...outcome });
 					return json({ ok: false, source, ...outcome, output: `${outcome.output}\n${service.reason}` });

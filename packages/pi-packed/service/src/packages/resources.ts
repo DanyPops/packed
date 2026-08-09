@@ -201,3 +201,66 @@ export async function toggleResource(input: ToggleResourceInput): Promise<{ ok: 
 	}
 	return { ok: true };
 }
+
+/**
+ * Captures a configured package entry's own filter overrides
+ * (extensions/skills/prompts/themes +/-path arrays -- see toggleResource's
+ * own doc comment) before a replace/update-to-target operation removes it
+ * outright: a bare `pi remove` + `pi install` sequence to bump a pinned
+ * version replaces the WHOLE settings.json entry, silently reverting any
+ * per-resource enable/disable customization the user had configured back
+ * to the freshly-installed package's own defaults. undefined when the
+ * entry has no filter overrides at all (nothing to preserve) or isn't
+ * found (already removed, or never existed as a real entry).
+ */
+export function captureEntryFilters(settingsPath: string, source: string): Partial<Record<ResourceField, string[]>> | undefined {
+	const entry = readSettingsPackages(settingsPath).find((candidate) => candidate.source === source);
+	if (!entry) return undefined;
+	const filters: Partial<Record<ResourceField, string[]>> = {};
+	for (const field of RESOURCE_FIELDS) {
+		const value = entry[field];
+		if (value) filters[field] = value;
+	}
+	return Object.keys(filters).length > 0 ? filters : undefined;
+}
+
+/**
+ * Re-applies a previously captured set of filter overrides onto `source`'s
+ * own freshly-created package entry -- the other half of
+ * captureEntryFilters, restoring what a replace operation's remove step
+ * would otherwise have discarded. A no-op (never throws) when `filters` is
+ * undefined/empty, the settings file is unreadable, or `source`'s entry
+ * doesn't exist yet (e.g. the install step itself failed and never wrote
+ * one) -- there is nothing safe to merge a filter override onto in that
+ * case, and the caller's own install failure is already the real error to
+ * surface.
+ */
+export async function applyEntryFilters(
+	settingsPath: string,
+	source: string,
+	filters: Partial<Record<ResourceField, string[]>> | undefined,
+): Promise<boolean> {
+	if (!filters || Object.keys(filters).length === 0) return true; // nothing to preserve is not a failure
+	let settings: Record<string, unknown>;
+	try {
+		settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+	} catch {
+		return false;
+	}
+	const packages = Array.isArray(settings.packages) ? [...settings.packages] : [];
+	const index = packages.findIndex((raw) => parseEntry(raw)?.source === source);
+	if (index === -1) return false;
+	const merged: Record<string, unknown> =
+		typeof packages[index] === "string" ? { source: packages[index] } : { ...(packages[index] as Record<string, unknown>) };
+	for (const [field, value] of Object.entries(filters)) merged[field] = value;
+	packages[index] = merged;
+	try {
+		await atomicWriteJson(settingsPath, { ...settings, packages });
+		return true;
+	} catch {
+		// best-effort: the replace itself already succeeded, a filter-preservation
+		// write failure here is surfaced to the caller as a non-fatal detail, not
+		// a reason to report the whole replace as failed.
+		return false;
+	}
+}

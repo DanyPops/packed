@@ -74,6 +74,77 @@ describe("native package mutation permission policy", () => {
 		expect(result.content[0]?.text).toContain("/reload");
 	});
 
+	it("threads target through to natives.update and reports a replace in the approval prompt and final message", async () => {
+		let gotSource = "";
+		let gotTarget: string | undefined;
+		const result = await updatePackageWithPolicy(
+			"npm:@scope/pkg@1.0.0",
+			{
+				async security() {
+					return { mutationApproval: "always" };
+				},
+				async update(source, approved, target) {
+					gotSource = source;
+					gotTarget = target;
+					expect(approved).toBe(true);
+					return {
+						output: "Removed npm:@scope/pkg@1.0.0\nInstalled npm:@scope/pkg@2.0.0",
+						reloadRequired: true,
+						alreadyUpToDate: false,
+						pinned: true,
+						replaced: true,
+						before: { source: "npm:@scope/pkg@1.0.0", version: "1.0.0" },
+						after: { source: "npm:@scope/pkg@2.0.0", version: "2.0.0" },
+					};
+				},
+			},
+			{
+				hasUI: true,
+				ui: {
+					async confirm(_title, message) {
+						expect(message).toContain("pi remove npm:@scope/pkg@1.0.0 && pi install npm:@scope/pkg@2.0.0");
+						return true;
+					},
+				},
+			},
+			"npm:@scope/pkg@2.0.0",
+		);
+		expect(gotSource).toBe("npm:@scope/pkg@1.0.0");
+		expect(gotTarget).toBe("npm:@scope/pkg@2.0.0");
+		expect(result.content[0]?.text).toContain("Replaced npm:@scope/pkg@1.0.0 with npm:@scope/pkg@2.0.0");
+	});
+
+	it("mentions target-aware replacement in the message for a pinned source with pinnedSourceRequiresTarget and no target given", async () => {
+		const result = await updatePackageWithPolicy(
+			"npm:@scope/pkg@1.0.0",
+			{
+				async security() {
+					return { mutationApproval: "always" };
+				},
+				async update() {
+					return {
+						output: "Updated npm:@scope/pkg@1.0.0",
+						reloadRequired: false,
+						alreadyUpToDate: true,
+						pinned: true,
+						pinnedSourceRequiresTarget: true,
+						previousVersion: "1.0.0",
+						currentVersion: "1.0.0",
+					};
+				},
+			},
+			{
+				hasUI: true,
+				ui: {
+					async confirm() {
+						return true;
+					},
+				},
+			},
+		);
+		expect(result.content[0]?.text).toContain("call pkg_update again with target set");
+	});
+
 	it("escalates install/update/remove of Packed's own package to restart wording, both in the approval dialog and the final message -- /reload cannot fix this (confirmed live)", async () => {
 		const security = async () => ({ mutationApproval: "always" as const });
 		const confirmMessages: string[] = [];

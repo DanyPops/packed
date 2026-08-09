@@ -110,7 +110,7 @@ export async function applyPackageChoice(
 			if (!outcome.reloadRequired) {
 				const version = outcome.currentVersion ?? outcome.previousVersion;
 				const reason = outcome.pinned
-					? `pinned to ${version ?? "an exact version"} -- pi update intentionally leaves pinned packages unchanged`
+					? `pinned to ${version ?? "an exact version"} -- pi update intentionally leaves pinned packages unchanged; run \`packed update npm:${row.name} --to <new-source>\`, or pkg_update with target set, to move off the pin`
 					: `already up to date${version ? ` at ${version}` : ""}`;
 				ctx.ui.notify(`${row.name} is ${reason}.`, "info");
 				onSettled?.({ ok: true, message: reason });

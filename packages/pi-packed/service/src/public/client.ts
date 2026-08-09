@@ -55,7 +55,7 @@ export interface PackedExtensionClient {
 	install(source: string, approved?: boolean): Promise<string>;
 	installService(source: string, approved?: boolean): Promise<{ output: string; spec?: ServiceSpecSummary }>;
 	remove(name: string, approved?: boolean): Promise<string>;
-	update(source: string, approved?: boolean): Promise<UpdateOutcome>;
+	update(source: string, approved?: boolean, target?: string): Promise<UpdateOutcome>;
 	setupPlan(manifestPath: string, prune?: boolean): Promise<SetupPlan>;
 	setupApply(manifestPath: string, approved?: boolean, prune?: boolean): Promise<SetupApplyResult>;
 	listResources(projectRoot?: string): Promise<{ global: PackageResources[]; project: PackageResources[] }>;
@@ -176,8 +176,8 @@ export class PackedClient implements PackedExtensionClient {
 		if (!result.ok) throw new Error(result.output);
 		return result.output;
 	}
-	async update(source: string, approved = false): Promise<UpdateOutcome> {
-		const result = await this.call("package.update", { source, approved });
+	async update(source: string, approved = false, target?: string): Promise<UpdateOutcome> {
+		const result = await this.call("package.update", { source, approved, target });
 		if (!result.ok) throw new Error(result.output);
 		return {
 			output: result.output,
@@ -187,6 +187,11 @@ export class PackedClient implements PackedExtensionClient {
 			previousVersion: result.previousVersion,
 			currentVersion: result.currentVersion,
 			outOfRangeUpdateAvailable: result.outOfRangeUpdateAvailable,
+			pinnedSourceRequiresTarget: result.pinnedSourceRequiresTarget,
+			replaced: result.replaced,
+			before: result.before,
+			after: result.after,
+			rollback: result.rollback,
 		};
 	}
 	setupPlan(manifestPath: string, prune = false) {

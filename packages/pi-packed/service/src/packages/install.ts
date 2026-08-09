@@ -8,8 +8,9 @@ import {
 	type InstallValidationResult,
 	type InstallValidator,
 } from "../adoption/install-validation.ts";
+import { applyEntryFilters, captureEntryFilters, resolveToggleSettingsPath } from "./resources.ts";
 import { createLogger } from "../shared/log.ts";
-import { defaultPiHome, isPinnedNpmSource, npmPackageName, readResolvedVersion } from "./installed.ts";
+import { defaultPiHome, isPinnedNpmSource, npmPackageName, readPackageDeclarations, readResolvedVersion } from "./installed.ts";
 import { isNewer } from "./package.ts";
 import type { Installer, UpdateOutcome } from "./package.ts";
 
@@ -150,7 +151,8 @@ export class ExecInstaller implements Installer {
 		return this.run(["remove", ...(options?.local ? ["-l"] : []), source]);
 	}
 
-	async update(source: string, _options?: { approved?: boolean; local?: boolean }): Promise<UpdateOutcome> {
+	async update(source: string, options?: { approved?: boolean; local?: boolean; target?: string }): Promise<UpdateOutcome> {
+		if (options?.target) return this.replace(source, options.target, options);
 		const t0 = performance.now();
 		const pinned = isPinnedNpmSource(source);
 		const previousVersion = readResolvedVersion(this.piHome, source);
@@ -189,6 +191,97 @@ export class ExecInstaller implements Installer {
 			previousVersion,
 			currentVersion,
 			...(outOfRangeUpdateAvailable ? { outOfRangeUpdateAvailable } : {}),
+			// A plain update() with no target can never move an exact pin --
+			// `pi update --extension` itself intentionally skips it (npm's own
+			// documented behavior for a versioned spec). alreadyUpToDate/pinned
+			// above are already an honest, non-"false success" result; this adds
+			// an unambiguous machine-readable nudge toward options.target instead
+			// of a caller having to infer "pinned AND alreadyUpToDate means stuck"
+			// itself. See replace() for the actual supervised pin-move workflow.
+			...(pinned && alreadyUpToDate ? { pinnedSourceRequiresTarget: true } : {}),
+		};
+	}
+
+	/**
+	 * The supervised "move a pin" workflow `pi update --extension` can never
+	 * perform by itself (it intentionally skips an exact pin) -- see the
+	 * linked research doc (pinned-package-update-behavior-and-safe-
+	 * replacement-research): a bare `pi install <newSource>` does not
+	 * rewrite an already-configured entry for the same package, it requires
+	 * an explicit remove-then-install sequence. Reuses install()/remove()
+	 * (the same supported, already-tested primitives) rather than
+	 * hand-rolling new subprocess calls, so validation/reresolve/timing
+	 * behave identically to every other mutation.
+	 *
+	 * Order of operations: identity check (never touches disk on mismatch)
+	 * -> capture `fromSource`'s own filter overrides (extensions/skills/
+	 * prompts/themes) so remove() doesn't silently discard them -> remove
+	 * `fromSource` -> install `toSource`, rolling back to `fromSource` on
+	 * failure -> re-apply the captured filters onto the new entry -> verify
+	 * BOTH postconditions (installed: readResolvedVersion; configured:
+	 * present in settings.json) before reporting success.
+	 */
+	private async replace(fromSource: string, toSource: string, options?: { approved?: boolean; local?: boolean }): Promise<UpdateOutcome> {
+		const fromName = npmPackageName(fromSource);
+		const toName = npmPackageName(toSource);
+		if (!fromName || !toName || fromName !== toName) {
+			throw new Error(`replace target must be the same package as the configured source: ${fromSource} -> ${toSource}`);
+		}
+		const settingsPath = resolveToggleSettingsPath(this.piHome);
+		const before = { source: fromSource, version: readResolvedVersion(this.piHome, fromSource) };
+		const filters = captureEntryFilters(settingsPath, fromSource);
+
+		let removeOutput: string;
+		try {
+			removeOutput = await this.remove(fromSource, options);
+		} catch (e) {
+			throw new Error(`replace failed removing ${fromSource}: ${e instanceof Error ? e.message : String(e)}`);
+		}
+
+		let installOutput: string;
+		try {
+			installOutput = await this.install(toSource, options);
+		} catch (installError) {
+			const installMessage = installError instanceof Error ? installError.message : String(installError);
+			let rollback: NonNullable<UpdateOutcome["rollback"]>;
+			try {
+				await this.install(fromSource, options);
+				rollback = { attempted: true, ok: true };
+			} catch (rollbackError) {
+				rollback = {
+					attempted: true,
+					ok: false,
+					message: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+				};
+			}
+			const rollbackNote = rollback.ok
+				? `rolled back to ${fromSource}`
+				: `ROLLBACK TO ${fromSource} ALSO FAILED: ${rollback.message} -- ${fromName} may now be uninstalled entirely, reinstall manually`;
+			throw new Error(`replace failed installing ${toSource}: ${installMessage} (${rollbackNote})`);
+		}
+
+		await applyEntryFilters(settingsPath, toSource, filters);
+
+		const afterVersion = readResolvedVersion(this.piHome, toSource);
+		const configuredAfter = readPackageDeclarations(this.piHome).includes(toSource);
+		if (!configuredAfter) {
+			// install() itself reported success, but settings.json doesn't show
+			// toSource configured -- a real postcondition failure, not merely a
+			// version mismatch. Never claim success on an unverified replace.
+			throw new Error(`replace installed ${toSource} but settings.json does not show it configured -- verify manually before retrying`);
+		}
+		const after = { source: toSource, version: afterVersion };
+		const changed = before.version !== after.version || before.source !== after.source;
+		return {
+			output: `${removeOutput}\n${installOutput}`.trim(),
+			reloadRequired: changed,
+			alreadyUpToDate: !changed,
+			pinned: isPinnedNpmSource(toSource),
+			previousVersion: before.version,
+			currentVersion: after.version,
+			replaced: true,
+			before,
+			after,
 		};
 	}
 }

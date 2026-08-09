@@ -59,7 +59,7 @@ export interface Natives {
 	/** Throws InstallServiceError; check .notADaemon before surfacing a failure -- most packages aren't daemons at all. */
 	installService(source: string, approved?: boolean): Promise<{ output: string; spec?: ServiceSpecSummary }>;
 	remove(name: string, approved?: boolean): Promise<string>;
-	update(source: string, approved?: boolean): Promise<UpdateOutcome>;
+	update(source: string, approved?: boolean, target?: string): Promise<UpdateOutcome>;
 	setupPlan(manifestPath: string, prune?: boolean): Promise<SetupPlan>;
 	setupApply(manifestPath: string, approved?: boolean, prune?: boolean): Promise<SetupApplyResult>;
 	listResources(projectRoot?: string): Promise<{ global: PackageResources[]; project: PackageResources[] }>;
@@ -100,7 +100,7 @@ export async function createNatives(connect: PackageDaemonConnector = connectDef
 		install: (source, approved) => client.callOnce((daemon) => daemon.install(source, approved)),
 		installService: (source, approved) => client.callOnce((daemon) => daemon.installService(source, approved)),
 		remove: (name, approved) => client.callOnce((daemon) => daemon.remove(name, approved)),
-		update: (source, approved) => client.callOnce((daemon) => daemon.update(source, approved)),
+		update: (source, approved, target) => client.callOnce((daemon) => daemon.update(source, approved, target)),
 		setupApply: (manifestPath, approved, prune) => client.callOnce((daemon) => daemon.setupApply(manifestPath, approved, prune)),
 		toggleResource: (source, field, path, enabled, projectRoot, approved) =>
 			client.callOnce((daemon) => daemon.toggleResource(source, field, path, enabled, projectRoot, approved)),

@@ -172,6 +172,7 @@ interface Flags {
 	self: boolean;
 	project?: string;
 	version?: string;
+	to?: string;
 }
 
 function parseFlags(rest: string[]): { flags: Flags; pos: string[] } {
@@ -207,6 +208,8 @@ function parseFlags(rest: string[]): { flags: Flags; pos: string[] } {
 		else if (a.startsWith("--project=")) flags.project = a.slice(10);
 		else if (a === "--version" && i + 1 < rest.length) flags.version = rest[++i];
 		else if (a.startsWith("--version=")) flags.version = a.slice(10);
+		else if (a === "--to" && i + 1 < rest.length) flags.to = rest[++i];
+		else if (a.startsWith("--to=")) flags.to = a.slice(5);
 		else pos.push(a);
 	}
 	return { flags, pos };
@@ -662,7 +665,8 @@ const commands: Record<string, { usage: string; run: Command }> = {
 	},
 
 	update: {
-		usage: "packed update <configured-source> [--approve] [--json] | packed update --self [--approve] [--json]",
+		usage:
+			"packed update <configured-source> [--to <new-source>] [--approve] [--json] | packed update --self [--approve] [--json]  (--to replaces an exact pin end to end -- see verify-deploy/doctor for post-replace checks)",
 		async run(_rest, d, flags, pos) {
 			if (flags.self) {
 				try {
@@ -682,13 +686,14 @@ const commands: Record<string, { usage: string; run: Command }> = {
 			}
 			const source = pos[0] ?? "";
 			if (!SOURCE_RE.test(source)) return usageErr(`usage: ${commands.update!.usage}\n`);
+			if (flags.to !== undefined && !SOURCE_RE.test(flags.to)) return usageErr(`usage: ${commands.update!.usage}\n`);
 			try {
-				const outcome = await d.inst.update(source, { approved: flags.approved });
+				const outcome = await d.inst.update(source, { approved: flags.approved, target: flags.to });
 				if (outcome.alreadyUpToDate) {
 					if (flags.json) return ok(`${JSON.stringify({ ok: true, source, ...outcome })}\n`);
 					const version = outcome.currentVersion ?? outcome.previousVersion;
 					const reason = outcome.pinned
-						? `is pinned to ${version ?? "an exact version"} — pi update intentionally leaves pinned packages unchanged; run \`packed install npm:${npmPackageName(source) ?? source}\` to move off the pin`
+						? `is pinned to ${version ?? "an exact version"} — pi update intentionally leaves pinned packages unchanged; run \`packed update ${source} --to npm:${npmPackageName(source) ?? source}@<version>\` to move off the pin`
 						: `is already up to date${version ? ` at ${version}` : ""}`;
 					const outOfRangeNote = outcome.outOfRangeUpdateAvailable
 						? ` (a newer version, ${outcome.outOfRangeUpdateAvailable}, exists outside the declared range -- widen it to update)`
@@ -698,7 +703,8 @@ const commands: Record<string, { usage: string; run: Command }> = {
 				if (flags.json) return ok(`${JSON.stringify({ ok: true, source, ...outcome })}\n`);
 				const transition =
 					outcome.previousVersion && outcome.currentVersion ? ` (${outcome.previousVersion} → ${outcome.currentVersion})` : "";
-				return ok(`${outcome.output}${transition}\nReload Pi with /reload to activate the updated package.\n`);
+				const replacedNote = outcome.replaced ? ` (replaced ${outcome.before?.source ?? source} with ${outcome.after?.source ?? ""})` : "";
+				return ok(`${outcome.output}${transition}${replacedNote}\nReload Pi with /reload to activate the updated package.\n`);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				return flags.json

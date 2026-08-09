@@ -87,18 +87,24 @@ export async function installPackageWithPolicy(
 	return text(output, createMutationDetails("install", source, "succeeded", output));
 }
 
-export async function updatePackageWithPolicy(source: string, natives: Pick<Natives, "security" | "update">, ctx: ApprovalContext) {
+export async function updatePackageWithPolicy(
+	source: string,
+	natives: Pick<Natives, "security" | "update">,
+	ctx: ApprovalContext,
+	target?: string,
+) {
 	const restartRequired = targetsPackedItself(source);
-	const approval = await approvePackageOperation("update", `pi update --extension ${source}`, natives, ctx, restartRequired);
+	const command = target ? `pi remove ${source} && pi install ${target}` : `pi update --extension ${source}`;
+	const approval = await approvePackageOperation("update", command, natives, ctx, restartRequired);
 	if (!approval.allowed) {
 		const output = approval.message ?? "update denied";
 		return text(output, createMutationDetails("update", source, approval.reason ?? "denied", output));
 	}
-	const outcome = await natives.update(source, approval.approved);
+	const outcome = await natives.update(source, approval.approved, target);
 	if (outcome.alreadyUpToDate) {
 		const version = outcome.currentVersion ?? outcome.previousVersion;
 		const reason = outcome.pinned
-			? `pinned to ${version ?? "an exact version"} -- pi update intentionally leaves pinned packages unchanged; reinstall with a different (or no) version to move off the pin`
+			? `pinned to ${version ?? "an exact version"} -- pi update intentionally leaves pinned packages unchanged; call pkg_update again with target set to move off the pin`
 			: `already up to date${version ? ` at ${version}` : ""}`;
 		const outOfRangeNote = outcome.outOfRangeUpdateAvailable
 			? ` A newer version, ${outcome.outOfRangeUpdateAvailable}, exists outside the declared range -- widen it to update.`
@@ -110,7 +116,8 @@ export async function updatePackageWithPolicy(source: string, natives: Pick<Nati
 	const activateNote = restartRequired
 		? "Restart Pi (exit and relaunch) to activate -- Packed's own running code can't hot-reload itself."
 		: "Reload with /reload to activate.";
-	const message = `${outcome.output || `Updated ${source}.`}${transition} ${activateNote}`;
+	const replacedNote = outcome.replaced ? ` Replaced ${outcome.before?.source ?? source} with ${outcome.after?.source ?? target}.` : "";
+	const message = `${outcome.output || `Updated ${source}.`}${transition}${replacedNote} ${activateNote}`;
 	return text(message, createMutationDetails("update", source, "succeeded", outcome.output || message, true));
 }
 
@@ -227,9 +234,15 @@ export function registerTools(pi: ExtensionAPI, natives: Natives): void {
 		name: "pkg_update",
 		label: "Pi Extension Update",
 		description:
-			"Update one already-installed Pi extension through Pi's documented update command. Operation-aware approval is secure by default.",
+			"Update one already-installed Pi extension through Pi's documented update command. Operation-aware approval is secure by default. An exact pin (e.g. npm:@scope/pkg@1.2.3) is intentionally left unchanged by a plain update -- pass target to move it, via a supervised remove+install workflow with identity checks, filter preservation, postcondition verification, and rollback on failure.",
 		parameters: Type.Object({
 			source: Type.String({ description: "configured npm:, git:, or https source of the installed Pi extension" }),
+			target: Type.Optional(
+				Type.String({
+					description:
+						"new npm:, git:, or https source to replace source with -- required to move an exact pin (source and target must name the same package)",
+				}),
+			),
 		}),
 		renderCall(args, theme) {
 			return renderPackageToolCall("Update Pi extension", args, theme);
@@ -238,7 +251,7 @@ export function registerTools(pi: ExtensionAPI, natives: Natives): void {
 			return renderPackageToolResult(result, options, theme, context);
 		},
 		async execute(_id, params, _signal, _onUpdate, ctx) {
-			return updatePackageWithPolicy(params.source, natives, ctx);
+			return updatePackageWithPolicy(params.source, natives, ctx, params.target);
 		},
 	});
 

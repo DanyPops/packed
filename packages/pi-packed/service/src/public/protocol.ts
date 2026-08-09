@@ -54,6 +54,11 @@ export interface UpdateOutcome {
 	previousVersion?: string;
 	currentVersion?: string;
 	outOfRangeUpdateAvailable?: string;
+	pinnedSourceRequiresTarget?: boolean;
+	replaced?: boolean;
+	before?: { source: string; version?: string };
+	after?: { source: string; version?: string };
+	rollback?: { attempted: boolean; ok: boolean; message?: string };
 }
 export interface Diagnostic {
 	code: string;
@@ -142,7 +147,7 @@ export interface ExtensionOperationInputs {
 	"package.install": { source: string; approved?: boolean };
 	"package.install_service": { source: string; approved?: boolean };
 	"package.remove": { name: string; approved?: boolean };
-	"package.update": { source: string; approved?: boolean };
+	"package.update": { source: string; approved?: boolean; target?: string };
 	"setup.plan": { manifestPath: string; prune?: boolean };
 	"setup.apply": { manifestPath: string; approved?: boolean; prune?: boolean };
 	"resources.list": { projectRoot?: string };
@@ -167,6 +172,11 @@ export interface ExtensionOperationOutputs {
 		previousVersion?: string;
 		currentVersion?: string;
 		outOfRangeUpdateAvailable?: string;
+		pinnedSourceRequiresTarget?: boolean;
+		replaced?: boolean;
+		before?: { source: string; version?: string };
+		after?: { source: string; version?: string };
+		rollback?: { attempted: boolean; ok: boolean; message?: string };
 	};
 	"setup.plan": SetupPlan;
 	"setup.apply": SetupApplyResult;

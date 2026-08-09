@@ -59,9 +59,11 @@ class FakeInstaller implements Installer {
 		this.approved = options?.approved === true;
 		return `Removed ${source}`;
 	}
-	async update(source: string, options?: { approved?: boolean }): Promise<UpdateOutcome> {
+	gotTarget: string | undefined;
+	async update(source: string, options?: { approved?: boolean; target?: string }): Promise<UpdateOutcome> {
 		this.updated = source;
 		this.approved = options?.approved === true;
+		this.gotTarget = options?.target;
 		return {
 			output: `Updated ${source}`,
 			reloadRequired: true,
@@ -594,6 +596,52 @@ describe("CLI", () => {
 		});
 	});
 
+	it("update --to threads the replacement target through to the installer and reports it in both human and JSON output", async () => {
+		const d = deps({
+			inst: (() => {
+				const fake = new FakeInstaller();
+				fake.updateOutcome = {
+					replaced: true,
+					before: { source: "npm:@scope/pkg@1.0.0", version: "1.0.0" },
+					after: { source: "npm:@scope/pkg@2.0.0", version: "2.0.0" },
+				};
+				return fake;
+			})(),
+		});
+
+		const human = await cliRun(["update", "npm:@scope/pkg@1.0.0", "--to", "npm:@scope/pkg@2.0.0", "--approve"], d);
+		expect(human.code).toBe(0);
+		expect(human.out).toContain("replaced npm:@scope/pkg@1.0.0 with npm:@scope/pkg@2.0.0");
+		expect((d.inst as FakeInstaller).gotTarget).toBe("npm:@scope/pkg@2.0.0");
+
+		const json = await cliRun(["update", "npm:@scope/pkg@1.0.0", "--to", "npm:@scope/pkg@2.0.0", "--approve", "--json"], d);
+		const parsed = JSON.parse(json.out);
+		expect(parsed.replaced).toBe(true);
+		expect(parsed.before).toEqual({ source: "npm:@scope/pkg@1.0.0", version: "1.0.0" });
+		expect(parsed.after).toEqual({ source: "npm:@scope/pkg@2.0.0", version: "2.0.0" });
+	});
+
+	it("update --to rejects an invalid target source with a usage error, before ever calling the installer", async () => {
+		const d = deps();
+		const result = await cliRun(["update", "npm:@scope/pkg@1.0.0", "--to", "not a valid source!", "--approve"], d);
+		expect(result.code).toBe(2);
+		expect((d.inst as FakeInstaller).updated).toBe("");
+	});
+
+	it("reports pinnedSourceRequiresTarget and mentions --to in the human-readable pinned message", async () => {
+		const d = deps({
+			inst: (() => {
+				const fake = new FakeInstaller();
+				fake.updateOutcome = { alreadyUpToDate: true, reloadRequired: false, pinned: true, pinnedSourceRequiresTarget: true };
+				return fake;
+			})(),
+		});
+
+		const human = await cliRun(["update", "npm:@scope/pkg@1.0.0", "--approve"], d);
+		expect(human.out).toContain("--to");
+		const json = await cliRun(["update", "npm:@scope/pkg@1.0.0", "--approve", "--json"], d);
+		expect(JSON.parse(json.out).pinnedSourceRequiresTarget).toBe(true);
+	});
 
 	it("update --self requires approval under the guarded default, same as every other mutation", async () => {
 		const d = deps({

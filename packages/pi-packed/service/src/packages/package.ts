@@ -142,13 +142,45 @@ export interface UpdateOutcome {
 	 * already uses, independent of the declared range.
 	 */
 	outOfRangeUpdateAvailable?: string;
+	/**
+	 * True only when update() was called on an exact npm pin with no
+	 * options.target -- `pi update --extension` intentionally leaves an
+	 * exact pin unchanged (npm's own documented behavior for a versioned
+	 * spec), so alreadyUpToDate/pinned above are already an honest,
+	 * non-"false success" result. This is an additional stable,
+	 * unambiguous machine-readable signal (kept alongside those existing
+	 * fields for back-compat) that a caller wanting to actually MOVE the
+	 * pin should retry with options.target set -- see replaced/before/
+	 * after/rollback below.
+	 */
+	pinnedSourceRequiresTarget?: boolean;
+	/**
+	 * True when options.target was given and update() routed to the
+	 * supervised replace workflow (remove the old exact source, install
+	 * the new one, verify both configured and installed postconditions,
+	 * attempt rollback on failure) instead of `pi update --extension`.
+	 */
+	replaced?: boolean;
+	before?: { source: string; version?: string };
+	after?: { source: string; version?: string };
+	/** Present only on a replace failure -- whether restoring the original
+	 * source was attempted and whether that restoration itself succeeded. */
+	rollback?: { attempted: boolean; ok: boolean; message?: string };
 }
 
 /** Driven port: pi CLI mutations. */
 export interface Installer {
 	install(source: string, options?: { approved?: boolean; local?: boolean }): Promise<string>;
 	remove(source: string, options?: { approved?: boolean; local?: boolean }): Promise<string>;
-	update(source: string, options?: { approved?: boolean; local?: boolean }): Promise<UpdateOutcome>;
+	/**
+	 * `options.target`, when given, replaces `source` (an exact pin or not)
+	 * with `target` through a supervised remove+install workflow instead of
+	 * `pi update --extension` -- see ExecInstaller.update()'s own doc
+	 * comment and the linked research doc
+	 * (pinned-package-update-behavior-and-safe-replacement-research) for
+	 * why a plain `pi update` can never move an exact pin by itself.
+	 */
+	update(source: string, options?: { approved?: boolean; local?: boolean; target?: string }): Promise<UpdateOutcome>;
 	/**
 	 * Optional batch-oriented split of install(), for a caller installing several packages
 	 * together (see SetupManager.apply()) -- a single ad hoc install() still does all three

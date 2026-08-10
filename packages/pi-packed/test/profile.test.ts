@@ -208,20 +208,16 @@ describe("Packed profiles", () => {
 			expect(model.id).toBe("gpt");
 			expect(notifications.at(-1)).toContain("restored");
 
+			// pi-setup.json's defaultProfile is no longer auto-applied on session start -- its presence must be a no-op.
 			model = { provider: "openai", id: "mini" };
 			entries.splice(0, entries.length, { type: "custom", customType: "profile-state", data: { name: null } });
 			writeFileSync(join(ctx.cwd, "pi-setup.json"), JSON.stringify({ schemaVersion: 1, defaultProfile: "work" }));
 			events.clear();
 			registerProfiles(pi);
 			await events.get("session_start")!({ reason: "reload" }, ctx);
-			expect(model.id).toBe("gpt");
+			expect(model.id).toBe("mini");
 
 			rmSync(join(ctx.cwd, "pi-setup.json"));
-			model = { provider: "openai", id: "mini" };
-			events.clear();
-			registerProfiles(pi);
-			await events.get("session_start")!({ reason: "reload" }, ctx);
-			expect(model.id).toBe("mini");
 		} finally {
 			if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
 			else process.env.PI_CODING_AGENT_DIR = previous;

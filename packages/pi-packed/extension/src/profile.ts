@@ -96,22 +96,6 @@ export function loadProfiles(agentDir: string, cwd: string, projectTrusted: bool
 	return { ...globalProfiles, ...readProfileFile(join(cwd, CONFIG_DIR_NAME, PROFILE_FILE)) };
 }
 
-function loadDefaultProfile(cwd: string, projectTrusted: boolean): string | undefined {
-	if (!projectTrusted) return undefined;
-	try {
-		const path = join(cwd, "pi-setup.json");
-		if (!existsSync(path)) return undefined;
-		const stat = lstatSync(path);
-		if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024 * 1024) return undefined;
-		const value = JSON.parse(readFileSync(path, "utf8")) as { schemaVersion?: unknown; defaultProfile?: unknown };
-		return value.schemaVersion === 1 && typeof value.defaultProfile === "string" && PROFILE_NAME.test(value.defaultProfile)
-			? value.defaultProfile
-			: undefined;
-	} catch {
-		return undefined;
-	}
-}
-
 function loadLastProfile(agentDir: string): string | undefined {
 	try {
 		const path = join(agentDir, LAST_PROFILE_FILE);
@@ -299,7 +283,7 @@ export function registerProfiles(pi: ExtensionAPI): void {
 	pi.on("before_agent_start", (event) =>
 		activeProfile?.instructions ? { systemPrompt: `${event.systemPrompt}\n\n${activeProfile.instructions}` } : undefined,
 	);
-	pi.on("session_start", async (event, ctx) => {
+	pi.on("session_start", async (_event, ctx) => {
 		try {
 			profiles = loadProfiles(agentDir, ctx.cwd, ctx.isProjectTrusted());
 		} catch (error) {
@@ -317,15 +301,6 @@ export function registerProfiles(pi: ExtensionAPI): void {
 			ctx.ui.notify(`Profile "${flag}" activated`, "info");
 			return;
 		}
-		const defaultProfile = loadDefaultProfile(ctx.cwd, ctx.isProjectTrusted());
-		if ((event.reason === "reload" || event.reason === "new") && defaultProfile) {
-			if (profiles[defaultProfile]) await apply(defaultProfile, profiles[defaultProfile]!, ctx, false);
-			else {
-				ctx.ui.notify(`Default profile "${defaultProfile}" is not defined`, "warning");
-				setStatus(ctx);
-			}
-			return;
-		}
 		const state = [...ctx.sessionManager.getEntries()]
 			.reverse()
 			.find(
@@ -338,14 +313,6 @@ export function registerProfiles(pi: ExtensionAPI): void {
 				activeProfile = profiles[state.data.name];
 			}
 			setStatus(ctx);
-			return;
-		}
-		if (defaultProfile) {
-			if (profiles[defaultProfile]) await apply(defaultProfile, profiles[defaultProfile]!, ctx, false);
-			else {
-				ctx.ui.notify(`Default profile "${defaultProfile}" is not defined`, "warning");
-				setStatus(ctx);
-			}
 			return;
 		}
 		const last = loadLastProfile(agentDir);

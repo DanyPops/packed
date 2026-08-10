@@ -70,14 +70,29 @@ async function invoke(app: { fetch(request: Request): Promise<Response> }, name:
 }
 
 describe("packed's daemon operation surface, through the real Vehicle wire protocol", () => {
-	it("GET /vehicle/manifest lists all 29 operations, authenticated the same as /api/v1/ops", async () => {
+	it("GET /vehicle/manifest lists all 29 operations plus the registry's own vehicle.approval.resolve, authenticated the same as /api/v1/ops", async () => {
 		const app = createApp(deps());
 		const unauthorized = await app.fetch(new Request("http://packed.internal/vehicle/manifest"));
 		expect(unauthorized.status).toBe(401);
 		const response = await app.fetch(new Request("http://packed.internal/vehicle/manifest", { headers: { authorization: "Bearer test-token" } }));
 		expect(response.status).toBe(200);
 		const body = (await response.json()) as { operations: Array<{ name: string }> };
-		expect(body.operations.map((o) => o.name).sort()).toEqual([...OPERATION_NAMES].sort());
+		expect(body.operations.map((o) => o.name).sort()).toEqual([...OPERATION_NAMES, "vehicle.approval.resolve"].sort());
+	});
+
+	it("a mutation's approvalRequired reflects security.ts's own per-operation classification, not a coarse effect default -- restart_service is gated despite sharing external-write with the never-gated catalog.sync", async () => {
+		const app = createApp(deps());
+		const response = await app.fetch(new Request("http://packed.internal/vehicle/manifest", { headers: { authorization: "Bearer test-token" } }));
+		const body = (await response.json()) as { operations: Array<{ name: string; approvalRequired?: boolean }> };
+		const byName = new Map(body.operations.map((o) => [o.name, o.approvalRequired]));
+		expect(byName.get("package.restart_service")).toBe(true);
+		expect(byName.get("package.reconcile_services")).toBe(true);
+		expect(byName.get("package.catalog.sync")).toBe(false);
+		expect(byName.get("package.index.build")).toBe(false);
+		expect(byName.get("resources.toggle")).toBe(true);
+		expect(byName.get("package.security.set")).toBe(true);
+		expect(byName.get("setup.export")).toBe(false);
+		expect(byName.get("setup.update")).toBe(false);
 	});
 
 	it("package.search round-trips through /vehicle/invoke, matching /api/v1/ops's own shape", async () => {
@@ -102,11 +117,88 @@ describe("packed's daemon operation surface, through the real Vehicle wire proto
 		expect(result.body.error?.category).toBe("authorization");
 	});
 
-	it("an approved mutation succeeds through /vehicle/invoke exactly like an approved /api/v1/ops call", async () => {
+	it("a genuinely approved mutation (through Vehicle's own request/resolve/capability dance) succeeds exactly like an approved /api/v1/ops call -- an approved:true field in the input body alone is no longer enough, since Vehicle's own gate never reads it", async () => {
 		const app = createApp(deps());
-		const result = await invoke(app, "package.remove", { name: "pi-lsp", approved: true });
+		const stillDenied = await invoke(app, "package.remove", { name: "pi-lsp", approved: true });
+		expect(stillDenied.status).toBe(403);
+
+		const denied = await invoke(app, "package.remove", { name: "pi-lsp" });
+		const requestId = (denied.body.error as unknown as { details?: { requestId?: string } }).details?.requestId;
+		expect(typeof requestId).toBe("string");
+		const resolveResponse = await app.fetch(
+			new Request("http://packed.internal/vehicle/invoke", {
+				method: "POST",
+				headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+				body: JSON.stringify({
+					name: "vehicle.approval.resolve",
+					version: 1,
+					input: { requestId, decision: "granted" },
+					permissions: ["vehicle:approvals:resolve"],
+				}),
+			}),
+		);
+		const resolved = {
+			status: resolveResponse.status,
+			body: (await resolveResponse.json()) as { output?: { capability?: string } },
+		};
+		expect(resolved.status).toBe(200);
+		const capability = (resolved.body.output as { capability?: string }).capability;
+		expect(typeof capability).toBe("string");
+
+		const response = await app.fetch(
+			new Request("http://packed.internal/vehicle/invoke", {
+				method: "POST",
+				headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+				body: JSON.stringify({
+					name: "package.remove",
+					version: 1,
+					input: { name: "pi-lsp" },
+					permissions: ["packed:read", "packed:write"],
+					approvalCapability: capability,
+				}),
+			}),
+		);
+		expect(response.status).toBe(200);
+		const body = (await response.json()) as { output: { ok: boolean } };
+		expect(body.output.ok).toBe(true);
+	});
+
+	it("mutationApproval: never disables the registry's own gate too, live, the instant /security POST changes it -- no daemon restart", async () => {
+		const app = createApp(deps());
+		const deniedFirst = await invoke(app, "package.remove", { name: "pi-lsp" });
+		expect(deniedFirst.status).toBe(403);
+
+		const securityPost = await app.fetch(
+			new Request("http://packed.internal/security", {
+				method: "POST",
+				headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+				body: JSON.stringify({ mutationApproval: "never", approved: true }),
+			}),
+		);
+		expect(securityPost.status).toBe(200);
+
+		const allowedNow = await invoke(app, "package.remove", { name: "pi-lsp" });
+		expect(allowedNow.status).toBe(200);
+		expect((allowedNow.body.output as { ok: boolean }).ok).toBe(true);
+	});
+
+	it("a daemon that boots with mutationApproval already never on disk starts with the gate already disabled, not just after the first /security POST", async () => {
+		const stateDir = temporaryRoot("packed-vehicle-never-");
+		const bootstrap = createApp(deps({ stateDir }));
+		const prep = await bootstrap.fetch(
+			new Request("http://packed.internal/security", {
+				method: "POST",
+				headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+				body: JSON.stringify({ mutationApproval: "never", approved: true }),
+			}),
+		);
+		expect(prep.status).toBe(200);
+
+		// A brand new app instance against the SAME on-disk state -- simulates a fresh daemon
+		// process starting up after the setting was already changed by a previous run.
+		const freshBoot = createApp(deps({ stateDir }));
+		const result = await invoke(freshBoot, "package.remove", { name: "pi-lsp" });
 		expect(result.status).toBe(200);
-		expect((result.body.output as { ok: boolean }).ok).toBe(true);
 	});
 
 	it("a handler-thrown validation error keeps its own real message, mapped to Vehicle's validation category (not a generic internal 500)", async () => {

@@ -267,6 +267,10 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 		description: "Pi package lifecycle daemon",
 	});
 	registerPackedVehicleOperations(vehicleRegistry, executeOperation);
+	// Live from day one: the registry's own gate mirrors whatever mutationApproval already
+	// is on disk at startup, then tracks every /security POST from here on (see below) --
+	// never a fixed per-deployment constant baked in once and forgotten.
+	vehicleRegistry.configureApprovals({ enabled: readSecuritySettings(deps.stateDir).mutationApproval === "always" });
 	const vehicleApp = createVehicleHttpApp({ registry: vehicleRegistry, token: deps.token });
 
 	function authorize(operation: PackageOperation, approved: boolean): Response | undefined {
@@ -304,7 +308,14 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			}
 			const denied = authorize("security.write", body.approved === true);
 			if (denied) return denied;
-			return json(await writeSecuritySettings(deps.stateDir, { mutationApproval: body.mutationApproval as MutationApproval }));
+			const mutationApproval = body.mutationApproval as MutationApproval;
+			const written = await writeSecuritySettings(deps.stateDir, { mutationApproval });
+			// Same live-toggle guarantee the legacy /api/v1/ops transport already had via
+			// readSecuritySettings() being re-read fresh on every request -- the Vehicle
+			// transport's own gate is a stateful in-memory policy, so a change here has to
+			// be pushed to it explicitly instead of being implicitly always-fresh.
+			vehicleRegistry.updateApprovalPolicy({ enabled: mutationApproval === "always" });
+			return json(written);
 		}
 
 		if (path === "/search" && req.method === "GET") {

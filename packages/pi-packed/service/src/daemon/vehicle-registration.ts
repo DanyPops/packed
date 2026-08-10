@@ -27,13 +27,29 @@
  * install/install_service/update/setup.apply which can fetch and run
  * arbitrary newly-published code).
  *
- * Approval/authorization is NOT reimplemented here: executeOperation()
- * (and the route()-based operations it delegates to internally) already
- * calls authorize()/assertPackagePermission() and throws
- * PackageOperationError(status: 403) on a denied mutation -- reusing
- * executeOperation() verbatim means this Vehicle surface automatically
- * inherits the exact same approval gate, with zero duplicated policy logic
- * to drift out of sync.
+ * Approval is delegated to the registry's own Vehicle-native mechanism
+ * (VehicleRegistry.configureApprovals/updateApprovalPolicy, wired up in
+ * daemon.ts/service.ts against packed's own mutationApproval setting) --
+ * NOT reimplemented here. Each operation below carries an explicit
+ * requiresApproval, exactly matching security.ts's PACKAGE_OPERATIONS
+ * classification's own guarded set (code-execution/settings-mutation/
+ * security-mutation), set unconditionally rather than left to derive from
+ * effect: two of Vehicle's five effect buckets already mix a guarded
+ * operation with an unguarded one here (external-write covers both
+ * restart_service/reconcile_services, which ARE guarded, and
+ * catalog.sync/index.build, which never were; local-write covers both
+ * resources.toggle/security.set, guarded, and setup.export/setup.update,
+ * never guarded) -- no single effect-derived default could reproduce this
+ * split, which is exactly the gap VehicleOperationDescriptor.requiresApproval
+ * exists to close.
+ *
+ * Once the registry's own gate approves a call (because it wasn't gated,
+ * or because a real capability was presented), the bound handler forces
+ * approved: true onto the input before delegating to executeOperation() --
+ * its own legacy authorize()/assertPackagePermission() check (still the
+ * sole gate for the older /api/v1/ops transport, untouched here) would
+ * otherwise reject a call whose caller never knew that REST-only field
+ * existed. A Vehicle caller's only approval contract is Vehicle's own.
  */
 
 import type { VehicleEffect, VehicleIdempotency } from "@danypops/vehicle-core";
@@ -66,6 +82,11 @@ const WRITE: VehicleIdempotency = { mode: "unsafe" };
 interface OperationMeta {
 	readonly description: string;
 	readonly effect: VehicleEffect;
+	/** See vehicle-core's VehicleOperationDescriptor.requiresApproval -- set explicitly for
+	 * every operation here (never left to derive from effect), matching security.ts's own
+	 * per-operation guarded/unguarded classification exactly. See this file's own doc
+	 * comment for why effect alone can't reproduce that split. */
+	readonly requiresApproval: boolean;
 }
 
 /**
@@ -74,53 +95,111 @@ interface OperationMeta {
  * classification) and its two deliberate refinements.
  */
 const OPERATION_META: Record<OperationName, OperationMeta> = {
-	"package.search": { description: "Searches Pi packages on npm.", effect: "read" },
-	"package.info": { description: "Reads bounded metadata for one package.", effect: "read" },
-	"package.installed": { description: "Lists locally installed Pi packages.", effect: "read" },
-	"package.catalog": { description: "Reads the local SQLite catalog mirror.", effect: "read" },
+	"package.search": { description: "Searches Pi packages on npm.", effect: "read", requiresApproval: false },
+	"package.info": { description: "Reads bounded metadata for one package.", effect: "read", requiresApproval: false },
+	"package.installed": { description: "Lists locally installed Pi packages.", effect: "read", requiresApproval: false },
+	"package.catalog": { description: "Reads the local SQLite catalog mirror.", effect: "read", requiresApproval: false },
 	"package.catalog.sync": {
 		description: "Refreshes the local catalog mirror from the Pi-package-tagged npm registry subset.",
 		effect: "external-write",
+		requiresApproval: false,
 	},
-	"package.index": { description: "Reads the locally built adoption-score index, if one exists.", effect: "read" },
+	"package.index": { description: "Reads the locally built adoption-score index, if one exists.", effect: "read", requiresApproval: false },
 	"package.index.build": {
 		description: "Builds the adoption-score index by scoring catalog entries against the npm registry.",
 		effect: "external-write",
+		requiresApproval: false,
 	},
-	"package.updates": { description: "Reads the last background update-check snapshot.", effect: "read" },
-	"package.check": { description: "Runs static (and optionally smoke-test) quality checks against a local package path.", effect: "read" },
-	"package.pack": { description: "Verifies a local package path via npm pack.", effect: "read" },
-	"package.score": { description: "Computes an adoption-readiness score for a local path or registry package.", effect: "read" },
-	"setup.export": { description: "Exports the current Pi setup as a portable manifest.", effect: "local-write" },
-	"setup.update": { description: "Updates an existing setup manifest in place.", effect: "local-write" },
-	"setup.plan": { description: "Computes a setup manifest's install/update/remove plan without applying it.", effect: "read" },
+	"package.updates": { description: "Reads the last background update-check snapshot.", effect: "read", requiresApproval: false },
+	"package.check": {
+		description: "Runs static (and optionally smoke-test) quality checks against a local package path.",
+		effect: "read",
+		requiresApproval: false,
+	},
+	"package.pack": { description: "Verifies a local package path via npm pack.", effect: "read", requiresApproval: false },
+	"package.score": {
+		description: "Computes an adoption-readiness score for a local path or registry package.",
+		effect: "read",
+		requiresApproval: false,
+	},
+	"setup.export": { description: "Exports the current Pi setup as a portable manifest.", effect: "local-write", requiresApproval: false },
+	"setup.update": { description: "Updates an existing setup manifest in place.", effect: "local-write", requiresApproval: false },
+	"setup.plan": {
+		description: "Computes a setup manifest's install/update/remove plan without applying it.",
+		effect: "read",
+		requiresApproval: false,
+	},
 	"setup.apply": {
 		description: "Applies a setup manifest's plan -- can install, update, or remove packages.",
 		effect: "open-world",
+		requiresApproval: true,
 	},
-	"package.security.get": { description: "Reads this daemon's mutation-approval security settings.", effect: "read" },
-	"package.security.set": { description: "Writes this daemon's mutation-approval security settings.", effect: "local-write" },
-	"package.install": { description: "Installs a Pi package from an npm, git, or https source.", effect: "open-world" },
+	"package.security.get": {
+		description: "Reads this daemon's mutation-approval security settings.",
+		effect: "read",
+		requiresApproval: false,
+	},
+	"package.security.set": {
+		description: "Writes this daemon's mutation-approval security settings.",
+		effect: "local-write",
+		requiresApproval: true,
+	},
+	"package.install": {
+		description: "Installs a Pi package from an npm, git, or https source.",
+		effect: "open-world",
+		requiresApproval: true,
+	},
 	"package.install_service": {
 		description: "Installs a persistent supervised service for an already-installed daemon package.",
 		effect: "open-world",
+		requiresApproval: true,
 	},
 	"package.restart_service": {
 		description: "Restarts an already-installed package's persistent service -- no new code introduced.",
 		effect: "external-write",
+		requiresApproval: true,
 	},
 	"package.reconcile_services": {
 		description: "Reconciles every installed daemon package's persistent service against desired state.",
 		effect: "external-write",
+		requiresApproval: true,
 	},
-	"package.remove": { description: "Removes an installed Pi package. Irreversible.", effect: "destructive" },
-	"package.update": { description: "Updates a configured Pi package to its latest available version.", effect: "open-world" },
-	"resources.list": { description: "Lists global and project-scoped Pi resources (extensions, skills, prompts, themes).", effect: "read" },
-	"resources.toggle": { description: "Enables or disables one Pi resource in a settings file.", effect: "local-write" },
-	"pi.status": { description: "Reports the locally running Pi version against the latest published release.", effect: "read" },
-	"advisories.scan": { description: "Scans installed package versions against known advisories.", effect: "read" },
-	"doctor.run": { description: "Runs diagnostic health checks (service install drift, resource config, ...).", effect: "read" },
-	"package.updates.project": { description: "Checks for updates across every scope visible to one project.", effect: "read" },
+	"package.remove": { description: "Removes an installed Pi package. Irreversible.", effect: "destructive", requiresApproval: true },
+	"package.update": {
+		description: "Updates a configured Pi package to its latest available version.",
+		effect: "open-world",
+		requiresApproval: true,
+	},
+	"resources.list": {
+		description: "Lists global and project-scoped Pi resources (extensions, skills, prompts, themes).",
+		effect: "read",
+		requiresApproval: false,
+	},
+	"resources.toggle": {
+		description: "Enables or disables one Pi resource in a settings file.",
+		effect: "local-write",
+		requiresApproval: true,
+	},
+	"pi.status": {
+		description: "Reports the locally running Pi version against the latest published release.",
+		effect: "read",
+		requiresApproval: false,
+	},
+	"advisories.scan": {
+		description: "Scans installed package versions against known advisories.",
+		effect: "read",
+		requiresApproval: false,
+	},
+	"doctor.run": {
+		description: "Runs diagnostic health checks (service install drift, resource config, ...).",
+		effect: "read",
+		requiresApproval: false,
+	},
+	"package.updates.project": {
+		description: "Checks for updates across every scope visible to one project.",
+		effect: "read",
+		requiresApproval: false,
+	},
 };
 
 /** Read effects need only packed:read; every other effect needs both (writes commonly also read first). */
@@ -142,16 +221,20 @@ export function registerPackedVehicleOperations(
 			output: passthroughVehicleSchema,
 			permissions: permissionsFor(meta.effect),
 			effect: meta.effect,
+			requiresApproval: meta.requiresApproval,
 			idempotency: meta.effect === "read" ? READ : WRITE,
 			limits: LIMITS,
 		});
 		registry.register(
 			OWNER,
-			bindVehicleOperation(
-				operation,
-				() => async (context) =>
-					withPackedErrorParity(() => executeOperation(name, context.input as OperationInputs[typeof name])),
-			),
+			bindVehicleOperation(operation, () => async (context) => {
+				// The registry's own gate (see this file's doc comment) already decided this
+				// call is approved by the time the handler runs -- forcing approved: true
+				// here satisfies executeOperation()'s own legacy authorize() check without
+				// asking a Vehicle caller to know that REST-only field even exists.
+				const input = { ...(context.input as Record<string, unknown>), approved: true } as OperationInputs[typeof name];
+				return withPackedErrorParity(() => executeOperation(name, input));
+			}),
 		);
 	}
 }

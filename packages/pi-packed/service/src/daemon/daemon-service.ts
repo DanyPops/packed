@@ -300,6 +300,45 @@ export function listUnconfiguredDaemonDependencies(piHome: string): DaemonDepend
 }
 
 /**
+ * True when `packageName` (a bare npm name) is a pi:-configured extension --
+ * present in readPackageDeclarations()'s own packages[] list, regardless of
+ * whether it's pinned. The other half of the classification
+ * classifyUpdateSource() needs: a name that resolves ok via
+ * resolveDaemonServiceSpec() but returns false here is a "daemon-dependency"
+ * class source, not an "extension" one.
+ */
+export function isConfiguredExtension(piHome: string, packageName: string): boolean {
+	return readPackageDeclarations(piHome).some((source) => npmPackageName(source) === packageName);
+}
+
+export type UpdateSourceKind = "extension" | "daemon-dependency";
+
+/**
+ * Classifies an npm: source for package.update's own two-path mutation:
+ * "extension" (pi:-configured, settings.json's packages[] -- `pi update
+ * --extension` already handles this correctly, unchanged) vs.
+ * "daemon-dependency" (NOT pi:-configured, but resolveDaemonServiceSpec()
+ * resolves it directly BY ITS OWN NAME -- pi-core can never see this one;
+ * confirmed via this house's own failing-test repro, service/test/
+ * install.test.ts, of pi's real "No matching package found"). Needs the
+ * alternate npm-level mutation path (Installer.updateDaemonDependency())
+ * instead of shelling to `pi update --extension` at all.
+ *
+ * undefined for a non-npm: source, or an npm: source that is neither
+ * (never installed, or installed but not Vehicle-shaped) -- package.update's
+ * existing catch-all path (calling `pi update --extension` and surfacing
+ * whatever it reports) still applies unchanged to either of those, exactly
+ * as it did before this classification existed.
+ */
+export function classifyUpdateSource(piHome: string, source: string): UpdateSourceKind | undefined {
+	if (!source.startsWith("npm:")) return undefined;
+	const packageName = npmPackageName(source);
+	if (!packageName) return undefined;
+	if (isConfiguredExtension(piHome, packageName)) return "extension";
+	return resolveDaemonServiceSpec(piHome, source).ok ? "daemon-dependency" : undefined;
+}
+
+/**
  * `packed installed`'s real, whole-fleet listing: every pi:-configured
  * extension (`kind: "extension"`, exactly today's
  * readInstalledPackagesAcrossScopes() output, unchanged) PLUS every

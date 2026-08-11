@@ -19,7 +19,7 @@ import { type AdoptionReport, scoreTarget } from "../adoption/score.ts";
 import { buildIndex, indexPath, type PackageIndex, readIndex, writeIndex } from "../index/build-index.ts";
 import { syncCatalog } from "../packages/catalog.ts";
 import { catalogList, dbPath, getSyncMeta, latestVersion, openDb, searchLocal } from "../packages/db.ts";
-import { defaultPiHome, readInstalledPackagesAcrossScopes } from "../packages/installed.ts";
+import { defaultPiHome, npmPackageName, readInstalledPackagesAcrossScopes, splitNpmSource } from "../packages/installed.ts";
 import type { InstalledPkg, Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome, UpdatesSnapshot } from "../packages/package.ts";
 import { buildSearchQuery, clampLimit } from "../packages/package.ts";
 import {
@@ -47,6 +47,7 @@ import { createLogger } from "../shared/log.ts";
 import { VERSION } from "../shared/version.ts";
 import { formatCleanupSummary, runCleanup } from "./cleanup.ts";
 import {
+	classifyUpdateSource,
 	type DaemonServiceInstaller,
 	listManagedPackages,
 	type ReconcileAllResult,
@@ -535,8 +536,35 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			// must reconcile against the NEW installed source, never the one that
 			// was just removed.
 			const restartSource = target ?? source;
+			// A real Vehicle-shaped daemon dependency with no pi: manifest of its
+			// own (e.g. @danypops/lector, pinned independently of its pi-lector
+			// wrapper) can never be found by `pi update --extension` -- pi-core's
+			// own "configured packages" notion IS settings.json's packages[].
+			// Route it through updateDaemonDependency() instead of ever shelling
+			// to pi at all, rather than surfacing its raw, unhelpful "No matching
+			// package found". See packed-package-update-restart-service-cant-manage.
+			const kind = classifyUpdateSource(piHomeForServiceInstall, source);
 			try {
-				const outcome = await deps.inst.update(source, { approved, target });
+				let outcome: UpdateOutcome;
+				if (kind === "daemon-dependency") {
+					if (!deps.inst.updateDaemonDependency) {
+						return json({
+							ok: false,
+							source,
+							output: `${source} is a real Vehicle-shaped daemon dependency with no pi: manifest of its own -- this installer cannot update it directly`,
+							reloadRequired: false,
+						});
+					}
+					const packageName = npmPackageName(source);
+					if (!packageName) return err(400, "invalid source; want npm:<pkg>[@ver]");
+					if (target !== undefined && npmPackageName(target) !== packageName) {
+						return err(400, "target must be the same package as source for a daemon-dependency update");
+					}
+					const [, targetVersion] = target ? splitNpmSource(target.slice(4)) : [undefined, undefined];
+					outcome = await deps.inst.updateDaemonDependency(packageName, { approved, version: targetVersion || undefined });
+				} else {
+					outcome = await deps.inst.update(source, { approved, target });
+				}
 				if (!restartSource.startsWith("npm:") || outcome.alreadyUpToDate) return json({ ok: true, source, ...outcome });
 				const service = await daemonServiceInstaller.restart(piHomeForServiceInstall, restartSource);
 				if (!service.ok) {

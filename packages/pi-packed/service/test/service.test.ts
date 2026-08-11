@@ -58,6 +58,14 @@ class FakeInstaller implements Installer {
 		this.gotTarget = options?.target;
 		return { output: this.output, reloadRequired: true, alreadyUpToDate: false, pinned: false, ...this.updateOutcome };
 	}
+	updateDaemonDependencyGotName = "";
+	updateDaemonDependencyGotVersion: string | undefined;
+	updateDaemonDependencyOutcome: Partial<UpdateOutcome> = {};
+	async updateDaemonDependency(name: string, options?: { approved?: boolean; version?: string }): Promise<UpdateOutcome> {
+		this.updateDaemonDependencyGotName = name;
+		this.updateDaemonDependencyGotVersion = options?.version;
+		return { output: this.output, reloadRequired: true, alreadyUpToDate: false, pinned: false, ...this.updateDaemonDependencyOutcome };
+	}
 }
 
 class FakeDaemonServiceInstaller implements DaemonServiceInstaller {
@@ -604,6 +612,72 @@ describe("service app", () => {
 			after: { source: "npm:@scope/pkg@2.0.0", version: "2.0.0" },
 			rollback: { attempted: false, ok: true },
 		});
+	});
+
+	it("POST /update routes a real Vehicle-shaped daemon dependency with no pi: manifest of its own through updateDaemonDependency, never pi update --extension -- packed-package-update-restart-service-cant-manage", async () => {
+		const inst = new FakeInstaller();
+		const svc = new FakeDaemonServiceInstaller();
+		const piHome = track(mkdtempSync(join(tmpdir(), "packed-update-daemon-dep-")));
+		writeFileSync(join(piHome, "settings.json"), JSON.stringify({ packages: ["npm:@danypops/pi-lector@0.12.7"] }));
+		const lectorDir = join(piHome, "npm", "node_modules", "@danypops", "lector");
+		mkdirSync(lectorDir, { recursive: true });
+		writeFileSync(
+			join(lectorDir, "package.json"),
+			JSON.stringify({
+				name: "@danypops/lector",
+				version: "0.18.9",
+				bin: { lector: "src/cli.ts" },
+				dependencies: { "@danypops/vehicle-server": "^0.18.2" },
+			}),
+		);
+		const app = createApp(deps({ inst, daemonServiceInstaller: svc, piHome }));
+
+		const response = await app.fetch(
+			new Request("http://x/update", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ source: "npm:@danypops/lector", approved: true }),
+			}),
+		);
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toMatchObject({ ok: true, source: "npm:@danypops/lector", serviceReconciled: true });
+		expect(inst.updateDaemonDependencyGotName).toBe("@danypops/lector");
+		// Never fell through to pi update --extension -- the exact call that fails
+		// live with pi-core's own "No matching package found".
+		expect(inst.updated).toBe("");
+		expect(svc.restartGotSource).toBe("npm:@danypops/lector");
+	});
+
+	it("POST /update still routes a pi:-configured extension through the ordinary pi update --extension path, unchanged, even when it also happens to resolve as a Vehicle daemon itself", async () => {
+		const inst = new FakeInstaller();
+		const svc = new FakeDaemonServiceInstaller();
+		const piHome = track(mkdtempSync(join(tmpdir(), "packed-update-extension-")));
+		writeFileSync(join(piHome, "settings.json"), JSON.stringify({ packages: ["npm:@danypops/papyrus"] }));
+		const papyrusDir = join(piHome, "npm", "node_modules", "@danypops", "papyrus");
+		mkdirSync(papyrusDir, { recursive: true });
+		writeFileSync(
+			join(papyrusDir, "package.json"),
+			JSON.stringify({
+				name: "@danypops/papyrus",
+				version: "1.0.0",
+				bin: { papyrus: "src/cli.ts" },
+				dependencies: { "@danypops/vehicle-server": "^0.18.2" },
+			}),
+		);
+		const app = createApp(deps({ inst, daemonServiceInstaller: svc, piHome }));
+
+		const response = await app.fetch(
+			new Request("http://x/update", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ source: "npm:@danypops/papyrus", approved: true }),
+			}),
+		);
+
+		expect(response.status).toBe(200);
+		expect(inst.updated).toBe("npm:@danypops/papyrus");
+		expect(inst.updateDaemonDependencyGotName).toBe("");
 	});
 
 	it("GET /updates serves the watcher snapshot", async () => {

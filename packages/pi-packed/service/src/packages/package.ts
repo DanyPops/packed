@@ -182,6 +182,21 @@ export interface Installer {
 	 */
 	update(source: string, options?: { approved?: boolean; local?: boolean; target?: string }): Promise<UpdateOutcome>;
 	/**
+	 * Updates a package that is genuinely installed and npm-resolvable but is
+	 * NOT itself a pi:-configured extension -- `pi update --extension` can
+	 * never find it (pi-core's own "configured packages" notion IS exactly
+	 * settings.json's packages[]), confirmed via a real failing-test repro
+	 * (service/test/install.test.ts) of pi's own "No matching package found".
+	 * `daemon-service.ts`'s `classifyUpdateSource()` decides when this path
+	 * applies instead of `update()` -- a real Vehicle-shaped daemon dependency
+	 * with no `pi:` manifest of its own (e.g. @danypops/lector, pinned
+	 * independently of its pi-lector wrapper). Optional because only a real
+	 * npm-backed Installer (ExecInstaller) can perform it; a caller checks for
+	 * its presence before using this path, exactly like validate()/
+	 * installOnly()/reresolveDependencyTree() below.
+	 */
+	updateDaemonDependency?(name: string, options?: { approved?: boolean; version?: string }): Promise<UpdateOutcome>;
+	/**
 	 * Optional batch-oriented split of install(), for a caller installing several packages
 	 * together (see SetupManager.apply()) -- a single ad hoc install() still does all three
 	 * steps itself and needs none of this; every existing Installer implementation that omits

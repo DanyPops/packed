@@ -203,6 +203,46 @@ export class ExecInstaller implements Installer {
 	}
 
 	/**
+	 * The alternate mutation path for a source classifyUpdateSource() flags as
+	 * "daemon-dependency" -- genuinely installed and npm-resolvable, but NOT
+	 * itself a pi:-configured extension, so `pi update --extension` can never
+	 * find it (confirmed via a real failing-test repro of pi's own "No
+	 * matching package found"). Runs a real, scoped `npm install
+	 * <name>[@version]` at piHome/npm directly -- npm's own single-invocation
+	 * dependency + lockfile update, no separate reresolveDependencyTree() call
+	 * needed afterward. No `pi:` manifest exists for this package to validate
+	 * against, so -- unlike install()/update() -- there is no validate() step
+	 * here at all.
+	 */
+	async updateDaemonDependency(name: string, options?: { approved?: boolean; version?: string }): Promise<UpdateOutcome> {
+		const t0 = performance.now();
+		const previousVersion = readResolvedVersion(this.piHome, `npm:${name}`);
+		const spec = `${name}@${options?.version ?? "latest"}`;
+		const cwd = join(this.piHome, "npm");
+		// See run()'s own comment: env is explicit for the identical reason.
+		const proc = Bun.spawn([this.npmBin, "install", spec], { cwd, stdout: "pipe", stderr: "pipe", env: process.env });
+		const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+		const out = [stdout.trim(), stderr.trim()].filter(Boolean).join("\n");
+		const code = await proc.exited;
+		if (code !== 0) throw new Error(out || `exit ${code}`);
+		const currentVersion = readResolvedVersion(this.piHome, `npm:${name}`);
+		this.logger.debug("updateDaemonDependency timing", { name, totalMs: round1(performance.now() - t0) });
+		// Same honesty discipline as update() above: only trust a "nothing
+		// changed" conclusion when a real version was actually read both before
+		// and after.
+		const knowsBoth = previousVersion !== undefined && currentVersion !== undefined;
+		const changed = !knowsBoth || previousVersion !== currentVersion;
+		return {
+			output: out,
+			reloadRequired: changed,
+			alreadyUpToDate: !changed,
+			pinned: options?.version !== undefined,
+			previousVersion,
+			currentVersion,
+		};
+	}
+
+	/**
 	 * The supervised "move a pin" workflow `pi update --extension` can never
 	 * perform by itself (it intentionally skips an exact pin) -- see the
 	 * linked research doc (pinned-package-update-behavior-and-safe-

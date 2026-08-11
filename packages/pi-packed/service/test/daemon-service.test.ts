@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { VehicleRegistrar } from "@danypops/armada";
 import { createArmadaTestHarness } from "@danypops/armada/testing";
 import {
+	classifyUpdateSource,
 	detectVehicleDaemonService,
 	listManagedPackages,
 	listUnconfiguredDaemonDependencies,
@@ -296,6 +297,46 @@ describe("listManagedPackages -- packed installed's real whole-fleet listing (pa
 		writeRawPackage(join(piHome, "npm", "node_modules", "plain"), { name: "plain", version: "1.0.0" });
 
 		expect(listManagedPackages(piHome)).toEqual([{ name: "plain", pinned: "1.0.0", installed: undefined, scope: "global", kind: "extension" }]);
+	});
+});
+
+describe("classifyUpdateSource -- package.update's own two-path split (packed-package-update-restart-service-cant-manage)", () => {
+	it("classifies a pi:-configured extension as 'extension', even when it also happens to resolve as a Vehicle daemon itself", () => {
+		const piHome = fakePiHome();
+		writeFileSync(piHome + "/settings.json", JSON.stringify({ packages: ["npm:@danypops/papyrus"] }));
+		writeRawPackage(join(piHome, "npm", "node_modules", "@danypops", "papyrus"), {
+			name: "@danypops/papyrus",
+			version: "1.0.0",
+			bin: { papyrus: "src/cli.ts" },
+			dependencies: { "@danypops/vehicle-server": "^0.1.0" },
+		});
+
+		expect(classifyUpdateSource(piHome, "npm:@danypops/papyrus")).toBe("extension");
+	});
+
+	it("classifies a real Vehicle-shaped daemon with no pi:-configured entry of its own as 'daemon-dependency'", () => {
+		const piHome = fakePiHome();
+		writeFileSync(piHome + "/settings.json", JSON.stringify({ packages: ["npm:@danypops/pi-lector"] }));
+		writeRawPackage(join(piHome, "npm", "node_modules", "@danypops", "lector"), {
+			name: "@danypops/lector",
+			version: "0.18.9",
+			bin: { lector: "src/cli.ts" },
+			dependencies: { "@danypops/vehicle-server": "^0.18.2" },
+		});
+
+		expect(classifyUpdateSource(piHome, "npm:@danypops/lector")).toBe("daemon-dependency");
+	});
+
+	it("classifies neither for an npm: source that resolves as nothing at all", () => {
+		const piHome = fakePiHome();
+		writeFileSync(piHome + "/settings.json", JSON.stringify({ packages: [] }));
+
+		expect(classifyUpdateSource(piHome, "npm:never-installed")).toBeUndefined();
+	});
+
+	it("classifies neither for a non-npm source -- git:/https: replace/update behavior is untouched", () => {
+		const piHome = fakePiHome();
+		expect(classifyUpdateSource(piHome, "git:github.com/u/r@v1")).toBeUndefined();
 	});
 });
 

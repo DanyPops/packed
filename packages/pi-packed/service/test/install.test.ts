@@ -378,6 +378,94 @@ describe("ExecInstaller.update() — a real Vehicle daemon dependency with no pi
 	});
 });
 
+/**
+ * A fake `npm` binary genuinely implementing `install <name>[@version]` against
+ * a real piHome -- distinct from writeFakeNpm above (a no-args
+ * reresolveDependencyTree() stand-in) and writeFakeReplacePi (implements `pi
+ * install`/`pi remove`, not raw npm). No version given simulates "whatever
+ * the registry's own latest happens to be right now" via `latestVersion`.
+ */
+function writeFakeNpmInstall(dir: string, piHome: string, latestVersion = "9.9.9"): string {
+	const script = join(dir, "fake-npm-install");
+	const body = `
+const piHome = ${JSON.stringify(piHome)};
+const latestVersion = ${JSON.stringify(latestVersion)};
+const fs = require("node:fs");
+const path = require("node:path");
+
+const [cmd, spec] = process.argv.slice(2);
+if (cmd !== "install" || !spec) {
+	process.stderr.write("unsupported invocation: " + process.argv.slice(2).join(" ") + "\\n");
+	process.exit(1);
+}
+const at = spec.lastIndexOf("@");
+const name = at > 0 ? spec.slice(0, at) : spec;
+const version = at > 0 ? spec.slice(at + 1) : latestVersion;
+const resolved = version === "latest" ? latestVersion : version;
+const pkgDir = path.join(piHome, "npm", "node_modules", name);
+fs.mkdirSync(pkgDir, { recursive: true });
+fs.writeFileSync(path.join(pkgDir, "package.json"), JSON.stringify({ name, version: resolved }));
+process.stdout.write("added 1 package, changed 1 package\\n");
+process.exit(0);
+`;
+	writeFileSync(script, `#!/usr/bin/env bun\n${body}`);
+	chmodSync(script, 0o755);
+	return script;
+}
+
+describe("ExecInstaller.updateDaemonDependency() -- the alternate npm-level mutation path for a package with no pi: manifest of its own (packed-package-update-restart-service-cant-manage)", () => {
+	it("bumps to the registry's real latest when no version is given, reporting an honest reloadRequired", async () => {
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-daemon-dep-")));
+		const piHome = writePiHome({ "@danypops/lector": "0.18.9" });
+		const npmBin = writeFakeNpmInstall(scriptDir, piHome, "0.19.0");
+		const installer = new ExecInstaller("unused-pi-bin", piHome, undefined, npmBin);
+
+		const outcome = await installer.updateDaemonDependency("@danypops/lector");
+
+		expect(outcome.previousVersion).toBe("0.18.9");
+		expect(outcome.currentVersion).toBe("0.19.0");
+		expect(outcome.reloadRequired).toBe(true);
+		expect(outcome.alreadyUpToDate).toBe(false);
+		expect(outcome.pinned).toBe(false);
+	});
+
+	it("pins to an explicit version when one is given, and reports pinned:true", async () => {
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-daemon-dep-")));
+		const piHome = writePiHome({ "@danypops/lector": "0.18.9" });
+		const npmBin = writeFakeNpmInstall(scriptDir, piHome);
+		const installer = new ExecInstaller("unused-pi-bin", piHome, undefined, npmBin);
+
+		const outcome = await installer.updateDaemonDependency("@danypops/lector", { version: "0.20.0" });
+
+		expect(outcome.currentVersion).toBe("0.20.0");
+		expect(outcome.pinned).toBe(true);
+		expect(outcome.reloadRequired).toBe(true);
+	});
+
+	it("reports an honest alreadyUpToDate when the version genuinely doesn't change", async () => {
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-daemon-dep-")));
+		const piHome = writePiHome({ "@danypops/lector": "0.18.9" });
+		const npmBin = writeFakeNpmInstall(scriptDir, piHome, "0.18.9");
+		const installer = new ExecInstaller("unused-pi-bin", piHome, undefined, npmBin);
+
+		const outcome = await installer.updateDaemonDependency("@danypops/lector");
+
+		expect(outcome.alreadyUpToDate).toBe(true);
+		expect(outcome.reloadRequired).toBe(false);
+	});
+
+	it("surfaces a real npm failure instead of silently reporting success", async () => {
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-daemon-dep-")));
+		const piHome = writePiHome({ "@danypops/lector": "0.18.9" });
+		const failingNpm = join(scriptDir, "fake-npm-fail");
+		writeFileSync(failingNpm, ["#!/usr/bin/env bash", "echo 'ERESOLVE unable to resolve dependency tree' >&2", "exit 1"].join("\n"));
+		chmodSync(failingNpm, 0o755);
+		const installer = new ExecInstaller("unused-pi-bin", piHome, undefined, failingNpm);
+
+		await expect(installer.updateDaemonDependency("@danypops/lector")).rejects.toThrow(/ERESOLVE/);
+	});
+});
+
 describe("ExecInstaller.update({ target }) — the supervised replace() workflow for moving an exact pin", () => {
 	function setup(options: { failInstallFor?: string } = {}) {
 		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-replace-bin-")));

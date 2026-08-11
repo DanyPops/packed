@@ -9,7 +9,7 @@ import {
 } from "@danypops/vehicle-server/daemon";
 import { ensureAuthToken } from "@danypops/vehicle-server/paths";
 import { captureLoadedModules, checkModuleFreshnessAll, ownRuntimeDependencyNames } from "../adoption/module-freshness.ts";
-import { type DaemonServiceInstaller, RealDaemonServiceInstaller, reconcileAllDaemonServices } from "./daemon-service.ts";
+import { type DaemonServiceInstaller, PACKED_VEHICLE_NAME, RealDaemonServiceInstaller, reconcileAllDaemonServices } from "./daemon-service.ts";
 import { generateIndex, indexPath, indexStatus } from "../index/build-index.ts";
 import { catalogStatus, syncCatalog } from "../packages/catalog.ts";
 import { latestVersion, openDb } from "../packages/db.ts";
@@ -134,6 +134,15 @@ export function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOpt
 	return {
 		daemonLabel: "Packed",
 		handlePath: paths.handle,
+		// Vehicle Shell broker mode (enable-vehicle-shell-broker-mode-in-pi-packed): registers this
+		// daemon's own identity in the shared, cross-daemon Vehicle Handle Directory, alongside its
+		// existing private handlePath above -- unaffected either way. Must match
+		// extension/src/vehicle-tools.ts's own registerVehicleTools({ shell: { broker: { ownVehicleName }
+		// } }) literal (extension/ and service/ deliberately never cross-import in this package, so both
+		// sides carry the same comment-anchored literal instead of a shared TS import -- see that
+		// file's own comment).
+		vehicleName: PACKED_VEHICLE_NAME,
+		tokenPath: paths.token,
 		logger,
 		maintenanceTasks,
 		...(idleBudgetMs === undefined ? {} : { idleBudgetMs }),

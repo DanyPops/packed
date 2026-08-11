@@ -378,7 +378,11 @@ export interface ReconcileAllResult {
 /** Matches readPackageDeclarations' own bound -- a reconcile-all sweep never processes an unbounded package list. */
 const MAX_RECONCILE_PACKAGES = 500;
 const PACKED_PACKAGE_NAME = "@danypops/pi-packed";
-const PACKED_VEHICLE_NAME = "pi-packed";
+/** Packed's own stable cross-daemon identity -- both its real Armada vehicle name (this file's own
+ * self-registration guards below) and, since it's the same daemon, the name it registers under in
+ * the shared Vehicle Handle Directory for Vehicle Shell broker mode (see daemon.ts's own
+ * daemonOptions() -- vehicleName: PACKED_VEHICLE_NAME). One canonical name, not two. */
+export const PACKED_VEHICLE_NAME = "pi-packed";
 const SELF_REGISTRATION_REASON = "Packed cannot replace its own Armada service from inside the running daemon";
 
 /**

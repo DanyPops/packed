@@ -128,6 +128,17 @@ describe("startPackedDaemon's own maintenance-task wiring (self-heals Vehicle dr
 		expect(options.idleBudgetMs).toBe(17_000);
 	});
 
+	it("registers pi-packed's own stable identity in the shared Vehicle Handle Directory (Vehicle Shell broker mode) -- enable-vehicle-shell-broker-mode-in-pi-packed", () => {
+		const paths = fakePaths();
+		const options = daemonOptions({ paths, reg: registry, inst: installer, piHome: fakePiHome([]), maintenanceTasks: [] });
+		// Must match extension/src/vehicle-tools.ts's own registerVehicleTools({ shell: { broker:
+		// { ownVehicleName } } }) literal -- the two sides can't share a real TS import (extension/
+		// and service/ deliberately never cross-import, matching this package's own established
+		// convention), so both carry the same comment-anchored literal instead.
+		expect(options.vehicleName).toBe("pi-packed");
+		expect(options.tokenPath).toBe(paths.token);
+	});
+
 	it("includes a vehicle-reconcile task, defaulting to RECONCILE_INTERVAL_DEFAULT_MS", () => {
 		const piHome = fakePiHome([]);
 		const paths = fakePaths();

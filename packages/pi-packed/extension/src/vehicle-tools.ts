@@ -74,7 +74,11 @@ export async function registerPackedVehicle(pi: ExtensionAPI): Promise<void> {
 		await registerVehicleTools(pi, client, {
 			permissions: ["packed:read"],
 			principal: { id: "pi-packed" },
-			shell: { coreOperations: CORE_OPERATIONS },
+			// ownVehicleName must match daemon.ts's own PACKED_VEHICLE_NAME (the shared Vehicle Handle
+			// Directory entry Packed's own daemon registers under via daemonOptions()'s vehicleName --
+			// see service/src/daemon/daemon.ts). activateForeignOperation is auto-supplied by
+			// registerVehicleTools. See enable-vehicle-shell-broker-mode-in-pi-packed.
+			shell: { coreOperations: CORE_OPERATIONS, broker: { ownVehicleName: "pi-packed" } },
 		});
 	} catch {
 		// Daemon state is stale/unreachable -- degrade silently, matching

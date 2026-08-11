@@ -160,4 +160,20 @@ describe("registerPackedVehicle opts into Vehicle Shell activation", () => {
 			stop();
 		}
 	});
+
+	it('enables Vehicle Shell broker mode under ownVehicleName "pi-packed" -- tools_list actually advertises cross-daemon discovery -- enable-vehicle-shell-broker-mode-in-pi-packed', async () => {
+		const { baseUrl, stop } = manifestServer();
+		try {
+			setVehicleClientTargetResolverForTests(() => ({ baseUrl, token: "test-token" }));
+			const { api, registeredTools } = fakePi();
+
+			await registerPackedVehicle(api);
+
+			const list = registeredTools.find((tool) => tool.name === "tools_list");
+			expect(list).toBeDefined();
+			expect(list!.description).toContain('namespaced "<vehicle>:<operation>"');
+		} finally {
+			stop();
+		}
+	});
 });

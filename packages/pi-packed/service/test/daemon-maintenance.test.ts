@@ -11,9 +11,11 @@ import {
 	RealDaemonServiceInstaller,
 	reconcileAllDaemonServices,
 } from "../src/daemon/daemon-service.ts";
+import { openDb, replaceAll } from "../src/packages/db.ts";
 import type { Installer, Registry } from "../src/packages/package.ts";
 import { RECONCILE_INTERVAL_DEFAULT_MS } from "../src/shared/constants.ts";
 import { resolvePackedPaths } from "../src/shared/paths.ts";
+import { loadUpdates } from "../src/daemon/watcher.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -55,6 +57,24 @@ function installMockDaemon(piHome: string, name: string): void {
 		}),
 	);
 	writeFileSync(join(directory, "cli.ts"), "// Mock Vehicle entry point; Armada's test controller never executes it.\n");
+}
+
+/** A Vehicle-shaped daemon-dependency (real bin + vehicle-server dependency), not declared in
+ * settings.json's packages[] -- e.g. papyrus, resolved only via pi-papyrus. */
+function installUnconfiguredDaemonDependency(piHome: string, name: string, version: string): void {
+	const directory = join(piHome, "npm", "node_modules", name);
+	mkdirSync(directory, { recursive: true });
+	writeFileSync(
+		join(directory, "package.json"),
+		JSON.stringify({ name, version, bin: { probe: "cli.ts" }, dependencies: { "@danypops/vehicle-server": "^0.1.0" } }),
+	);
+	writeFileSync(join(directory, "cli.ts"), "// Mock Vehicle entry point.\n");
+}
+
+function installConfiguredExtension(piHome: string, name: string, version: string): void {
+	const directory = join(piHome, "npm", "node_modules", name);
+	mkdirSync(directory, { recursive: true });
+	writeFileSync(join(directory, "package.json"), JSON.stringify({ name, version }));
 }
 
 const registry: Registry = {
@@ -251,5 +271,41 @@ describe("startPackedDaemon's own maintenance-task wiring (self-heals Vehicle dr
 			await running.stop();
 			await harness.dispose();
 		}
+	});
+
+	describe("package-update-check (feeds package.updates / pkg_updates)", () => {
+		it("reports a stale pi:-configured extension", async () => {
+			const piHome = fakePiHome(["npm:@danypops/probe-ext"]);
+			installConfiguredExtension(piHome, "@danypops/probe-ext", "1.0.0");
+			const paths = fakePaths();
+			const db = openDb(paths.database);
+			replaceAll(db, [{ name: "@danypops/probe-ext", version: "2.0.0" }], "test");
+			db.close();
+
+			const options = daemonOptions({ paths, reg: registry, inst: installer, piHome });
+			const task = options.maintenanceTasks?.find((t) => t.name === "package-update-check");
+			expect(task).toBeDefined();
+			await task?.run();
+
+			const snapshot = await loadUpdates(paths.stateDirectory);
+			expect(snapshot?.updates.map((u) => u.name)).toContain("@danypops/probe-ext");
+		});
+
+		it("also reports a stale daemon-dependency package (e.g. papyrus via pi-papyrus)", async () => {
+			const piHome = fakePiHome([]); // deliberately NOT declaring probe-daemon in settings.json
+			installUnconfiguredDaemonDependency(piHome, "@danypops/probe-daemon", "1.0.0");
+			const paths = fakePaths();
+			const db = openDb(paths.database);
+			replaceAll(db, [{ name: "@danypops/probe-daemon", version: "9.9.9" }], "test");
+			db.close();
+
+			const options = daemonOptions({ paths, reg: registry, inst: installer, piHome });
+			const task = options.maintenanceTasks?.find((t) => t.name === "package-update-check");
+			expect(task).toBeDefined();
+			await task?.run();
+
+			const snapshot = await loadUpdates(paths.stateDirectory);
+			expect(snapshot?.updates.map((u) => u.name)).toContain("@danypops/probe-daemon");
+		});
 	});
 });

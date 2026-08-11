@@ -9,12 +9,18 @@ import {
 } from "@danypops/vehicle-server/daemon";
 import { ensureAuthToken } from "@danypops/vehicle-server/paths";
 import { captureLoadedModules, checkModuleFreshnessAll, ownRuntimeDependencyNames } from "../adoption/module-freshness.ts";
-import { type DaemonServiceInstaller, PACKED_VEHICLE_NAME, RealDaemonServiceInstaller, reconcileAllDaemonServices } from "./daemon-service.ts";
+import {
+	type DaemonServiceInstaller,
+	listManagedPackages,
+	PACKED_VEHICLE_NAME,
+	RealDaemonServiceInstaller,
+	reconcileAllDaemonServices,
+} from "./daemon-service.ts";
 import { generateIndex, indexPath, indexStatus } from "../index/build-index.ts";
 import { catalogStatus, syncCatalog } from "../packages/catalog.ts";
 import { latestVersion, openDb } from "../packages/db.ts";
 import { ExecInstaller } from "../packages/install.ts";
-import { defaultPiHome, readInstalledPackages } from "../packages/installed.ts";
+import { defaultPiHome } from "../packages/installed.ts";
 import type { Installer, Registry } from "../packages/package.ts";
 import { HttpRegistry } from "../registry/registry.ts";
 import {
@@ -87,7 +93,10 @@ export function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOpt
 			name: "package-update-check",
 			intervalMs: envMs(ENV.WATCH_SECS, WATCH_INTERVAL_DEFAULT_MS),
 			run: async () => {
-				const updates = checkUpdates((name) => latestVersion(database, name), readInstalledPackages(piHome));
+				// listManagedPackages(), not readInstalledPackages() -- also catches a physically
+				// installed daemon-dependency that isn't itself pi:-configured (e.g. papyrus via
+				// pi-papyrus). readInstalledPackages() alone silently missed every such stale package.
+				const updates = checkUpdates((name) => latestVersion(database, name), listManagedPackages(piHome));
 				await saveUpdates(paths.stateDirectory, { checkedAt: new Date().toISOString(), updates });
 			},
 		},

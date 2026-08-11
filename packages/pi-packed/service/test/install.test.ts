@@ -298,6 +298,86 @@ process.exit(1);
 	return script;
 }
 
+/**
+ * A fake `pi` binary reproducing real `pi update --extension <source>`'s own
+ * "configured packages" check (settings.json's `packages[]` -- the exact
+ * same list installed.ts's readPackageDeclarations()/readInstalledPackages()
+ * reads) -- distinct from writeFakePi above, which never looks at
+ * settings.json at all and so can't reproduce this failure mode. Real `pi`
+ * fails this way for ANY source not itself present in `packages[]`,
+ * regardless of whether it is genuinely resolvable on disk in node_modules --
+ * exactly the shape of a plain library dependency (e.g. @danypops/lector,
+ * added directly to piHome/npm/package.json so it can run as its own
+ * standalone Armada vehicle) that was never itself `pi install`ed as a Pi
+ * extension. See packed-package-update-restart-service-cant-manage.
+ */
+function writeFakePiConfiguredOnly(dir: string, piHome: string): string {
+	const script = join(dir, "fake-pi-configured-only");
+	const body = `
+const piHome = ${JSON.stringify(piHome)};
+const fs = require("node:fs");
+const path = require("node:path");
+
+function bareName(source) {
+	const spec = source.startsWith("npm:") ? source.slice(4) : source;
+	const at = spec.lastIndexOf("@");
+	return at > 0 ? spec.slice(0, at) : spec;
+}
+function entrySource(entry) {
+	return typeof entry === "string" ? entry : entry && typeof entry === "object" ? entry.source : undefined;
+}
+function readSettings() {
+	try {
+		return JSON.parse(fs.readFileSync(path.join(piHome, "settings.json"), "utf8"));
+	} catch {
+		return { packages: [] };
+	}
+}
+
+const [cmd, flag, source] = process.argv.slice(2);
+if (cmd === "update" && flag === "--extension") {
+	const settings = readSettings();
+	const configured = (settings.packages ?? []).some((e) => bareName(entrySource(e) ?? "") === bareName(source));
+	if (!configured) {
+		process.stderr.write("Error: No matching package found for " + source + "\\n");
+		process.exit(1);
+	}
+	process.stdout.write("Updated " + source + "\\n");
+	process.exit(0);
+}
+process.stderr.write("unsupported invocation: " + process.argv.slice(2).join(" ") + "\\n");
+process.exit(1);
+`;
+	writeFileSync(script, `#!/usr/bin/env bun\n${body}`);
+	chmodSync(script, 0o755);
+	return script;
+}
+
+describe("ExecInstaller.update() — a real Vehicle daemon dependency with no pi: extension manifest of its own (packed-package-update-restart-service-cant-manage)", () => {
+	it("fails with pi's own 'No matching package found' for a package that is genuinely installed on disk but was never configured as a Pi extension -- e.g. a standalone Armada vehicle dependency like @danypops/lector", async () => {
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-bin-")));
+		const piHome = writePiHome({ "@danypops/lector": "1.0.0", "@danypops/pi-lector": "0.12.7" });
+		// Only pi-lector (the real Pi extension, with its own `pi:` manifest) is a
+		// configured `packages[]` entry. @danypops/lector is a plain library
+		// dependency of piHome/npm/package.json -- installed and resolvable in
+		// node_modules, registered as its own independent Armada vehicle, but
+		// never itself `pi install`ed.
+		writeFileSync(join(piHome, "settings.json"), JSON.stringify({ packages: ["npm:@danypops/pi-lector"] }));
+		const bin = writeFakePiConfiguredOnly(scriptDir, piHome);
+		const npmBin = writeFakeNpm(scriptDir, join(scriptDir, "npm.log"));
+		const installer = new ExecInstaller(bin, piHome, undefined, npmBin);
+
+		await expect(installer.update("npm:@danypops/lector")).rejects.toThrow(/No matching package found for npm:@danypops\/lector/);
+
+		// Its sibling, a real configured Pi extension, updates fine through the
+		// exact same code path -- matching the live-confirmed asymmetry this task
+		// recorded (`packed update npm:@danypops/pi-lector` reports
+		// alreadyUpToDate, `packed update npm:@danypops/lector` fails outright).
+		const sibling = await installer.update("npm:@danypops/pi-lector");
+		expect(sibling.alreadyUpToDate).toBe(true);
+	});
+});
+
 describe("ExecInstaller.update({ target }) — the supervised replace() workflow for moving an exact pin", () => {
 	function setup(options: { failInstallFor?: string } = {}) {
 		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-replace-bin-")));

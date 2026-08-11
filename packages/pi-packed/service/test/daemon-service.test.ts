@@ -125,6 +125,22 @@ describe("resolveDaemonServiceSpec", () => {
 		});
 	});
 
+	it("defaults a detected (manifest-less) daemon's handle filename to 'daemon.json', not 'handle.json' -- confirmed live: jittor, pipes, and web-spider-daemon's own real HANDLE_FILENAME constants are all 'daemon.json'; only enigma uses 'handle.json'", () => {
+		const piHome = fakePiHome();
+		const dir = join(piHome, "npm", "node_modules", "@danypops/papyrus");
+		writeRawPackage(dir, {
+			name: "@danypops/papyrus",
+			version: "1.0.0",
+			bin: { papyrus: "src/cli.ts" },
+			dependencies: { "@danypops/vehicle-server": "^0.1.0" },
+		});
+
+		const result = resolveDaemonServiceSpec(piHome, "npm:@danypops/papyrus");
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error("expected ok");
+		expect(result.spec.handlePath.endsWith("daemon.json")).toBe(true);
+	});
+
 	it("falls back to detection one level into a real dependency -- a Pi extension with no daemon of its own", () => {
 		const piHome = fakePiHome();
 		const extDir = join(piHome, "npm", "node_modules", "@danypops/pi-papyrus");

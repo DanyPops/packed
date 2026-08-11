@@ -155,12 +155,25 @@ export function detectVehicleDaemonService(
 	return undefined;
 }
 
+/**
+ * "daemon.json" -- not "handle.json" -- when a detected daemon carries no explicit
+ * packed.daemonService.handleFilename override. Confirmed live across every real Vehicle daemon
+ * checked in this ecosystem: jittor, pipes, and web-spider-daemon's own HANDLE_FILENAME constants
+ * are all "daemon.json"; only enigma uses "handle.json". A real, reported bug traced back to this
+ * default: pipes' Armada vehicle registration kept reverting to the wrong handlePath every time
+ * this auto-detect path re-ran, because this guess didn't match pipes' own real convention. Still
+ * a guess, not a read of the target package's own actual value -- a package with a real,
+ * non-default handleFilename must declare it explicitly via packed.daemonService for a fully
+ * correct resolution; this only narrows how often the guess is wrong.
+ */
+const DEFAULT_DETECTED_HANDLE_FILENAME = "daemon.json";
+
 function buildSpec(entry: ResolvedDaemonEntrypoint): ServiceSpec {
 	const paths = resolveDaemonPaths({
 		stateDirectoryName: entry.name,
 		databaseFilename: "unused.db",
 		tokenFilename: "unused-token",
-		handleFilename: entry.handleFilename ?? "handle.json",
+		handleFilename: entry.handleFilename ?? DEFAULT_DETECTED_HANDLE_FILENAME,
 		systemdUnitName: `${entry.name}.service`,
 	});
 	return {

@@ -146,6 +146,28 @@ export function detectVehicleDaemonService(
 		for (const depDir of candidateDirs) {
 			const dep = readPackageJson(depDir);
 			if (!dep) continue;
+			// An explicit manifest on the dependency itself wins over convention detection here too --
+			// mirrors resolveDaemonServiceSpec's own explicit-manifest-first behavior for a directly
+			// installed package. Without this, a dependency's own correct, explicit
+			// handleFilename/name/etc. was silently discarded in favor of a guess whenever the daemon
+			// was discovered one level down instead of installed directly by name -- exactly the
+			// common case (a Pi extension like pi-papyrus has no daemon of its own). Confirmed live:
+			// papyrus's real handle file is "vehicle-handle.json", not the "daemon.json" convention
+			// guess, and papyrus is only ever discovered this way, never installed directly by name.
+			const depManifest = dep.packed?.daemonService;
+			if (depManifest && typeof depManifest.binPath === "string" && depManifest.binPath.length > 0 && dep.version) {
+				return {
+					binPath: join(depDir, depManifest.binPath),
+					args: depManifest.args,
+					name: depManifest.name ?? unscopedName(dep.name ?? depName),
+					displayName: depManifest.displayName,
+					handleFilename: depManifest.handleFilename,
+					workingDirectory: depManifest.workingDirectory,
+					restartOnFailure: depManifest.restartOnFailure,
+					restartSec: depManifest.restartSec,
+					version: dep.version,
+				};
+			}
 			const depBin = firstBinPath(dep);
 			if (depBin && dependsOnVehicle(dep) && dep.version) {
 				return { binPath: join(depDir, depBin), args: ["serve"], name: unscopedName(dep.name ?? depName), version: dep.version };

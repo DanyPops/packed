@@ -185,6 +185,29 @@ describe("resolveDaemonServiceSpec", () => {
 		expect(result.spec.name).toBe("papyrus");
 	});
 
+	it("honors a nested dependency's own explicit packed.daemonService manifest, not just bin+dependency convention -- confirmed live: papyrus's real handle file is 'vehicle-handle.json', not the 'daemon.json' convention guess, and papyrus is only ever discovered this way (one level into pi-papyrus's own dependencies), never installed directly by name", () => {
+		const piHome = fakePiHome();
+		const extDir = join(piHome, "npm", "node_modules", "@danypops/pi-papyrus");
+		writeRawPackage(extDir, { name: "@danypops/pi-papyrus", version: "1.0.0", dependencies: { "@danypops/papyrus": "^0.54.0" } });
+		const depDir = join(extDir, "node_modules", "@danypops/papyrus");
+		writeRawPackage(depDir, {
+			name: "@danypops/papyrus",
+			version: "0.54.0",
+			bin: { papyrus: "src/cli.ts" },
+			dependencies: { "@danypops/vehicle-server": "^0.24.0" },
+			packed: { daemonService: { binPath: "src/cli.ts", args: ["serve"], handleFilename: "vehicle-handle.json", restartOnFailure: true, restartSec: 2 } },
+		});
+
+		const result = resolveDaemonServiceSpec(piHome, "npm:@danypops/pi-papyrus");
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error("expected ok");
+		expect(result.spec.binPath).toBe(join(depDir, "src/cli.ts"));
+		expect(result.spec.name).toBe("papyrus");
+		expect(result.spec.handlePath.endsWith("vehicle-handle.json")).toBe(true);
+		expect(result.spec.restartOnFailure).toBe(true);
+		expect(result.spec.restartSec).toBe(2);
+	});
+
 	it("also detects the legacy @danypops/daemon-kit dependency name, not just vehicle-server", () => {
 		const piHome = fakePiHome();
 		const dir = join(piHome, "npm", "node_modules", "@danypops/web-spider-daemon");

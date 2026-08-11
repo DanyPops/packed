@@ -212,6 +212,17 @@ export interface InstalledPkg {
 	pinned?: string;
 	installed?: string;
 	scope?: "global" | "project";
+	/**
+	 * "extension" (a real pi:-manifested package, settings.json's own
+	 * packages[]) vs. "daemon-dependency" (a Vehicle-shaped daemon Packed
+	 * independently detects at piHome/npm's own top level -- e.g.
+	 * @danypops/lector -- that is NOT itself pi:-configured). Undefined from
+	 * every pre-existing reader (readInstalledPackages/
+	 * readInstalledPackagesAcrossScopes); only daemon-service.ts's
+	 * listManagedPackages() sets this on every row it returns. See
+	 * packed-package-update-restart-service-cant-manage.
+	 */
+	kind?: "extension" | "daemon-dependency";
 }
 
 export interface UpdateEntry {

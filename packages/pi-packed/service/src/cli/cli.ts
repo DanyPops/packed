@@ -14,6 +14,7 @@ import { generateIndex, indexPath, readIndex } from "../index/build-index.ts";
 import { syncCatalog } from "../packages/catalog.ts";
 import { catalogList, dbPath, getSyncMeta, latestVersion, openDb, searchLocal } from "../packages/db.ts";
 import { formatDeployVerification, verifyDeploy } from "../packages/deploy-verify.ts";
+import { listManagedPackages } from "../daemon/daemon-service.ts";
 import { defaultPiBin, NAME_RE } from "../packages/install.ts";
 import { npmPackageName, readInstalledPackages, readInstalledPackagesAcrossScopes } from "../packages/installed.ts";
 import type { Installer, Pkg, Registry, UpdateEntry } from "../packages/package.ts";
@@ -556,9 +557,13 @@ const commands: Record<string, { usage: string; run: Command }> = {
 	installed: {
 		usage: "packed installed [--json]",
 		async run(_rest, d, flags) {
-			const installed = d.daemon ? await d.daemon.installed() : readInstalledPackages(d.piHome);
+			const installed = d.daemon ? await d.daemon.installed() : listManagedPackages(d.piHome);
 			if (flags.json) return ok(`${JSON.stringify(installed)}\n`);
-			return ok(installed.map((p) => `  ${p.name}@${p.pinned ?? p.installed ?? "?"}\n`).join(""));
+			return ok(
+				installed
+					.map((p) => `  ${p.name}@${p.pinned ?? p.installed ?? "?"}${p.kind === "daemon-dependency" ? " [daemon-dependency]" : ""}\n`)
+					.join(""),
+			);
 		},
 	},
 

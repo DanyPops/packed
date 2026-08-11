@@ -25,7 +25,7 @@
  * step isn't a real convention, so detection reads what's already true
  * on disk instead of asking for one more declaration.
  */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createVehicleRegistrar, type VehicleRegistrar } from "@danypops/armada";
 import { resolveDaemonPaths } from "@danypops/vehicle-server/paths";
@@ -36,7 +36,8 @@ import {
 	type ServiceSpec,
 	unregisterVehicleService,
 } from "@danypops/vehicle-server/service";
-import { npmPackageName, readInstalledPackagesAcrossScopes } from "../packages/installed.ts";
+import { npmPackageName, readInstalledPackagesAcrossScopes, readPackageDeclarations } from "../packages/installed.ts";
+import type { InstalledPkg } from "../packages/package.ts";
 
 export interface DaemonServiceManifest {
 	/** Relative to the installed package's own root directory. */
@@ -216,6 +217,117 @@ export function resolveDaemonServiceSpec(piHome: string, source: string): Resolv
 		notADaemon: true,
 		reason: `${packageName} does not declare a packed.daemonService manifest and no Vehicle-shaped daemon dependency was detected`,
 	};
+}
+
+export interface DaemonDependencyPkg {
+	name: string;
+	version: string;
+	/** The Armada vehicle name resolveDaemonServiceSpec built for this package -- may differ
+	 * from `name`'s own bare unscoped form when a packed.daemonService manifest overrides it. */
+	vehicleName: string;
+}
+
+/** Bare npm package names directly under a node_modules directory -- one level for an
+ * unscoped name, two for a @scope/name pair. Never throws; a missing directory (no
+ * npm project yet) is just an empty result. */
+function listTopLevelPackageNames(nodeModulesDir: string): string[] {
+	let entries: string[];
+	try {
+		entries = readdirSync(nodeModulesDir);
+	} catch {
+		return [];
+	}
+	const names: string[] = [];
+	for (const entry of entries) {
+		if (!entry.startsWith("@")) {
+			names.push(entry);
+			continue;
+		}
+		let scoped: string[];
+		try {
+			scoped = readdirSync(join(nodeModulesDir, entry));
+		} catch {
+			continue;
+		}
+		for (const name of scoped) names.push(`${entry}/${name}`);
+	}
+	return names;
+}
+
+/** Matches reconcileAllDaemonServices' own bound -- a full node_modules sweep never
+ * processes an unbounded package list either. */
+const MAX_DAEMON_DEPENDENCY_SCAN = 500;
+
+/**
+ * Every top-level npm package physically installed under piHome/npm/node_modules
+ * that resolveDaemonServiceSpec() itself already recognizes as a real Vehicle-
+ * shaped daemon (an explicit packed.daemonService manifest, or
+ * detectVehicleDaemonService()'s own-bin-plus-real-vehicle-dependency
+ * convention), but that is NOT itself a pi:-configured extension
+ * (readPackageDeclarations() has no entry for it) -- e.g. @danypops/lector,
+ * added directly to piHome/npm/package.json as an independent pin so it can
+ * run ahead of whatever version its own pi-lector wrapper's dependency tree
+ * would otherwise resolve. These are real, running Armada vehicles that a
+ * pi:-manifest-only "installed packages" notion makes permanently invisible
+ * to `packed installed`/`packed update` -- see
+ * packed-package-update-restart-service-cant-manage.
+ *
+ * Deliberately does NOT walk one level into each configured extension's own
+ * dependencies the way resolveDaemonServiceSpec's own detection does for
+ * install-service/restart-service/doctor (service-doctor.ts's
+ * checkServiceUnitPaths already reaches that same dependency through its
+ * wrapper extension's own row) -- duplicating that walk here would
+ * double-report the same Vehicle under two different package names. This
+ * only reports a dependency independently resolvable BY ITS OWN NAME at
+ * piHome/npm's own top level -- exactly the shape a caller can actually run
+ * `packed update npm:<name>` against directly.
+ */
+export function listUnconfiguredDaemonDependencies(piHome: string): DaemonDependencyPkg[] {
+	const configured = new Set(
+		readPackageDeclarations(piHome).flatMap((source) => {
+			const name = npmPackageName(source);
+			return name ? [name] : [];
+		}),
+	);
+	const names = listTopLevelPackageNames(join(piHome, "npm", "node_modules")).slice(0, MAX_DAEMON_DEPENDENCY_SCAN);
+	const out: DaemonDependencyPkg[] = [];
+	for (const name of names) {
+		if (configured.has(name)) continue;
+		const resolved = resolveDaemonServiceSpec(piHome, `npm:${name}`);
+		if (resolved.ok) out.push({ name, version: resolved.spec.version, vehicleName: resolved.spec.name });
+	}
+	return out;
+}
+
+/**
+ * `packed installed`'s real, whole-fleet listing: every pi:-configured
+ * extension (`kind: "extension"`, exactly today's
+ * readInstalledPackagesAcrossScopes() output, unchanged) PLUS every
+ * top-level daemon-only dependency listUnconfiguredDaemonDependencies() can
+ * independently resolve (`kind: "daemon-dependency"`) -- so a real, running
+ * Armada vehicle like @danypops/lector shows up under its own name instead
+ * of staying invisibly nested inside its pi-lector wrapper's own row. See
+ * packed-package-update-restart-service-cant-manage.
+ *
+ * projectRoot only ever widens the extension half (matching
+ * readInstalledPackagesAcrossScopes' own scope) -- daemon-dependency
+ * detection is global-only for now, since the reported gap itself (an
+ * independently-pinned piHome/npm/package.json dependency) is a global-scope
+ * shape; a project-scoped .pi/npm equivalent is real future work, not
+ * something this fixes today.
+ */
+export function listManagedPackages(piHome: string, projectRoot?: string): InstalledPkg[] {
+	const extensions: InstalledPkg[] = readInstalledPackagesAcrossScopes(piHome, projectRoot).map((pkg) => ({
+		...pkg,
+		kind: "extension",
+	}));
+	const daemonDependencies: InstalledPkg[] = listUnconfiguredDaemonDependencies(piHome).map((dep) => ({
+		name: dep.name,
+		installed: dep.version,
+		scope: "global",
+		kind: "daemon-dependency",
+	}));
+	return [...extensions, ...daemonDependencies];
 }
 
 export interface ReconcileAllResult {

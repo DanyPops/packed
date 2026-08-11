@@ -19,7 +19,7 @@ import { type AdoptionReport, scoreTarget } from "../adoption/score.ts";
 import { buildIndex, indexPath, type PackageIndex, readIndex, writeIndex } from "../index/build-index.ts";
 import { syncCatalog } from "../packages/catalog.ts";
 import { catalogList, dbPath, getSyncMeta, latestVersion, openDb, searchLocal } from "../packages/db.ts";
-import { defaultPiHome, readInstalledPackages, readInstalledPackagesAcrossScopes } from "../packages/installed.ts";
+import { defaultPiHome, readInstalledPackagesAcrossScopes } from "../packages/installed.ts";
 import type { InstalledPkg, Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome, UpdatesSnapshot } from "../packages/package.ts";
 import { buildSearchQuery, clampLimit } from "../packages/package.ts";
 import {
@@ -46,7 +46,13 @@ import { SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT } from "../shared/constants.ts";
 import { createLogger } from "../shared/log.ts";
 import { VERSION } from "../shared/version.ts";
 import { formatCleanupSummary, runCleanup } from "./cleanup.ts";
-import { type DaemonServiceInstaller, type ReconcileAllResult, reconcileAllDaemonServices, RealDaemonServiceInstaller } from "./daemon-service.ts";
+import {
+	type DaemonServiceInstaller,
+	listManagedPackages,
+	type ReconcileAllResult,
+	reconcileAllDaemonServices,
+	RealDaemonServiceInstaller,
+} from "./daemon-service.ts";
 import { checkUpdates, loadUpdates } from "./watcher.ts";
 
 const log = createLogger("service");
@@ -366,7 +372,7 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 		}
 
 		if (path === "/installed" && req.method === "GET") {
-			return json(readInstalledPackages(deps.piHome ?? defaultPiHome()));
+			return json(listManagedPackages(deps.piHome ?? defaultPiHome()));
 		}
 
 		if (path === "/remove" && req.method === "POST") {

@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { VehicleRegistrar } from "@danypops/armada";
 import { createArmadaTestHarness } from "@danypops/armada/testing";
-import { detectVehicleDaemonService, RealDaemonServiceInstaller, resolveDaemonServiceSpec } from "../src/daemon/daemon-service.ts";
+import {
+	detectVehicleDaemonService,
+	listManagedPackages,
+	listUnconfiguredDaemonDependencies,
+	RealDaemonServiceInstaller,
+	resolveDaemonServiceSpec,
+} from "../src/daemon/daemon-service.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -205,6 +211,91 @@ describe("resolveDaemonServiceSpec", () => {
 		expect(detectVehicleDaemonService(dir, "some-cli")).toBeUndefined();
 		const result = resolveDaemonServiceSpec(piHome, "npm:some-cli");
 		expect(result.ok).toBe(false);
+	});
+});
+
+describe("listUnconfiguredDaemonDependencies -- the packed-package-update-restart-service-cant-manage visibility gap", () => {
+	it("reports a real Vehicle-shaped daemon installed at piHome/npm's own top level that is NOT a pi:-configured extension", () => {
+		const piHome = fakePiHome();
+		// @danypops/pi-lector IS configured (a real Pi extension, settings.json packages[]).
+		// @danypops/lector is a plain top-level dependency -- installed, own bin, real
+		// vehicle-server dependency -- but never itself `pi install`ed. Exactly the live
+		// shape confirmed in ~/.pi/agent/npm/package.json.
+		writeFileSync(join(piHome, "settings.json"), JSON.stringify({ packages: ["npm:@danypops/pi-lector"] }));
+		writeRawPackage(join(piHome, "npm", "node_modules", "@danypops", "pi-lector"), {
+			name: "@danypops/pi-lector",
+			version: "0.12.7",
+			dependencies: { "@danypops/lector": "^0.18.0" },
+		});
+		writeRawPackage(join(piHome, "npm", "node_modules", "@danypops", "lector"), {
+			name: "@danypops/lector",
+			version: "0.18.9",
+			bin: { lector: "src/cli.ts" },
+			dependencies: { "@danypops/vehicle-server": "^0.18.2" },
+		});
+
+		const result = listUnconfiguredDaemonDependencies(piHome);
+
+		expect(result).toEqual([{ name: "@danypops/lector", version: "0.18.9", vehicleName: "lector" }]);
+	});
+
+	it("never reports a package that is already pi:-configured, even though it independently resolves as a daemon too", () => {
+		const piHome = fakePiHome();
+		writeFileSync(join(piHome, "settings.json"), JSON.stringify({ packages: ["npm:@danypops/papyrus"] }));
+		writeRawPackage(join(piHome, "npm", "node_modules", "@danypops", "papyrus"), {
+			name: "@danypops/papyrus",
+			version: "1.0.0",
+			bin: { papyrus: "src/cli.ts" },
+			dependencies: { "@danypops/vehicle-server": "^0.1.0" },
+		});
+
+		expect(listUnconfiguredDaemonDependencies(piHome)).toEqual([]);
+	});
+
+	it("never reports a package with no real Vehicle-shaped daemon of its own -- an ordinary library dependency", () => {
+		const piHome = fakePiHome();
+		writeFileSync(join(piHome, "settings.json"), JSON.stringify({ packages: [] }));
+		writeRawPackage(join(piHome, "npm", "node_modules", "picomatch"), { name: "picomatch", version: "4.0.5" });
+
+		expect(listUnconfiguredDaemonDependencies(piHome)).toEqual([]);
+	});
+
+	it("returns [] rather than throwing when piHome/npm/node_modules doesn't exist yet", () => {
+		const piHome = fakePiHome();
+		expect(listUnconfiguredDaemonDependencies(piHome)).toEqual([]);
+	});
+});
+
+describe("listManagedPackages -- packed installed's real whole-fleet listing (packed-package-update-restart-service-cant-manage)", () => {
+	it("tags a pi:-configured extension row 'extension' and a detected top-level daemon dependency 'daemon-dependency', side by side", () => {
+		const piHome = fakePiHome();
+		writeFileSync(join(piHome, "settings.json"), JSON.stringify({ packages: ["npm:@danypops/pi-lector@0.12.7"] }));
+		writeRawPackage(join(piHome, "npm", "node_modules", "@danypops", "pi-lector"), {
+			name: "@danypops/pi-lector",
+			version: "0.12.7",
+			dependencies: { "@danypops/lector": "^0.18.0" },
+		});
+		writeRawPackage(join(piHome, "npm", "node_modules", "@danypops", "lector"), {
+			name: "@danypops/lector",
+			version: "0.18.9",
+			bin: { lector: "src/cli.ts" },
+			dependencies: { "@danypops/vehicle-server": "^0.18.2" },
+		});
+
+		const result = listManagedPackages(piHome);
+
+		expect(result).toEqual([
+			{ name: "@danypops/pi-lector", pinned: "0.12.7", installed: undefined, scope: "global", kind: "extension" },
+			{ name: "@danypops/lector", installed: "0.18.9", scope: "global", kind: "daemon-dependency" },
+		]);
+	});
+
+	it("is exactly today's extension listing, with kind added, when there are no daemon-only dependencies at all", () => {
+		const piHome = fakePiHome();
+		writeFileSync(piHome + "/settings.json", JSON.stringify({ packages: ["npm:plain@1.0.0"] }));
+		writeRawPackage(join(piHome, "npm", "node_modules", "plain"), { name: "plain", version: "1.0.0" });
+
+		expect(listManagedPackages(piHome)).toEqual([{ name: "plain", pinned: "1.0.0", installed: undefined, scope: "global", kind: "extension" }]);
 	});
 });
 

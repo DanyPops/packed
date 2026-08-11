@@ -387,6 +387,57 @@ describe("CLI", () => {
 		expect(out).toContain('"pinned":"0.8.2"');
 	});
 
+	it("installed --json also surfaces a real Vehicle-shaped daemon dependency that has no pi: manifest of its own, standalone without a daemon -- packed-package-update-restart-service-cant-manage", async () => {
+		const d = deps();
+		writeFileSync(join(d.piHome, "settings.json"), JSON.stringify({ packages: ["npm:@danypops/pi-lector@0.12.7"] }));
+		const piLectorDir = join(d.piHome, "npm", "node_modules", "@danypops", "pi-lector");
+		mkdirSync(piLectorDir, { recursive: true });
+		writeFileSync(
+			join(piLectorDir, "package.json"),
+			JSON.stringify({ name: "@danypops/pi-lector", version: "0.12.7", dependencies: { "@danypops/lector": "^0.18.0" } }),
+		);
+		const lectorDir = join(d.piHome, "npm", "node_modules", "@danypops", "lector");
+		mkdirSync(lectorDir, { recursive: true });
+		writeFileSync(
+			join(lectorDir, "package.json"),
+			JSON.stringify({
+				name: "@danypops/lector",
+				version: "0.18.9",
+				bin: { lector: "src/cli.ts" },
+				dependencies: { "@danypops/vehicle-server": "^0.18.2" },
+			}),
+		);
+		const { code, out } = await cliRun(["installed", "--json"], d);
+		expect(code).toBe(0);
+		expect(out).toContain('"name":"@danypops/lector"');
+		expect(out).toContain('"kind":"daemon-dependency"');
+	});
+
+	it("installed (human-readable) tags a daemon-dependency row distinctly from a plain pi: extension row", async () => {
+		const d = deps();
+		writeFileSync(join(d.piHome, "settings.json"), JSON.stringify({ packages: ["npm:@danypops/pi-lector@0.12.7"] }));
+		const piLectorDir = join(d.piHome, "npm", "node_modules", "@danypops", "pi-lector");
+		mkdirSync(piLectorDir, { recursive: true });
+		writeFileSync(
+			join(piLectorDir, "package.json"),
+			JSON.stringify({ name: "@danypops/pi-lector", version: "0.12.7", dependencies: { "@danypops/lector": "^0.18.0" } }),
+		);
+		const lectorDir = join(d.piHome, "npm", "node_modules", "@danypops", "lector");
+		mkdirSync(lectorDir, { recursive: true });
+		writeFileSync(
+			join(lectorDir, "package.json"),
+			JSON.stringify({
+				name: "@danypops/lector",
+				version: "0.18.9",
+				bin: { lector: "src/cli.ts" },
+				dependencies: { "@danypops/vehicle-server": "^0.18.2" },
+			}),
+		);
+		const { code, out } = await cliRun(["installed"], d);
+		expect(code).toBe(0);
+		expect(out).toBe("  @danypops/pi-lector@0.12.7\n  @danypops/lector@0.18.9 [daemon-dependency]\n");
+	});
+
 	it("updates computes drift from the local mirror", async () => {
 		const d = deps();
 		writeFileSync(join(d.piHome, "settings.json"), JSON.stringify({ packages: ["npm:pi-extension-manager@0.8.2"] }));

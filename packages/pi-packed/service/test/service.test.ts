@@ -632,6 +632,37 @@ describe("service app", () => {
 		expect(body.map((p: { name: string }) => p.name)).toEqual(["pi-extension-manager", "obj"]);
 	});
 
+	it("GET /installed also surfaces a real Vehicle-shaped daemon dependency that has no pi: manifest of its own -- packed-package-update-restart-service-cant-manage", async () => {
+		const piHome = track(mkdtempSync(join(tmpdir(), "packed-pi-")));
+		writeFileSync(join(piHome, "settings.json"), JSON.stringify({ packages: ["npm:@danypops/pi-lector@0.12.7"] }));
+		const piLectorDir = join(piHome, "npm", "node_modules", "@danypops", "pi-lector");
+		mkdirSync(piLectorDir, { recursive: true });
+		writeFileSync(
+			join(piLectorDir, "package.json"),
+			JSON.stringify({ name: "@danypops/pi-lector", version: "0.12.7", dependencies: { "@danypops/lector": "^0.18.0" } }),
+		);
+		const lectorDir = join(piHome, "npm", "node_modules", "@danypops", "lector");
+		mkdirSync(lectorDir, { recursive: true });
+		writeFileSync(
+			join(lectorDir, "package.json"),
+			JSON.stringify({
+				name: "@danypops/lector",
+				version: "0.18.9",
+				bin: { lector: "src/cli.ts" },
+				dependencies: { "@danypops/vehicle-server": "^0.18.2" },
+			}),
+		);
+		const d = deps({ piHome });
+		const app = createApp(d);
+		const res = await app.fetch(new Request("http://x/installed", { headers: auth }));
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as any;
+		expect(body).toEqual([
+			{ name: "@danypops/pi-lector", pinned: "0.12.7", installed: undefined, scope: "global", kind: "extension" },
+			{ name: "@danypops/lector", installed: "0.18.9", scope: "global", kind: "daemon-dependency" },
+		]);
+	});
+
 	it("POST /remove validates bare names and reports in-band", async () => {
 		const inst = new FakeInstaller();
 		const app = createApp(deps({ inst }));

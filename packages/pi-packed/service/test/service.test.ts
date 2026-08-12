@@ -53,10 +53,20 @@ class FakeInstaller implements Installer {
 	}
 	updateOutcome: Partial<UpdateOutcome> = {};
 	gotTarget: string | undefined;
+	updatedSources: string[] = [];
+	updateOutcomeFor: Record<string, Partial<UpdateOutcome>> = {};
 	async update(source: string, options?: { target?: string }): Promise<UpdateOutcome> {
 		this.updated = source;
+		this.updatedSources.push(source);
 		this.gotTarget = options?.target;
-		return { output: this.output, reloadRequired: true, alreadyUpToDate: false, pinned: false, ...this.updateOutcome };
+		return {
+			output: this.output,
+			reloadRequired: true,
+			alreadyUpToDate: false,
+			pinned: false,
+			...this.updateOutcome,
+			...this.updateOutcomeFor[source],
+		};
 	}
 	updateDaemonDependencyGotName = "";
 	updateDaemonDependencyGotVersion: string | undefined;
@@ -678,6 +688,89 @@ describe("service app", () => {
 		expect(response.status).toBe(200);
 		expect(inst.updated).toBe("npm:@danypops/papyrus");
 		expect(inst.updateDaemonDependencyGotName).toBe("");
+	});
+
+	it("POST /update-all validates, authorizes, and delegates every explicitly given source", async () => {
+		const inst = new FakeInstaller();
+		const app = createApp(deps({ inst }));
+		const denied = await app.fetch(
+			new Request("http://x/update-all", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ sources: ["npm:pi-lsp"] }),
+			}),
+		);
+		expect(denied.status).toBe(403);
+		const allowed = await app.fetch(
+			new Request("http://x/update-all", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ sources: ["npm:pi-lsp", "npm:pi-tickets"], approved: true }),
+			}),
+		);
+		expect(allowed.status).toBe(200);
+		const body = (await allowed.json()) as any;
+		expect(body.ok).toBe(true);
+		expect(inst.updatedSources).toEqual(["npm:pi-lsp", "npm:pi-tickets"]);
+		expect(body.results.map((r: any) => r.source)).toEqual(["npm:pi-lsp", "npm:pi-tickets"]);
+		expect(body.results.every((r: any) => r.ok)).toBe(true);
+	});
+
+	it("POST /update-all defaults to every currently-stale global package from the mirror when sources is omitted", async () => {
+		const inst = new FakeInstaller();
+		const d = deps({ inst });
+		await saveUpdates(d.stateDir, {
+			checkedAt: new Date().toISOString(),
+			updates: [
+				{ name: "pi-lsp", installed: "1.0.0", latest: "1.1.0" },
+				{ name: "pi-tickets", installed: "2.0.0", latest: "2.1.0" },
+			],
+		});
+		const app = createApp(d);
+		const response = await app.fetch(
+			new Request("http://x/update-all", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ approved: true }),
+			}),
+		);
+		expect(response.status).toBe(200);
+		expect(inst.updatedSources).toEqual(["npm:pi-lsp", "npm:pi-tickets"]);
+	});
+
+	it("POST /update-all reports one failure without blocking the rest of the batch", async () => {
+		const inst = new FakeInstaller();
+		inst.updateOutcomeFor["npm:broken"] = undefined as unknown as Partial<UpdateOutcome>;
+		const originalUpdate = inst.update.bind(inst);
+		inst.update = async (source: string, options?: { target?: string }) => {
+			if (source === "npm:broken") throw new Error("No matching package found");
+			return originalUpdate(source, options);
+		};
+		const app = createApp(deps({ inst }));
+		const response = await app.fetch(
+			new Request("http://x/update-all", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ sources: ["npm:broken", "npm:pi-lsp"], approved: true }),
+			}),
+		);
+		expect(response.status).toBe(200);
+		const body = (await response.json()) as any;
+		expect(body.ok).toBe(false);
+		expect(body.results[0]).toMatchObject({ source: "npm:broken", ok: false });
+		expect(body.results[1]).toMatchObject({ source: "npm:pi-lsp", ok: true });
+	});
+
+	it("POST /update-all rejects an invalid source the same way /update does", async () => {
+		const app = createApp(deps({ inst: new FakeInstaller() }));
+		const response = await app.fetch(
+			new Request("http://x/update-all", {
+				method: "POST",
+				headers: { ...auth, "content-type": "application/json" },
+				body: JSON.stringify({ sources: ["not-a-real-source"], approved: true }),
+			}),
+		);
+		expect(response.status).toBe(400);
 	});
 
 	it("GET /updates serves the watcher snapshot", async () => {

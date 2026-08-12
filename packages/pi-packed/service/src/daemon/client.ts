@@ -52,6 +52,7 @@ export interface PackageDaemonPort {
 	reconcileServices(approved?: boolean, projectRoot?: string): Promise<OperationOutputs["package.reconcile_services"]>;
 	remove(name: string, approved?: boolean): Promise<string>;
 	update(source: string, approved?: boolean, target?: string): Promise<UpdateOutcome>;
+	updateAll(sources?: string[], approved?: boolean): Promise<OperationOutputs["package.update_all"]>;
 	piStatus(): Promise<PiVersionReport>;
 	resourcesList(projectRoot?: string): Promise<{ global: PackageResources[]; project: PackageResources[] }>;
 	resourcesToggle(
@@ -282,6 +283,14 @@ export class PackageDaemonClient implements PackageDaemonPort {
 			after: result.after,
 			rollback: result.rollback,
 		};
+	}
+
+	/** Batch update -- see updateManyPackages()'s own doc comment (install.ts). sources omitted
+	 * defaults to every currently-stale global package the mirror already knows about. */
+	async updateAll(sources?: string[], approved = false): Promise<OperationOutputs["package.update_all"]> {
+		const result = await this.call("package.update_all", { sources, approved });
+		if (!result.ok) throw new PackageDaemonError(result.output || "failed to update packages", "package.update_all");
+		return result;
 	}
 }
 

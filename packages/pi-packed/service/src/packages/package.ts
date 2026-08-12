@@ -219,6 +219,15 @@ export interface Installer {
 	 */
 	validate?(source: string): Promise<InstallValidationResult>;
 	installOnly?(source: string, options?: { approved?: boolean; local?: boolean }): Promise<string>;
+	/**
+	 * updateOnly() is update()'s own equivalent split: the real `pi update --extension` mutation
+	 * (or replace(), when options.target is given) WITHOUT the trailing reresolveDependencyTree(),
+	 * returning the same UpdateOutcome update() itself returns -- a single package's own before/
+	 * after version diff is already correct right after its own mutation, reresolveDependencyTree()
+	 * exists to fix a DIFFERENT sibling's drift. See updateManyPackages() (install.ts) for the
+	 * batch caller. Same SEQUENTIAL-only constraint as installOnly() above.
+	 */
+	updateOnly?(source: string, options?: { approved?: boolean; local?: boolean; target?: string }): Promise<UpdateOutcome>;
 	reresolveDependencyTree?(): Promise<string>;
 }
 

@@ -170,6 +170,11 @@ const OPERATION_META: Record<OperationName, OperationMeta> = {
 		effect: "open-world",
 		requiresApproval: true,
 	},
+	"package.update_all": {
+		description: "Updates every currently-stale Pi package in one batch, re-resolving the dependency tree once instead of once per package.",
+		effect: "open-world",
+		requiresApproval: true,
+	},
 	"resources.list": {
 		description: "Lists global and project-scoped Pi resources (extensions, skills, prompts, themes).",
 		effect: "read",

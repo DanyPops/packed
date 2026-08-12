@@ -788,6 +788,71 @@ describe("CLI", () => {
 		});
 	});
 
+	/** A PackageDaemonPort stub that throws "unexpected call" for anything the test doesn't
+	 * explicitly override -- update --all only ever calls updateAll(), so nothing else should
+	 * ever be invoked; a Proxy avoids hand-writing 25+ unused method stubs. */
+	function baseDaemonPort(): PackageDaemonPort {
+		return new Proxy(
+			{},
+			{
+				get: (_target, prop) => async () => {
+					throw new Error(`unexpected call: ${String(prop)}`);
+				},
+			},
+		) as PackageDaemonPort;
+	}
+
+	it("update --all fails closed without a running daemon", async () => {
+		const d = deps({ daemon: undefined });
+		const { code, out } = await cliRun(["update", "--all", "--approve"], d);
+		expect(code).toBe(1);
+		expect(out).toContain("requires a running packed daemon");
+	});
+
+	it("update --all delegates to the daemon's batch endpoint and reports a per-package summary", async () => {
+		const calls: Array<[string[] | undefined, boolean | undefined]> = [];
+		const daemon = {
+			...baseDaemonPort(),
+			async updateAll(sources?: string[], approved?: boolean) {
+				calls.push([sources, approved]);
+				return {
+					ok: true,
+					output: "updated 1/2 package(s)",
+					results: [
+						{ source: "npm:pi-lsp", ok: true, output: "Updated npm:pi-lsp", previousVersion: "1.0.0", currentVersion: "1.1.0" },
+						{ source: "npm:pi-tickets", ok: true, output: "Updated npm:pi-tickets", alreadyUpToDate: true },
+					],
+				};
+			},
+		};
+		const d = deps({ daemon });
+		const { code, out } = await cliRun(["update", "--all", "--approve"], d);
+		expect(code).toBe(0);
+		expect(calls).toEqual([[undefined, true]]);
+		expect(out).toContain("npm:pi-lsp  updated (1.0.0 \u2192 1.1.0)");
+		expect(out).toContain("npm:pi-tickets  already up to date");
+		expect(out).toContain("Reload Pi with /reload to activate the updated packages.");
+		const json = await cliRun(["update", "--all", "--approve", "--json"], d);
+		expect(JSON.parse(json.out).results).toHaveLength(2);
+	});
+
+	it("update --all reports failures inline with exit code 1, without hiding the packages that did succeed", async () => {
+		const daemon = {
+			...baseDaemonPort(),
+			async updateAll() {
+				return {
+					ok: false,
+					output: "updated 0/1 package(s)",
+					results: [{ source: "npm:broken", ok: false, output: "No matching package found" }],
+				};
+			},
+		};
+		const d = deps({ daemon });
+		const { code, out } = await cliRun(["update", "--all", "--approve"], d);
+		expect(code).toBe(1);
+		expect(out).toContain("npm:broken  FAILED: No matching package found");
+	});
+
 	it("remove wants a bare name and has stable JSON output", async () => {
 		const d = deps();
 		expect((await cliRun(["remove", "npm:foo"], d)).code).toBe(2);
@@ -946,6 +1011,10 @@ describe("CLI", () => {
 			},
 			async update(source) {
 				return { output: source, reloadRequired: false, alreadyUpToDate: true, pinned: false };
+			},
+			async updateAll(sources) {
+				calls.push(`updateAll:${sources?.join(",")}`);
+				return { ok: true, output: "updated 0/0 package(s)", results: [] };
 			},
 			async piStatus() {
 				calls.push("piStatus");

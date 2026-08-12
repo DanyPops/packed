@@ -18,6 +18,7 @@ import { NpmPackVerifier, type PackReport } from "../adoption/pack.ts";
 import { type AdoptionReport, scoreTarget } from "../adoption/score.ts";
 import { buildIndex, indexPath, type PackageIndex, readIndex, writeIndex } from "../index/build-index.ts";
 import { syncCatalog } from "../packages/catalog.ts";
+import { updateManyPackages } from "../packages/install.ts";
 import { catalogList, dbPath, getSyncMeta, latestVersion, openDb, searchLocal } from "../packages/db.ts";
 import { defaultPiHome, npmPackageName, readInstalledPackagesAcrossScopes, splitNpmSource } from "../packages/installed.ts";
 import type { InstalledPkg, Installer, Pkg, PkgInfo, Registry, SearchPage, UpdateOutcome, UpdatesSnapshot } from "../packages/package.ts";
@@ -113,6 +114,7 @@ export type OperationName =
 	| "package.reconcile_services"
 	| "package.remove"
 	| "package.update"
+	| "package.update_all"
 	| "resources.list"
 	| "resources.toggle"
 	| "pi.status"
@@ -144,6 +146,7 @@ export interface OperationInputs {
 	"package.reconcile_services": { approved?: boolean; projectRoot?: string };
 	"package.remove": { name: string; approved?: boolean };
 	"package.update": { source: string; approved?: boolean; target?: string };
+	"package.update_all": { sources?: string[]; approved?: boolean };
 	"resources.list": { projectRoot?: string };
 	"resources.toggle": { source: string; field: ResourceField; path: string; enabled: boolean; projectRoot?: string; approved?: boolean };
 	"pi.status": Record<string, never>;
@@ -157,6 +160,10 @@ interface MutationResponse {
 	output: string;
 }
 interface UpdateMutationResponse extends MutationResponse, Partial<Omit<UpdateOutcome, "output">> {}
+interface UpdateAllMutationResponse extends MutationResponse {
+	results: Array<{ source: string; ok: boolean; output: string; serviceReconciled?: boolean } & Partial<Omit<UpdateOutcome, "output">>>;
+	reresolveError?: string;
+}
 interface InstallServiceResponse {
 	ok: boolean;
 	output: string;
@@ -192,6 +199,7 @@ export interface OperationOutputs {
 	"package.reconcile_services": ReconcileServicesResponse;
 	"package.remove": MutationResponse;
 	"package.update": UpdateMutationResponse;
+	"package.update_all": UpdateAllMutationResponse;
 	"resources.list": { global: PackageResources[]; project: PackageResources[] };
 	"resources.toggle": MutationResponse;
 	"pi.status": PiVersionReport;
@@ -224,6 +232,7 @@ export const OPERATION_NAMES: readonly OperationName[] = [
 	"package.reconcile_services",
 	"package.remove",
 	"package.update",
+	"package.update_all",
 	"resources.list",
 	"resources.toggle",
 	"pi.status",
@@ -577,6 +586,55 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 			}
 		}
 
+		if (path === "/update-all" && req.method === "POST") {
+			let approved = false;
+			let sources: string[] | undefined;
+			try {
+				const body = (await req.json()) as { approved?: unknown; sources?: unknown };
+				approved = body.approved === true;
+				if (Array.isArray(body.sources)) sources = body.sources.filter((item): item is string => typeof item === "string");
+			} catch {
+				/* fall through -- approved stays false, sources stays undefined (defaults to every stale package) */
+			}
+			if (sources && sources.some((source) => !SOURCE_RE.test(source))) {
+				return err(400, "invalid source; want a configured npm:, git:, or https package source");
+			}
+			const denied = authorize("update_all", approved);
+			if (denied) return denied;
+			// Default: every currently-stale GLOBAL package the mirror already knows about -- same set
+			// `packed updates` (no --project) reports. A caller wanting project-scoped sources too
+			// passes them explicitly via body.sources; this endpoint never guesses project scope.
+			if (!sources) {
+				const snap = await loadUpdates(deps.stateDir);
+				sources = (snap?.updates ?? []).map((entry) => `npm:${entry.name}`);
+			}
+			// Daemon-dependency sources (see classifyUpdateSource's own doc comment) still route through
+			// updateOnly()/update() here, exactly like a bare `pi update --extension` would today -- a
+			// known, non-regressive scope limit for this batch endpoint's first version, not a silent
+			// misclassification: each such source simply reports its already-existing, honest
+			// "No matching package found" failure as its own independent per-source outcome.
+			const batchResult = await updateManyPackages(deps.inst, sources, { approved });
+			const results: UpdateAllMutationResponse["results"] = batchResult.outcomes.map((item) =>
+				item.status === "succeeded" && item.outcome
+					? { source: item.source, ok: true, ...item.outcome }
+					: { source: item.source, ok: false, output: item.error ?? "update failed" },
+			);
+			// Best-effort per-source service-restart reconciliation, same as /update's own -- one
+			// package's restart failing never fails the batch or blocks a sibling's own reconciliation.
+			for (const result of results) {
+				if (!result.ok || result.alreadyUpToDate || !result.source.startsWith("npm:")) continue;
+				try {
+					const service = await daemonServiceInstaller.restart(piHomeForServiceInstall, result.source);
+					if (service.ok) result.serviceReconciled = service.restarted;
+				} catch {
+					/* best-effort -- a restart failure never fails the batch */
+				}
+			}
+			const ok = results.every((result) => result.ok) && !batchResult.reresolveError;
+			const output = `updated ${results.filter((result) => result.ok && !result.alreadyUpToDate).length}/${results.length} package(s)`;
+			return json({ ok, output, results, ...(batchResult.reresolveError ? { reresolveError: batchResult.reresolveError } : {}) });
+		}
+
 		if (path === "/updates" && req.method === "GET") {
 			const snap = await loadUpdates(deps.stateDir);
 			return json(snap ?? { updates: [] });
@@ -760,6 +818,10 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 				break;
 			case "package.update":
 				path = "/update";
+				init = { method: "POST", body: JSON.stringify(input) };
+				break;
+			case "package.update_all":
+				path = "/update-all";
 				init = { method: "POST", body: JSON.stringify(input) };
 				break;
 			default:

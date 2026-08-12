@@ -11,10 +11,11 @@
  * version diff is what actually drives reloadRequired/alreadyUpToDate.
  */
 import { afterEach, describe, expect, it } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ExecInstaller } from "../src/packages/install.ts";
+import { ExecInstaller, updateManyPackages } from "../src/packages/install.ts";
+import type { Installer, UpdateOutcome } from "../src/packages/package.ts";
 import { createLogger } from "../src/shared/log.ts";
 
 /**
@@ -708,5 +709,100 @@ describe("ExecInstaller — run()/reresolveDependencyTree() thread the CURRENT p
 		await installer.install("npm:plain");
 
 		expect(readFileSync(npmLog, "utf8")).toBe("reresolve-sees-this-too");
+	});
+});
+
+describe("updateManyPackages -- batch update over several sources at once, reresolving ONCE for the whole batch", () => {
+	it("updates every source via updateOnly() and runs exactly one npm install afterward, not one per source", async () => {
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-bin-")));
+		const piHome = writePiHome({ "@scope/a": "1.0.0", "@scope/b": "1.0.0" });
+		const bin = writeFakePi(scriptDir);
+		const npmLog = join(scriptDir, "npm.log");
+		const npmBin = writeFakeNpm(scriptDir, npmLog);
+		const installer = new ExecInstaller(bin, piHome, undefined, npmBin);
+
+		const result = await updateManyPackages(installer, ["npm:@scope/a", "npm:@scope/b"]);
+
+		expect(result.outcomes.map((o) => o.source)).toEqual(["npm:@scope/a", "npm:@scope/b"]);
+		expect(result.outcomes.every((o) => o.status === "succeeded")).toBe(true);
+		// The real point of this batch path: ONE npm install for two sources, not two.
+		const invocations = readFileSync(npmLog, "utf8").trim().split("\n").filter((line) => line === "install");
+		expect(invocations).toHaveLength(1);
+	});
+
+	it("one source failing never stops the rest, and each gets its own independent outcome", async () => {
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-bin-")));
+		const piHome = writePiHome({ "@scope/a": "1.0.0", "@scope/b": "1.0.0" });
+		const failingPi = join(scriptDir, "fake-pi-fail-once");
+		writeFileSync(
+			failingPi,
+			[
+				"#!/usr/bin/env bash",
+				"set -euo pipefail",
+				'source="${3:-}"',
+				'if [ "$source" = "npm:@scope/a" ]; then echo "No matching package found" >&2; exit 1; fi',
+				'echo "Updated $source"',
+				"exit 0",
+			].join("\n"),
+		);
+		chmodSync(failingPi, 0o755);
+		const npmLog = join(scriptDir, "npm.log");
+		const npmBin = writeFakeNpm(scriptDir, npmLog);
+		const installer = new ExecInstaller(failingPi, piHome, undefined, npmBin);
+
+		const result = await updateManyPackages(installer, ["npm:@scope/a", "npm:@scope/b"]);
+
+		expect(result.outcomes[0]).toMatchObject({ source: "npm:@scope/a", status: "failed" });
+		expect(result.outcomes[1]).toMatchObject({ source: "npm:@scope/b", status: "succeeded" });
+		// The batch-wide reresolve still runs once, since @scope/b did succeed.
+		expect(readFileSync(npmLog, "utf8").trim().split("\n").filter((line) => line === "install")).toHaveLength(1);
+	});
+
+	it("never runs the batch-wide reresolve when every source failed", async () => {
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-bin-")));
+		const piHome = writePiHome({ "@scope/a": "1.0.0" });
+		const failingPi = join(scriptDir, "fake-pi-always-fail");
+		writeFileSync(failingPi, ["#!/usr/bin/env bash", "echo 'No matching package found' >&2", "exit 1"].join("\n"));
+		chmodSync(failingPi, 0o755);
+		const npmLog = join(scriptDir, "npm.log");
+		const npmBin = writeFakeNpm(scriptDir, npmLog);
+		const installer = new ExecInstaller(failingPi, piHome, undefined, npmBin);
+
+		await updateManyPackages(installer, ["npm:@scope/a"]);
+
+		expect(existsSync(npmLog)).toBe(false);
+	});
+
+	it("reports a failed final reresolve distinctly, after every individual source already succeeded", async () => {
+		const scriptDir = track(mkdtempSync(join(tmpdir(), "packed-exec-bin-")));
+		const piHome = writePiHome({ "@scope/a": "1.0.0" });
+		const bin = writeFakePi(scriptDir);
+		const failingNpm = join(scriptDir, "fake-npm-fail");
+		writeFileSync(failingNpm, ["#!/usr/bin/env bash", "echo 'ERESOLVE unable to resolve dependency tree' >&2", "exit 1"].join("\n"));
+		chmodSync(failingNpm, 0o755);
+		const installer = new ExecInstaller(bin, piHome, undefined, failingNpm);
+
+		const result = await updateManyPackages(installer, ["npm:@scope/a"]);
+
+		expect(result.outcomes[0]?.status).toBe("succeeded");
+		expect(result.reresolveError).toMatch(/npm install failed to re-resolve/);
+	});
+
+	it("falls back to one update() call per source (each paying its own reresolve) when the installer lacks the batch trio", async () => {
+		const calls: string[] = [];
+		const fake: Installer = {
+			install: async () => "",
+			remove: async () => "",
+			update: async (source): Promise<UpdateOutcome> => {
+				calls.push(source);
+				return { output: `updated ${source}`, reloadRequired: true, alreadyUpToDate: false, pinned: false };
+			},
+		};
+
+		const result = await updateManyPackages(fake, ["npm:a", "npm:b"]);
+
+		expect(calls).toEqual(["npm:a", "npm:b"]);
+		expect(result.outcomes.every((o) => o.status === "succeeded")).toBe(true);
+		expect(result.reloadRequired).toBe(true);
 	});
 });

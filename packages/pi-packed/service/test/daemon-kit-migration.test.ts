@@ -145,6 +145,7 @@ describe("daemon-kit migration", () => {
 			"package.reconcile_services",
 			"package.remove",
 			"package.update",
+			"package.update_all",
 			"resources.list",
 			"resources.toggle",
 			"pi.status",

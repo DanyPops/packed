@@ -171,6 +171,7 @@ interface Flags {
 	machineLocal: boolean;
 	ecosystem: boolean;
 	self: boolean;
+	all: boolean;
 	project?: string;
 	version?: string;
 	to?: string;
@@ -189,6 +190,7 @@ function parseFlags(rest: string[]): { flags: Flags; pos: string[] } {
 		machineLocal: false,
 		ecosystem: false,
 		self: false,
+		all: false,
 	};
 	const pos: string[] = [];
 	for (let i = 0; i < rest.length; i++) {
@@ -203,6 +205,7 @@ function parseFlags(rest: string[]): { flags: Flags; pos: string[] } {
 		else if (a === "--machine-local") flags.machineLocal = true;
 		else if (a === "--ecosystem") flags.ecosystem = true;
 		else if (a === "--self") flags.self = true;
+		else if (a === "--all") flags.all = true;
 		else if (a === "--limit" && i + 1 < rest.length) flags.limit = Number(rest[++i]) || SEARCH_DEFAULT_LIMIT;
 		else if (a.startsWith("--limit=")) flags.limit = Number(a.slice(8)) || SEARCH_DEFAULT_LIMIT;
 		else if (a === "--project" && i + 1 < rest.length) flags.project = rest[++i];
@@ -671,8 +674,29 @@ const commands: Record<string, { usage: string; run: Command }> = {
 
 	update: {
 		usage:
-			"packed update <configured-source> [--to <new-source>] [--approve] [--json] | packed update --self [--approve] [--json]  (--to replaces an exact pin end to end -- see verify-deploy/doctor for post-replace checks)",
+			"packed update <configured-source> [--to <new-source>] [--approve] [--json] | packed update --self [--approve] [--json] | packed update --all [--approve] [--json]  (--to replaces an exact pin end to end -- see verify-deploy/doctor for post-replace checks; --all batches every currently-stale package, re-resolving once instead of once per package)",
 		async run(_rest, d, flags, pos) {
+			if (flags.all) {
+				if (!d.daemon) return fail("update --all requires a running packed daemon\n");
+				try {
+					const result = await d.daemon.updateAll(undefined, flags.approved);
+					if (flags.json) return ok(`${JSON.stringify(result)}\n`);
+					if (result.results.length === 0) return ok("all pi packages up to date (per the local mirror)\n");
+					let out = `${result.output}\n\n`;
+					for (const item of result.results) {
+						const transition = item.previousVersion && item.currentVersion ? ` (${item.previousVersion} → ${item.currentVersion})` : "";
+						const status = item.ok ? (item.alreadyUpToDate ? "already up to date" : `updated${transition}`) : `FAILED: ${item.output}`;
+						out += `  ${item.source}  ${status}\n`;
+					}
+					if (result.reresolveError) out += `\nWARNING: final dependency re-resolution failed: ${result.reresolveError}\n`;
+					const anyChanged = result.results.some((item) => item.ok && !item.alreadyUpToDate);
+					if (anyChanged) out += "\nReload Pi with /reload to activate the updated packages.\n";
+					return result.ok ? ok(out) : fail(out);
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					return flags.json ? fail(`${JSON.stringify({ ok: false, error: message })}\n`) : fail(`${message}\n`);
+				}
+			}
 			if (flags.self) {
 				try {
 					assertPackagePermission(await d.security.security(), "update.self", flags.approved);

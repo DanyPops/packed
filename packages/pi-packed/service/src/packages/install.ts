@@ -151,23 +151,22 @@ export class ExecInstaller implements Installer {
 		return this.run(["remove", ...(options?.local ? ["-l"] : []), source]);
 	}
 
-	async update(source: string, options?: { approved?: boolean; local?: boolean; target?: string }): Promise<UpdateOutcome> {
+	/**
+	 * The real `pi update --extension <source>` mutation alone -- no trailing reresolveDependencyTree()
+	 * (a batch caller defers that to once per batch via updateManyPackages(), not once per package).
+	 * Returns the full UpdateOutcome (unlike installOnly()'s raw string): a single package's own
+	 * before/after version diff is already correct right after ITS OWN update -- reresolveDependencyTree()
+	 * exists to fix a DIFFERENT sibling's drift, not this package's own resolved version. MUST be
+	 * awaited sequentially across a batch, never run concurrently -- same shared settings.json/
+	 * package.json mutation hazard as installOnly(), see its own doc comment.
+	 */
+	async updateOnly(source: string, options?: { approved?: boolean; local?: boolean; target?: string }): Promise<UpdateOutcome> {
 		if (options?.target) return this.replace(source, options.target, options);
 		const t0 = performance.now();
 		const pinned = isPinnedNpmSource(source);
 		const previousVersion = readResolvedVersion(this.piHome, source);
-		const t1 = performance.now();
 		const output = await this.run(["update", "--extension", source]);
-		const updateMs = performance.now() - t1;
-		const t2 = performance.now();
-		await this.reresolveDependencyTree();
-		const reresolveMs = performance.now() - t2;
-		this.logger.debug("update timing", {
-			source,
-			updateMs: round1(updateMs),
-			reresolveMs: round1(reresolveMs),
-			totalMs: round1(performance.now() - t0),
-		});
+		this.logger.debug("updateOnly timing", { source, updateMs: round1(performance.now() - t0) });
 		const currentVersion = readResolvedVersion(this.piHome, source);
 		// Only trust a "nothing changed" conclusion when we actually read a
 		// real version both before and after (npm source, resolvable in
@@ -200,6 +199,24 @@ export class ExecInstaller implements Installer {
 			// itself. See replace() for the actual supervised pin-move workflow.
 			...(pinned && alreadyUpToDate ? { pinnedSourceRequiresTarget: true } : {}),
 		};
+	}
+
+	async update(source: string, options?: { approved?: boolean; local?: boolean; target?: string }): Promise<UpdateOutcome> {
+		if (options?.target) return this.replace(source, options.target, options);
+		const t0 = performance.now();
+		const t1 = performance.now();
+		const result = await this.updateOnly(source, options);
+		const updateMs = performance.now() - t1;
+		const t2 = performance.now();
+		await this.reresolveDependencyTree();
+		const reresolveMs = performance.now() - t2;
+		this.logger.debug("update timing", {
+			source,
+			updateMs: round1(updateMs),
+			reresolveMs: round1(reresolveMs),
+			totalMs: round1(performance.now() - t0),
+		});
+		return result;
 	}
 
 	/**
@@ -324,4 +341,58 @@ export class ExecInstaller implements Installer {
 			after,
 		};
 	}
+}
+
+export interface UpdateManyOutcome {
+	readonly source: string;
+	readonly status: "succeeded" | "failed";
+	readonly outcome?: UpdateOutcome;
+	readonly error?: string;
+}
+
+export interface UpdateManyResult {
+	readonly outcomes: readonly UpdateManyOutcome[];
+	/** True whenever any succeeded source actually changed version -- one combined signal instead of a caller re-deriving it per outcome. */
+	readonly reloadRequired: boolean;
+	/** Set only when the final batch-wide reresolve itself failed -- every individual outcome above already reflects its own real result regardless. */
+	readonly reresolveError?: string;
+}
+
+/**
+ * Batch update over several sources at once -- same validate-concurrently/commit-sequentially/
+ * reresolve-once shape as SetupManager.apply()'s own batch mode (see Installer.updateOnly's own
+ * doc comment): every source is updated in turn via updateOnly() (no per-source reresolve), then
+ * reresolveDependencyTree() runs exactly ONCE for the whole batch -- the real cost `packed update`
+ * one source at a time was paying N times over (see ExecInstaller's own constructor doc comment).
+ * Sequential across sources, never fanned out -- same shared-file mutation hazard as installOnly().
+ * One source failing never stops the rest; each gets its own independent outcome. Falls back to
+ * one update() call per source (each paying its own reresolve) when the installer doesn't
+ * implement the updateOnly/reresolveDependencyTree batch trio -- matching SetupManager.apply()'s
+ * own graceful degradation for a non-batch-capable Installer (e.g. a plain test double).
+ */
+export async function updateManyPackages(
+	installer: Installer,
+	sources: readonly string[],
+	options?: { approved?: boolean },
+): Promise<UpdateManyResult> {
+	const batch = Boolean(installer.updateOnly && installer.reresolveDependencyTree);
+	const outcomes: UpdateManyOutcome[] = [];
+	for (const source of sources) {
+		try {
+			const outcome =
+				batch && installer.updateOnly ? await installer.updateOnly(source, options) : await installer.update(source, options);
+			outcomes.push({ source, status: "succeeded", outcome });
+		} catch (error) {
+			outcomes.push({ source, status: "failed", error: error instanceof Error ? error.message : String(error) });
+		}
+	}
+	const reloadRequired = outcomes.some((item) => item.status === "succeeded" && item.outcome?.reloadRequired);
+	if (batch && installer.reresolveDependencyTree && outcomes.some((item) => item.status === "succeeded")) {
+		try {
+			await installer.reresolveDependencyTree();
+		} catch (error) {
+			return { outcomes, reloadRequired, reresolveError: error instanceof Error ? error.message : String(error) };
+		}
+	}
+	return { outcomes, reloadRequired };
 }

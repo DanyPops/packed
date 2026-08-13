@@ -33,7 +33,7 @@
     "@danypops/vehicle-client": "^0.8.1",
     "@danypops/vehicle-client-pi": "^0.40.1",
     "@danypops/vehicle-core": "^0.15.0",
-    "@danypops/vehicle-server": "^0.22.0",
+    "@danypops/vehicle-server": "^0.24.1",
     "jiti": "^2.7.0",
     "malevich-tui-components": "^0.21.1",
     "publint": "0.3.22",

@@ -1,6 +1,6 @@
 {
   "name": "@danypops/pi-packed",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "description": "Pi package lifecycle, validation, daemon, tools, profiles, and TUI",
   "type": "module",
   "bin": {
@@ -27,7 +27,7 @@
     "typecheck": "bunx tsc --noEmit"
   },
   "dependencies": {
-    "@danypops/armada": "^0.4.3",
+    "@danypops/armada": "^0.4.6",
     "@danypops/packed": "^0.7.0",
     "@danypops/pi-extension-harness": "^0.7.0",
     "@danypops/vehicle-client": "^0.8.1",

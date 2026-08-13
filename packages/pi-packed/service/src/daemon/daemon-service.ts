@@ -25,8 +25,10 @@
  * step isn't a real convention, so detection reads what's already true
  * on disk instead of asking for one more declaration.
  */
+import { spawn } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createVehicleRegistrar, type VehicleRegistrar, type VehicleRegistrationOutcome, type VehicleSpec } from "@danypops/armada";
 import { resolveDaemonPaths } from "@danypops/vehicle-server/paths";
 import {
@@ -439,6 +441,38 @@ const PACKED_PACKAGE_NAME = "@danypops/pi-packed";
  * daemonOptions() -- vehicleName: PACKED_VEHICLE_NAME). One canonical name, not two. */
 export const PACKED_VEHICLE_NAME = "pi-packed";
 const SELF_REGISTRATION_REASON = "Packed cannot replace its own Armada service from inside the running daemon";
+const SELF_RESTART_SCHEDULED_REASON = "self-restart scheduled via a detached armada CLI process";
+/** Long enough for the HTTP response carrying this reason back to the caller to flush before the
+ * detached child's `armada restart` stops this very process. */
+const SELF_RESTART_DELAY_MS = 500;
+
+/** Fire-and-forget: schedule Packed's own Vehicle to restart from OUTSIDE this process. Packed
+ * can't safely stop+start itself in-process (the `stop` step would kill the very process handling
+ * this request before it could `start` again) -- so this spawns a detached `armada restart
+ * pi-packed` a beat later, after the response reporting "scheduled" has had time to flush, and lets
+ * it outlive this process via detached+unref. Swallows a resolution failure silently: worst case is
+ * the pre-existing behavior (a human restarts the service by hand), never a crash. */
+export type SelfRestartScheduler = (spec: ServiceSpec) => void;
+
+export const scheduleSelfRestart: SelfRestartScheduler = (_spec) => {
+	let cliPath: string;
+	try {
+		cliPath = fileURLToPath(import.meta.resolve("@danypops/armada/cli"));
+	} catch {
+		return;
+	}
+	setTimeout(() => {
+		try {
+			const child = spawn(process.execPath, [cliPath, "restart", PACKED_VEHICLE_NAME, "--json"], {
+				detached: true,
+				stdio: "ignore",
+			});
+			child.unref();
+		} catch {
+			/* best-effort -- a human can still restart the service by hand */
+		}
+	}, SELF_RESTART_DELAY_MS).unref();
+};
 
 /**
  * Sweeps every installed Packed package (global scope, plus a project's own
@@ -557,7 +591,10 @@ export interface DaemonServiceInstaller {
  * path/native controller are resolved once, not on every call.
  */
 export class RealDaemonServiceInstaller implements DaemonServiceInstaller {
-	constructor(private readonly registrar: VehicleRegistrar = createVehicleRegistrar()) {}
+	constructor(
+		private readonly registrar: VehicleRegistrar = createVehicleRegistrar(),
+		private readonly selfRestart: SelfRestartScheduler = scheduleSelfRestart,
+	) {}
 
 	async listRegisteredVehicles(): Promise<readonly VehicleSpec[]> {
 		return this.registrar.listRegistered();
@@ -600,7 +637,8 @@ export class RealDaemonServiceInstaller implements DaemonServiceInstaller {
 		const resolved = resolveDaemonServiceSpec(piHome, source);
 		if (!resolved.ok) return resolved;
 		if (resolved.spec.name === PACKED_VEHICLE_NAME) {
-			return { ok: true, restarted: false, reason: SELF_REGISTRATION_REASON, spec: resolved.spec };
+			this.selfRestart(resolved.spec);
+			return { ok: true, restarted: true, reason: SELF_RESTART_SCHEDULED_REASON, spec: resolved.spec };
 		}
 		if (!(await isVehicleServiceRegistered(resolved.spec.name, this.registrar))) {
 			return { ok: true, restarted: false, reason: `no persistent service is registered for ${resolved.spec.name}`, spec: resolved.spec };

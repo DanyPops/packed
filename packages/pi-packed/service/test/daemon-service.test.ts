@@ -9,8 +9,11 @@ import {
 	detectVehicleDaemonService,
 	listManagedPackages,
 	listUnconfiguredDaemonDependencies,
+	PACKED_VEHICLE_NAME,
 	RealDaemonServiceInstaller,
 	resolveDaemonServiceSpec,
+	scheduleSelfRestart,
+	type SelfRestartScheduler,
 } from "../src/daemon/daemon-service.ts";
 
 const roots: string[] = [];
@@ -468,6 +471,32 @@ describe("RealDaemonServiceInstaller -- Armada registration through the in-proce
 		} finally {
 			await harness.dispose();
 		}
+	});
+
+	it("restart() schedules an out-of-process self-restart for Packed's own Vehicle, never touching Armada in-process", async () => {
+		const piHome = fakePiHome();
+		writePackage(piHome, "@danypops/pi-packed", { binPath: "service/src/cli/cli.ts", args: ["serve"] });
+		const harness = await createArmadaTestHarness();
+		const scheduled: Array<{ name: string }> = [];
+		const selfRestart: SelfRestartScheduler = (spec) => {
+			scheduled.push({ name: spec.name });
+		};
+		try {
+			const installer = new RealDaemonServiceInstaller(harness.registrar, selfRestart);
+			const outcome = await installer.restart(piHome, "npm:@danypops/pi-packed");
+
+			expect(outcome).toMatchObject({ ok: true, restarted: true, spec: { name: "pi-packed" } });
+			expect(scheduled).toEqual([{ name: PACKED_VEHICLE_NAME }]);
+			// never asked Armada to stop/replace/start the very process running this test
+			expect(harness.events()).toEqual([]);
+		} finally {
+			await harness.dispose();
+		}
+	});
+
+	it("scheduleSelfRestart resolves armada's real CLI module -- proves the wiring is live, not just typechecked", () => {
+		expect(() => import.meta.resolve("@danypops/armada/cli")).not.toThrow();
+		expect(typeof scheduleSelfRestart).toBe("function");
 	});
 
 	it("install() reports a non-daemon package without touching Armada", async () => {

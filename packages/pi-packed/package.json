@@ -27,7 +27,7 @@
     "typecheck": "bunx tsc --noEmit"
   },
   "dependencies": {
-    "@danypops/armada": "^0.4.8",
+    "@danypops/armada": "^0.4.9",
     "@danypops/packed": "^0.7.0",
     "@danypops/pi-extension-harness": "^0.7.0",
     "@danypops/vehicle-client": "^0.8.1",

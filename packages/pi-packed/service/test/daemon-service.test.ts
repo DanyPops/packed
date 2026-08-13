@@ -500,6 +500,7 @@ describe("RealDaemonServiceInstaller -- Armada registration through the in-proce
 			register: async () => ({ ok: false, diagnostics: [{ code: "X", severity: "error", path: "/", message: "native failure" }] }),
 			unregister: async () => ({ ok: false, diagnostics: [] }),
 			isRegistered: async () => false,
+			listRegistered: async () => [],
 		};
 		const installer = new RealDaemonServiceInstaller(registrar);
 

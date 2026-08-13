@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { VehicleRegistrationOutcome, VehicleSpec } from "@danypops/armada";
 import { createArmadaTestHarness } from "@danypops/armada/testing";
 import type { MaintenanceTask } from "@danypops/vehicle-server/daemon";
 import type { ServiceInstallResult, ServiceSpec } from "@danypops/vehicle-server/service";
@@ -120,6 +121,12 @@ class RecordingDaemonServiceInstaller {
 		{ ok: true; restarted: boolean; reason?: string; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean }
 	> {
 		return { ok: false, reason: "not a daemon", notADaemon: true };
+	}
+	async listRegisteredVehicles(): Promise<readonly VehicleSpec[]> {
+		return [];
+	}
+	async unregisterVehicleByName(): Promise<VehicleRegistrationOutcome> {
+		return { ok: true, manifestHash: "hash" as never, applied: [], diagnostics: [] };
 	}
 }
 
@@ -306,6 +313,173 @@ describe("startPackedDaemon's own maintenance-task wiring (self-heals Vehicle dr
 
 			const snapshot = await loadUpdates(paths.stateDirectory);
 			expect(snapshot?.updates.map((u) => u.name)).toContain("@danypops/probe-daemon");
+		});
+	});
+
+	describe("reconcileAllDaemonServices pruning -- unregisters a Vehicle no longer discoverable by any path (the-armada-registrar-jittor-web-spider-daemon-collision)", () => {
+		function stalePiHomeVehicle(piHome: string, name: string): VehicleSpec {
+			return {
+				name: name as VehicleSpec["name"],
+				version: "0.1.0",
+				executable: join(piHome, "npm", "node_modules", "@danypops", "old-package", "cli.ts"),
+				arguments: ["serve"],
+				handlePath: join(piHome, "stale-handle.json"),
+				restart: { policy: "never" },
+				readiness: { timeoutMs: 500, pollIntervalMs: 50 },
+			};
+		}
+
+		it("prunes a Vehicle whose executable lives under piHome's own node_modules once nothing discovers it anymore", async () => {
+			const piHome = fakePiHome([]); // deliberately empty -- old-package no longer configured or on disk
+			const harness = await createArmadaTestHarness();
+			try {
+				await harness.registrar.register(stalePiHomeVehicle(piHome, "old-package"));
+				expect(await harness.registrar.isRegistered("old-package")).toBe(true);
+
+				const installer = new RealDaemonServiceInstaller(harness.registrar);
+				const result = await reconcileAllDaemonServices(piHome, undefined, installer);
+
+				expect(result.pruned).toEqual([{ vehicleName: "old-package", executable: stalePiHomeVehicle(piHome, "old-package").executable }]);
+				expect(result.pruneFailed).toEqual([]);
+				expect(await harness.registrar.isRegistered("old-package")).toBe(false);
+			} finally {
+				await harness.dispose();
+			}
+		});
+
+		it("never prunes a Vehicle registered outside piHome's own node_modules, regardless of discovery", async () => {
+			const piHome = fakePiHome([]);
+			const harness = await createArmadaTestHarness();
+			try {
+				await harness.registrar.register({
+					name: "externally-managed" as VehicleSpec["name"],
+					version: "1.0.0",
+					executable: "/opt/custom/cli.js",
+					arguments: ["serve"],
+					handlePath: join(piHome, "external-handle.json"),
+					restart: { policy: "never" },
+					readiness: { timeoutMs: 500, pollIntervalMs: 50 },
+				});
+
+				const installer = new RealDaemonServiceInstaller(harness.registrar);
+				const result = await reconcileAllDaemonServices(piHome, undefined, installer);
+
+				expect(result.pruned).toEqual([]);
+				expect(await harness.registrar.isRegistered("externally-managed")).toBe(true);
+			} finally {
+				await harness.dispose();
+			}
+		});
+
+		it("never prunes a Vehicle still discoverable through the configured-extension sweep -- only updates it", async () => {
+			const piHome = fakePiHome(["npm:@danypops/probe"]);
+			installMockDaemon(piHome, "@danypops/probe");
+			const harness = await createArmadaTestHarness();
+			try {
+				const installer = new RealDaemonServiceInstaller(harness.registrar);
+				const result = await reconcileAllDaemonServices(piHome, undefined, installer);
+
+				expect(result.pruned).toEqual([]);
+				expect(await harness.registrar.isRegistered("probe")).toBe(true);
+			} finally {
+				await harness.dispose();
+			}
+		});
+
+		it("never prunes a Vehicle still discoverable only through the unconfigured-daemon-dependency sweep (e.g. a root-pinned package like lector)", async () => {
+			const piHome = fakePiHome([]); // deliberately NOT settings.json-configured
+			installUnconfiguredDaemonDependency(piHome, "@danypops/probe-daemon", "1.0.0");
+			const harness = await createArmadaTestHarness();
+			try {
+				await harness.registrar.register({
+					name: "probe-daemon" as VehicleSpec["name"],
+					version: "1.0.0",
+					executable: join(piHome, "npm", "node_modules", "@danypops", "probe-daemon", "cli.ts"),
+					arguments: ["serve"],
+					handlePath: join(piHome, "probe-daemon-handle.json"),
+					restart: { policy: "never" },
+					readiness: { timeoutMs: 500, pollIntervalMs: 50 },
+				});
+
+				const installer = new RealDaemonServiceInstaller(harness.registrar);
+				const result = await reconcileAllDaemonServices(piHome, undefined, installer);
+
+				expect(result.pruned).toEqual([]);
+				expect(await harness.registrar.isRegistered("probe-daemon")).toBe(true);
+			} finally {
+				await harness.dispose();
+			}
+		});
+
+		it("never prunes pi-packed's own Vehicle, even though reconcileAllDaemonServices always skips scanning its own package", async () => {
+			const piHome = fakePiHome([]);
+			const harness = await createArmadaTestHarness();
+			try {
+				await harness.registrar.register({
+					name: "pi-packed" as VehicleSpec["name"],
+					version: "1.0.0",
+					executable: join(piHome, "npm", "node_modules", "@danypops", "pi-packed", "service", "src", "cli", "cli.ts"),
+					arguments: ["serve"],
+					handlePath: join(piHome, "pi-packed-handle.json"),
+					restart: { policy: "never" },
+					readiness: { timeoutMs: 500, pollIntervalMs: 50 },
+				});
+
+				const installer = new RealDaemonServiceInstaller(harness.registrar);
+				const result = await reconcileAllDaemonServices(piHome, undefined, installer);
+
+				expect(result.pruned).toEqual([]);
+				expect(await harness.registrar.isRegistered("pi-packed")).toBe(true);
+			} finally {
+				await harness.dispose();
+			}
+		});
+
+		it("reproduces the real web-spider/web-spider-daemon collision: the orphaned duplicate is pruned, the correctly-discovered one survives", async () => {
+			const piHome = fakePiHome(["npm:@danypops/pi-web-spider"]);
+			// pi-web-spider's own dependency-walk discovers @danypops/web-spider-daemon,
+			// whose packed.daemonService.name overrides the vehicle name to "web-spider".
+			const piWebSpiderDir = join(piHome, "npm", "node_modules", "@danypops", "pi-web-spider");
+			mkdirSync(piWebSpiderDir, { recursive: true });
+			writeFileSync(
+				join(piWebSpiderDir, "package.json"),
+				JSON.stringify({ name: "@danypops/pi-web-spider", version: "1.0.0", dependencies: { "@danypops/web-spider-daemon": "^1.0.0" } }),
+			);
+			const daemonDir = join(piHome, "npm", "node_modules", "@danypops", "web-spider-daemon");
+			mkdirSync(daemonDir, { recursive: true });
+			writeFileSync(
+				join(daemonDir, "package.json"),
+				JSON.stringify({
+					name: "@danypops/web-spider-daemon",
+					version: "1.0.0",
+					packed: { daemonService: { name: "web-spider", binPath: "cli.ts", args: ["serve"] } },
+				}),
+			);
+			writeFileSync(join(daemonDir, "cli.ts"), "// Mock Vehicle entry point.\n");
+
+			const harness = await createArmadaTestHarness();
+			try {
+				// A leftover registration from before the packed.daemonService.name override existed --
+				// the exact orphan a prior Packed version would have produced and never cleaned up.
+				await harness.registrar.register({
+					name: "web-spider-daemon" as VehicleSpec["name"],
+					version: "0.9.0",
+					executable: join(daemonDir, "cli.ts"),
+					arguments: ["serve"],
+					handlePath: join(piHome, "web-spider-daemon-handle.json"),
+					restart: { policy: "never" },
+					readiness: { timeoutMs: 500, pollIntervalMs: 50 },
+				});
+
+				const installer = new RealDaemonServiceInstaller(harness.registrar);
+				const result = await reconcileAllDaemonServices(piHome, undefined, installer);
+
+				expect(result.pruned).toEqual([{ vehicleName: "web-spider-daemon", executable: join(daemonDir, "cli.ts") }]);
+				expect(await harness.registrar.isRegistered("web-spider-daemon")).toBe(false);
+				expect(await harness.registrar.isRegistered("web-spider")).toBe(true);
+			} finally {
+				await harness.dispose();
+			}
 		});
 	});
 });

@@ -123,6 +123,8 @@ class FakeDaemonServiceInstaller {
 			reconciled: [{ packageName: "@danypops/probe", vehicleName: "probe", installed: true }],
 			skipped: 0,
 			failed: [],
+			pruned: [],
+			pruneFailed: [],
 		};
 	}
 }
@@ -605,6 +607,8 @@ describe("CLI", () => {
 			reconciled: [{ packageName: "@danypops/probe", vehicleName: "probe", installed: true }],
 			skipped: 0,
 			failed: [],
+			pruned: [],
+			pruneFailed: [],
 		});
 	});
 
@@ -1007,7 +1011,15 @@ describe("CLI", () => {
 			},
 			async reconcileServices(approved, projectRoot) {
 				calls.push(`reconcileServices:${approved}:${projectRoot}`);
-				return { ok: true, output: "reconciled 0 Vehicle(s), skipped 0 non-daemon package(s)", reconciled: [], skipped: 0, failed: [] };
+				return {
+					ok: true,
+					output: "reconciled 0 Vehicle(s), skipped 0 non-daemon package(s)",
+					reconciled: [],
+					skipped: 0,
+					failed: [],
+					pruned: [],
+					pruneFailed: [],
+				};
 			},
 			async update(source) {
 				return { output: source, reloadRequired: false, alreadyUpToDate: true, pinned: false };
@@ -1302,6 +1314,12 @@ describe("daemon client", () => {
 						restarted: true,
 						spec: { name: "pi-lsp", version: "1.0.0", binPath: "/opt/pi-lsp/cli.js", handlePath: "/tmp/pi-lsp.handle.json" },
 					};
+				},
+				async listRegisteredVehicles() {
+					return [];
+				},
+				async unregisterVehicleByName() {
+					return { ok: true, manifestHash: "hash" as never, applied: [], diagnostics: [] };
 				},
 			},
 			token: daemonToken,

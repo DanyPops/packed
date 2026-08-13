@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { VehicleRegistrationOutcome, VehicleSpec } from "@danypops/armada";
 import type { ServiceSpec } from "@danypops/vehicle-server/service";
 import type { DaemonServiceInstaller } from "../src/daemon/daemon-service.ts";
 import { createApp, type Deps } from "../src/daemon/service.ts";
@@ -122,6 +123,16 @@ class FakeDaemonServiceInstaller implements DaemonServiceInstaller {
 		if (this.restartResolveFailure)
 			return { ok: false, reason: this.restartResolveFailure, ...(this.restartNotADaemon ? { notADaemon: true } : {}) };
 		return { ok: true, restarted: this.restarted, reason: this.restartReason, spec: this.spec };
+	}
+	registeredVehicles: VehicleSpec[] = [];
+	unregisterByNameCalls: string[] = [];
+	async listRegisteredVehicles(): Promise<readonly VehicleSpec[]> {
+		return this.registeredVehicles;
+	}
+	async unregisterVehicleByName(name: string): Promise<VehicleRegistrationOutcome> {
+		this.unregisterByNameCalls.push(name);
+		this.registeredVehicles = this.registeredVehicles.filter((vehicle) => vehicle.name !== name);
+		return { ok: true, manifestHash: "hash" as never, applied: [], diagnostics: [] };
 	}
 }
 

@@ -27,7 +27,7 @@
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createVehicleRegistrar, type VehicleRegistrar } from "@danypops/armada";
+import { createVehicleRegistrar, type VehicleRegistrar, type VehicleRegistrationOutcome, type VehicleSpec } from "@danypops/armada";
 import { resolveDaemonPaths } from "@danypops/vehicle-server/paths";
 import {
 	isVehicleServiceRegistered,
@@ -408,6 +408,15 @@ export interface ReconcileAllResult {
 	reconciled: Array<{ packageName: string; vehicleName: string; installed: boolean; reason?: string }>;
 	skipped: number;
 	failed: Array<{ packageName: string; reason: string }>;
+	/**
+	 * Every Vehicle unregistered because this same sweep could no longer
+	 * discover it by any path (neither a configured extension's own
+	 * dependency walk nor listUnconfiguredDaemonDependencies' root-pinned
+	 * scan) -- see pruneStaleVehicles' own doc comment for why this is safe
+	 * to do unconditionally rather than requiring a separate opt-in call.
+	 */
+	pruned: Array<{ vehicleName: string; executable: string }>;
+	pruneFailed: Array<{ vehicleName: string; reason: string }>;
 }
 
 /** Matches readPackageDeclarations' own bound -- a reconcile-all sweep never processes an unbounded package list. */
@@ -438,7 +447,7 @@ const SELF_REGISTRATION_REASON = "Packed cannot replace its own Armada service f
 export async function reconcileAllDaemonServices(
 	piHome: string,
 	projectRoot: string | undefined,
-	installer: Pick<DaemonServiceInstaller, "install">,
+	installer: Pick<DaemonServiceInstaller, "install" | "listRegisteredVehicles" | "unregisterVehicleByName">,
 ): Promise<ReconcileAllResult> {
 	const packages = readInstalledPackagesAcrossScopes(piHome, projectRoot).slice(0, MAX_RECONCILE_PACKAGES);
 	const reconciled: ReconcileAllResult["reconciled"] = [];
@@ -470,7 +479,62 @@ export async function reconcileAllDaemonServices(
 			...(resolved.result.installed ? {} : { reason: resolved.result.reason }),
 		});
 	}
-	return { reconciled, skipped, failed };
+	// listUnconfiguredDaemonDependencies deliberately walks the FULL top-level
+	// node_modules sweep, not just readInstalledPackagesAcrossScopes' own
+	// pi:-configured list above -- a root-pinned dependency (e.g. lector,
+	// pinned directly in piHome/npm/package.json ahead of whatever version its
+	// own pi-lector wrapper's tree would resolve) is a real, currently-running
+	// Vehicle that the configured-packages loop above never reaches at all.
+	// Folding it in here is what makes the discovered set below actually
+	// complete -- pruning against anything narrower would delete a Vehicle
+	// that's still genuinely there, just reachable by a different path.
+	for (const dep of listUnconfiguredDaemonDependencies(piHome)) seen.add(dep.vehicleName);
+	const { pruned, pruneFailed } = await pruneStaleVehicles(piHome, seen, installer);
+	return { reconciled, skipped, failed, pruned, pruneFailed };
+}
+
+/**
+ * Unregisters every Vehicle Armada currently declares that `discovered`
+ * (this same sweep's own complete union of configured-extension and
+ * root-pinned resolution) no longer produces at all -- the other half of
+ * what makes Armada authoritative for every Vehicle Packed knows about.
+ * Without this, a Vehicle whose packed.daemonService.name changed (or that
+ * a stale nested dependency copy once resolved under a different name --
+ * see this session's own live incident, a duplicate "web-spider-daemon"
+ * losing every restart's single-instance-lock race against the correctly-
+ * named "web-spider" Vehicle) just sits in the manifest forever: nothing
+ * ever re-discovers it to overwrite it, and nothing ever notices it's gone
+ * stale either.
+ *
+ * Scoped to only ever touch a Vehicle whose own `executable` lives under
+ * piHome's own npm/node_modules -- i.e. one only Packed itself could
+ * plausibly have registered in the first place. A Vehicle registered by an
+ * entirely different mechanism (a hand-rolled `armada upsert` pointing
+ * somewhere else on disk) is never a candidate, no matter how the
+ * discovered set above turns out -- this function has no way to know that
+ * caller's own intent, so it stays out of its way entirely. Packed's own
+ * Vehicle (PACKED_VEHICLE_NAME) is excluded for the same reason
+ * install()/remove()/restart() already refuse to touch it: reconcile runs
+ * from inside Packed's own process.
+ */
+async function pruneStaleVehicles(
+	piHome: string,
+	discovered: ReadonlySet<string>,
+	installer: Pick<DaemonServiceInstaller, "listRegisteredVehicles" | "unregisterVehicleByName">,
+): Promise<Pick<ReconcileAllResult, "pruned" | "pruneFailed">> {
+	const managedRoot = join(piHome, "npm", "node_modules") + "/";
+	const pruned: ReconcileAllResult["pruned"] = [];
+	const pruneFailed: ReconcileAllResult["pruneFailed"] = [];
+	const registered = await installer.listRegisteredVehicles();
+	for (const vehicle of registered) {
+		if (vehicle.name === PACKED_VEHICLE_NAME) continue;
+		if (discovered.has(vehicle.name)) continue;
+		if (!vehicle.executable.startsWith(managedRoot)) continue;
+		const outcome = await installer.unregisterVehicleByName(vehicle.name);
+		if (outcome.ok) pruned.push({ vehicleName: vehicle.name, executable: vehicle.executable });
+		else pruneFailed.push({ vehicleName: vehicle.name, reason: outcome.diagnostics.map((d) => d.message).join("; ") || "unregister failed" });
+	}
+	return { pruned, pruneFailed };
 }
 
 export interface DaemonServiceInstaller {
@@ -486,6 +550,15 @@ export interface DaemonServiceInstaller {
 		piHome: string,
 		source: string,
 	): Promise<{ ok: true; restarted: boolean; reason?: string; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean }>;
+	/** Every Vehicle Armada currently declares -- see pruneStaleVehicles' own doc comment for why this exists. */
+	listRegisteredVehicles(): Promise<readonly VehicleSpec[]>;
+	/**
+	 * Unregisters by Armada vehicle NAME directly, distinct from remove()'s
+	 * own by-npm-source resolution -- pruning has no installed package left to
+	 * resolve a source from; the whole point is the vehicle survived past
+	 * whatever used to produce it.
+	 */
+	unregisterVehicleByName(name: string): Promise<VehicleRegistrationOutcome>;
 }
 
 /**
@@ -497,6 +570,14 @@ export interface DaemonServiceInstaller {
  */
 export class RealDaemonServiceInstaller implements DaemonServiceInstaller {
 	constructor(private readonly registrar: VehicleRegistrar = createVehicleRegistrar()) {}
+
+	async listRegisteredVehicles(): Promise<readonly VehicleSpec[]> {
+		return this.registrar.listRegistered();
+	}
+
+	async unregisterVehicleByName(name: string): Promise<VehicleRegistrationOutcome> {
+		return this.registrar.unregister(name);
+	}
 
 	async install(
 		piHome: string,

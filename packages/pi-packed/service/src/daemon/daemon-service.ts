@@ -38,6 +38,7 @@ import {
 } from "@danypops/vehicle-server/service";
 import { npmPackageName, readInstalledPackagesAcrossScopes, readPackageDeclarations } from "../packages/installed.ts";
 import type { InstalledPkg } from "../packages/package.ts";
+import { versionAtLeast } from "../publish/publish.ts";
 
 export interface DaemonServiceManifest {
 	/** Relative to the installed package's own root directory. */
@@ -125,6 +126,47 @@ function dependsOnVehicle(pkg: InstalledPackageJson): boolean {
  * web-spider, packed, enigma all expose a `serve` subcommand on the same
  * bin their `service install` command already points at).
  */
+/**
+ * Resolves ONE candidate directory to a daemon entrypoint, using the same
+ * explicit-manifest-first-then-convention rule detectVehicleDaemonService's
+ * own doc comment describes -- factored out so the nested and hoisted
+ * candidates for the same dependency name can each be resolved
+ * independently and then compared, instead of the first one found
+ * unconditionally winning (see detectVehicleDaemonService's own comment on
+ * why iteration order alone is never a safe tie-break).
+ */
+function resolveDependencyCandidate(depDir: string, depName: string): ResolvedDaemonEntrypoint | undefined {
+	const dep = readPackageJson(depDir);
+	if (!dep) return undefined;
+	// An explicit manifest on the dependency itself wins over convention detection here too --
+	// mirrors resolveDaemonServiceSpec's own explicit-manifest-first behavior for a directly
+	// installed package. Without this, a dependency's own correct, explicit
+	// handleFilename/name/etc. was silently discarded in favor of a guess whenever the daemon
+	// was discovered one level down instead of installed directly by name -- exactly the
+	// common case (a Pi extension like pi-papyrus has no daemon of its own). Confirmed live:
+	// papyrus's real handle file is "vehicle-handle.json", not the "daemon.json" convention
+	// guess, and papyrus is only ever discovered this way, never installed directly by name.
+	const depManifest = dep.packed?.daemonService;
+	if (depManifest && typeof depManifest.binPath === "string" && depManifest.binPath.length > 0 && dep.version) {
+		return {
+			binPath: join(depDir, depManifest.binPath),
+			args: depManifest.args,
+			name: depManifest.name ?? unscopedName(dep.name ?? depName),
+			displayName: depManifest.displayName,
+			handleFilename: depManifest.handleFilename,
+			workingDirectory: depManifest.workingDirectory,
+			restartOnFailure: depManifest.restartOnFailure,
+			restartSec: depManifest.restartSec,
+			version: dep.version,
+		};
+	}
+	const depBin = firstBinPath(dep);
+	if (depBin && dependsOnVehicle(dep) && dep.version) {
+		return { binPath: join(depDir, depBin), args: ["serve"], name: unscopedName(dep.name ?? depName), version: dep.version };
+	}
+	return undefined;
+}
+
 export function detectVehicleDaemonService(
 	packageDir: string,
 	fallbackName: string,
@@ -143,36 +185,24 @@ export function detectVehicleDaemonService(
 			join(packageDir, "node_modules", depName),
 			...(hoistedNodeModulesDir ? [join(hoistedNodeModulesDir, depName)] : []),
 		];
-		for (const depDir of candidateDirs) {
-			const dep = readPackageJson(depDir);
-			if (!dep) continue;
-			// An explicit manifest on the dependency itself wins over convention detection here too --
-			// mirrors resolveDaemonServiceSpec's own explicit-manifest-first behavior for a directly
-			// installed package. Without this, a dependency's own correct, explicit
-			// handleFilename/name/etc. was silently discarded in favor of a guess whenever the daemon
-			// was discovered one level down instead of installed directly by name -- exactly the
-			// common case (a Pi extension like pi-papyrus has no daemon of its own). Confirmed live:
-			// papyrus's real handle file is "vehicle-handle.json", not the "daemon.json" convention
-			// guess, and papyrus is only ever discovered this way, never installed directly by name.
-			const depManifest = dep.packed?.daemonService;
-			if (depManifest && typeof depManifest.binPath === "string" && depManifest.binPath.length > 0 && dep.version) {
-				return {
-					binPath: join(depDir, depManifest.binPath),
-					args: depManifest.args,
-					name: depManifest.name ?? unscopedName(dep.name ?? depName),
-					displayName: depManifest.displayName,
-					handleFilename: depManifest.handleFilename,
-					workingDirectory: depManifest.workingDirectory,
-					restartOnFailure: depManifest.restartOnFailure,
-					restartSec: depManifest.restartSec,
-					version: dep.version,
-				};
-			}
-			const depBin = firstBinPath(dep);
-			if (depBin && dependsOnVehicle(dep) && dep.version) {
-				return { binPath: join(depDir, depBin), args: ["serve"], name: unscopedName(dep.name ?? depName), version: dep.version };
-			}
+		const resolved = candidateDirs
+			.map((depDir) => resolveDependencyCandidate(depDir, depName))
+			.filter((entry): entry is ResolvedDaemonEntrypoint => entry !== undefined);
+		if (resolved.length === 0) continue;
+		if (resolved.length === 1) return resolved[0];
+		// Both a nested copy (checked first, above) and a hoisted copy resolved for the exact same
+		// dependency name -- e.g. pi-papyrus's own nested @danypops/jittor@0.14.0 alongside the
+		// correctly-versioned, tree-wide hoisted @danypops/jittor@0.18.1. The real jittor incident:
+		// the nested copy always won here, unconditionally, purely because candidateDirs checks it
+		// first -- regardless of which was actually newer. Prefer the real higher semver version
+		// instead; a genuine tie keeps the first-found (nested) result, preserving papyrus's own
+		// intentional-nesting case (confirmed live, see resolveDependencyCandidate's own comment)
+		// exactly as before whenever there's nothing to disambiguate.
+		let best = resolved[0]!;
+		for (const candidate of resolved.slice(1)) {
+			if (versionAtLeast(candidate.version, best.version) && candidate.version !== best.version) best = candidate;
 		}
+		return best;
 	}
 	return undefined;
 }

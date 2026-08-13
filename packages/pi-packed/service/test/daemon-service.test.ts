@@ -208,6 +208,60 @@ describe("resolveDaemonServiceSpec", () => {
 		expect(result.spec.restartSec).toBe(2);
 	});
 
+	it("prefers the higher-semver candidate when BOTH a nested and hoisted copy of the same dependency resolve via bin+dependency convention -- the real jittor incident: a stale nested copy must never win over a correctly-versioned hoisted one just because it's checked first", () => {
+		const piHome = fakePiHome();
+		const extDir = join(piHome, "npm", "node_modules", "@danypops/pi-papyrus");
+		writeRawPackage(extDir, { name: "@danypops/pi-papyrus", version: "1.0.0", dependencies: { "@danypops/jittor": "^0.14.0" } });
+		// A stale nested copy pi-papyrus's own outdated floor forced npm to keep private, instead of
+		// deduping to the shared, correctly-versioned, hoisted copy every other consumer already uses.
+		const nestedDir = join(extDir, "node_modules", "@danypops/jittor");
+		writeRawPackage(nestedDir, {
+			name: "@danypops/jittor",
+			version: "0.14.0",
+			bin: { jittor: "src/cli.ts" },
+			dependencies: { "@danypops/vehicle-server": "^0.3.1" },
+		});
+		const hoistedDir = join(piHome, "npm", "node_modules", "@danypops/jittor");
+		writeRawPackage(hoistedDir, {
+			name: "@danypops/jittor",
+			version: "0.18.1",
+			bin: { jittor: "src/cli.ts" },
+			dependencies: { "@danypops/vehicle-server": "^0.17.0" },
+		});
+
+		const result = resolveDaemonServiceSpec(piHome, "npm:@danypops/pi-papyrus");
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error("expected ok");
+		expect(result.spec.binPath).toBe(join(hoistedDir, "src/cli.ts"));
+		expect(result.spec.version).toBe("0.18.1");
+	});
+
+	it("keeps the nested copy when it is genuinely the newer (or equal) one -- the tie-break only ever prefers a candidate that's actually newer, never blindly flips to hoisted", () => {
+		const piHome = fakePiHome();
+		const extDir = join(piHome, "npm", "node_modules", "@danypops/pi-papyrus");
+		writeRawPackage(extDir, { name: "@danypops/pi-papyrus", version: "1.0.0", dependencies: { "@danypops/jittor": "^0.18.0" } });
+		const nestedDir = join(extDir, "node_modules", "@danypops/jittor");
+		writeRawPackage(nestedDir, {
+			name: "@danypops/jittor",
+			version: "0.18.1",
+			bin: { jittor: "src/cli.ts" },
+			dependencies: { "@danypops/vehicle-server": "^0.17.0" },
+		});
+		const hoistedDir = join(piHome, "npm", "node_modules", "@danypops/jittor");
+		writeRawPackage(hoistedDir, {
+			name: "@danypops/jittor",
+			version: "0.14.0",
+			bin: { jittor: "src/cli.ts" },
+			dependencies: { "@danypops/vehicle-server": "^0.3.1" },
+		});
+
+		const result = resolveDaemonServiceSpec(piHome, "npm:@danypops/pi-papyrus");
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error("expected ok");
+		expect(result.spec.binPath).toBe(join(nestedDir, "src/cli.ts"));
+		expect(result.spec.version).toBe("0.18.1");
+	});
+
 	it("also detects the legacy @danypops/daemon-kit dependency name, not just vehicle-server", () => {
 		const piHome = fakePiHome();
 		const dir = join(piHome, "npm", "node_modules", "@danypops/web-spider-daemon");

@@ -316,7 +316,7 @@ describe("startPackedDaemon's own maintenance-task wiring (self-heals Vehicle dr
 		});
 	});
 
-	describe("reconcileAllDaemonServices pruning -- unregisters a Vehicle no longer discoverable by any path (the-armada-registrar-jittor-web-spider-daemon-collision)", () => {
+	describe("reconcileAllDaemonServices pruning (the-armada-registrar-jittor-web-spider-daemon-collision)", () => {
 		function stalePiHomeVehicle(piHome: string, name: string): VehicleSpec {
 			return {
 				name: name as VehicleSpec["name"],

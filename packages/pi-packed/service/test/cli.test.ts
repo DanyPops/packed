@@ -1059,7 +1059,7 @@ describe("CLI", () => {
 			},
 			async doctor(projectRoot) {
 				calls.push(`doctor:${projectRoot}`);
-				return { ok: true, conflicts: [], extensions: [], scanned: 0, truncated: false, serviceUnits: [] };
+				return { ok: true, conflicts: [], extensions: [], scanned: 0, truncated: false, serviceUnits: [], duplicateDependencies: [] };
 			},
 			async updatesForProject(projectRoot) {
 				calls.push(`updatesForProject:${projectRoot}`);
@@ -1101,6 +1101,7 @@ describe("CLI", () => {
 			scanned: 0,
 			truncated: false,
 			serviceUnits: [],
+			duplicateDependencies: [],
 		});
 		expect(JSON.parse((await cliRun(["updates", "--project", "/tmp/project", "--json"], d)).out).updates).toEqual([]);
 		expect(calls).toEqual([

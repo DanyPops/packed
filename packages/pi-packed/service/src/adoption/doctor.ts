@@ -10,6 +10,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { createNodeServiceInstallDeps } from "@danypops/vehicle-server/service";
 import { listPackageResources, type PackageResources, resolveInstalledDir } from "../packages/resources.ts";
+import { type DuplicateDependencyDiagnostic, findDuplicateDependencyVersions } from "./duplicate-dependency-doctor.ts";
 import type { ModuleFreshnessDiagnostic } from "./module-freshness.ts";
 import { checkServiceUnitPaths, type ServiceUnitDiagnostic } from "./service-doctor.ts";
 import { runExtensionSmoke, type SmokeOptions, type SmokeRegistrations } from "./smoke.ts";
@@ -56,6 +57,8 @@ export interface DoctorReport {
 	truncated: boolean;
 	/** A daemon-backed package's systemd --user unit referencing a path that no longer exists on disk -- see service-doctor.ts. Empty (not omitted) on a platform without systemd --user coverage. */
 	serviceUnits: ServiceUnitDiagnostic[];
+	/** Any @danypops/* package resolved to more than one distinct version anywhere in piHome's own npm tree -- see duplicate-dependency-doctor.ts's own doc comment for why this stays out of `ok`. */
+	duplicateDependencies: DuplicateDependencyDiagnostic[];
 	/**
 	 * Whether THIS running process still holds a stale in-memory copy of one
 	 * of its own runtime dependencies, loaded once at startup -- see
@@ -140,6 +143,7 @@ export async function runDoctor(piHome: string, projectRoot?: string, options: S
 		scanned: bounded.length,
 		truncated,
 		serviceUnits: serviceReport.diagnostics,
+		duplicateDependencies: findDuplicateDependencyVersions(piHome),
 	};
 }
 
@@ -160,6 +164,10 @@ export function formatDoctorReport(report: DoctorReport, json: boolean): string 
 	}
 	for (const diagnostic of report.serviceUnits) {
 		out += `\n${diagnostic.severity.toUpperCase()} ${diagnostic.code} ${diagnostic.package} (${diagnostic.unitName}.service): ${diagnostic.message}\n`;
+	}
+	for (const duplicate of report.duplicateDependencies) {
+		const versions = duplicate.locations.map((location) => `${location.version} (${location.path})`).join(", ");
+		out += `\nDUPLICATE_DEPENDENCY_VERSION ${duplicate.name}: ${versions}\n`;
 	}
 	for (const module of report.moduleFreshness ?? []) {
 		if (!module.stale) continue;

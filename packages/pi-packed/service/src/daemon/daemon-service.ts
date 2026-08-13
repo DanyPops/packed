@@ -127,25 +127,17 @@ function dependsOnVehicle(pkg: InstalledPackageJson): boolean {
  * bin their `service install` command already points at).
  */
 /**
- * Resolves ONE candidate directory to a daemon entrypoint, using the same
- * explicit-manifest-first-then-convention rule detectVehicleDaemonService's
- * own doc comment describes -- factored out so the nested and hoisted
- * candidates for the same dependency name can each be resolved
- * independently and then compared, instead of the first one found
- * unconditionally winning (see detectVehicleDaemonService's own comment on
- * why iteration order alone is never a safe tie-break).
+ * Resolves ONE candidate directory to a daemon entrypoint -- factored out
+ * so the nested and hoisted candidates for the same dependency name can
+ * each be resolved independently and then compared (see
+ * detectVehicleDaemonService), instead of the first one found
+ * unconditionally winning.
  */
 function resolveDependencyCandidate(depDir: string, depName: string): ResolvedDaemonEntrypoint | undefined {
 	const dep = readPackageJson(depDir);
 	if (!dep) return undefined;
-	// An explicit manifest on the dependency itself wins over convention detection here too --
-	// mirrors resolveDaemonServiceSpec's own explicit-manifest-first behavior for a directly
-	// installed package. Without this, a dependency's own correct, explicit
-	// handleFilename/name/etc. was silently discarded in favor of a guess whenever the daemon
-	// was discovered one level down instead of installed directly by name -- exactly the
-	// common case (a Pi extension like pi-papyrus has no daemon of its own). Confirmed live:
-	// papyrus's real handle file is "vehicle-handle.json", not the "daemon.json" convention
-	// guess, and papyrus is only ever discovered this way, never installed directly by name.
+	// An explicit manifest wins over convention detection -- confirmed live: papyrus's real
+	// handle file is "vehicle-handle.json", not the "daemon.json" convention guess.
 	const depManifest = dep.packed?.daemonService;
 	if (depManifest && typeof depManifest.binPath === "string" && depManifest.binPath.length > 0 && dep.version) {
 		return {
@@ -190,14 +182,9 @@ export function detectVehicleDaemonService(
 			.filter((entry): entry is ResolvedDaemonEntrypoint => entry !== undefined);
 		if (resolved.length === 0) continue;
 		if (resolved.length === 1) return resolved[0];
-		// Both a nested copy (checked first, above) and a hoisted copy resolved for the exact same
-		// dependency name -- e.g. pi-papyrus's own nested @danypops/jittor@0.14.0 alongside the
-		// correctly-versioned, tree-wide hoisted @danypops/jittor@0.18.1. The real jittor incident:
-		// the nested copy always won here, unconditionally, purely because candidateDirs checks it
-		// first -- regardless of which was actually newer. Prefer the real higher semver version
-		// instead; a genuine tie keeps the first-found (nested) result, preserving papyrus's own
-		// intentional-nesting case (confirmed live, see resolveDependencyCandidate's own comment)
-		// exactly as before whenever there's nothing to disambiguate.
+		// Nested and hoisted both resolved for the same dependency (the real jittor incident:
+		// a stale nested copy always won just because it's checked first). Prefer the newer
+		// version; a genuine tie keeps the nested result, preserving papyrus's intentional case.
 		let best = resolved[0]!;
 		for (const candidate of resolved.slice(1)) {
 			if (versionAtLeast(candidate.version, best.version) && candidate.version !== best.version) best = candidate;
@@ -438,13 +425,7 @@ export interface ReconcileAllResult {
 	reconciled: Array<{ packageName: string; vehicleName: string; installed: boolean; reason?: string }>;
 	skipped: number;
 	failed: Array<{ packageName: string; reason: string }>;
-	/**
-	 * Every Vehicle unregistered because this same sweep could no longer
-	 * discover it by any path (neither a configured extension's own
-	 * dependency walk nor listUnconfiguredDaemonDependencies' root-pinned
-	 * scan) -- see pruneStaleVehicles' own doc comment for why this is safe
-	 * to do unconditionally rather than requiring a separate opt-in call.
-	 */
+	/** Every Vehicle unregistered because this sweep no longer discovers it at all -- see pruneStaleVehicles. */
 	pruned: Array<{ vehicleName: string; executable: string }>;
 	pruneFailed: Array<{ vehicleName: string; reason: string }>;
 }
@@ -509,43 +490,20 @@ export async function reconcileAllDaemonServices(
 			...(resolved.result.installed ? {} : { reason: resolved.result.reason }),
 		});
 	}
-	// listUnconfiguredDaemonDependencies deliberately walks the FULL top-level
-	// node_modules sweep, not just readInstalledPackagesAcrossScopes' own
-	// pi:-configured list above -- a root-pinned dependency (e.g. lector,
-	// pinned directly in piHome/npm/package.json ahead of whatever version its
-	// own pi-lector wrapper's tree would resolve) is a real, currently-running
-	// Vehicle that the configured-packages loop above never reaches at all.
-	// Folding it in here is what makes the discovered set below actually
-	// complete -- pruning against anything narrower would delete a Vehicle
-	// that's still genuinely there, just reachable by a different path.
+	// Also fold in root-pinned dependencies (e.g. lector) the configured-packages loop above
+	// never reaches -- pruning against a narrower set would delete a Vehicle still genuinely there.
 	for (const dep of listUnconfiguredDaemonDependencies(piHome)) seen.add(dep.vehicleName);
 	const { pruned, pruneFailed } = await pruneStaleVehicles(piHome, seen, installer);
 	return { reconciled, skipped, failed, pruned, pruneFailed };
 }
 
 /**
- * Unregisters every Vehicle Armada currently declares that `discovered`
- * (this same sweep's own complete union of configured-extension and
- * root-pinned resolution) no longer produces at all -- the other half of
- * what makes Armada authoritative for every Vehicle Packed knows about.
- * Without this, a Vehicle whose packed.daemonService.name changed (or that
- * a stale nested dependency copy once resolved under a different name --
- * see this session's own live incident, a duplicate "web-spider-daemon"
- * losing every restart's single-instance-lock race against the correctly-
- * named "web-spider" Vehicle) just sits in the manifest forever: nothing
- * ever re-discovers it to overwrite it, and nothing ever notices it's gone
- * stale either.
- *
- * Scoped to only ever touch a Vehicle whose own `executable` lives under
- * piHome's own npm/node_modules -- i.e. one only Packed itself could
- * plausibly have registered in the first place. A Vehicle registered by an
- * entirely different mechanism (a hand-rolled `armada upsert` pointing
- * somewhere else on disk) is never a candidate, no matter how the
- * discovered set above turns out -- this function has no way to know that
- * caller's own intent, so it stays out of its way entirely. Packed's own
- * Vehicle (PACKED_VEHICLE_NAME) is excluded for the same reason
- * install()/remove()/restart() already refuse to touch it: reconcile runs
- * from inside Packed's own process.
+ * Unregisters every Vehicle Armada declares that `discovered` no longer
+ * produces at all -- otherwise a renamed/collided Vehicle (see the real
+ * web-spider-daemon incident) sits in the manifest forever. Scoped to only
+ * ever touch a Vehicle whose `executable` lives under piHome's own
+ * npm/node_modules -- one Packed itself could plausibly have registered.
+ * Packed's own Vehicle is excluded, matching install/remove/restart.
  */
 async function pruneStaleVehicles(
 	piHome: string,

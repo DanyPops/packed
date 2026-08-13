@@ -169,6 +169,40 @@ describeIfSandboxed("runDoctor", () => {
 		expect(report.ok).toBe(true);
 		expect(report.scanned).toBe(1);
 	});
+
+	it("surfaces a real duplicate @danypops/* dependency version without failing the overall report -- the same jittor-incident shape, caught proactively this time", async () => {
+		const home = piHome(["npm:pi-a"]);
+		installNpmPackage(
+			home,
+			"pi-a",
+			{ extensions: ["extension/index.ts"] },
+			{
+				"extension/index.ts": 'export default function (pi: any) { pi.registerTool({ name: "alpha" }); }',
+			},
+		);
+		const nodeModules = join(home, "npm", "node_modules");
+		mkdirSync(join(nodeModules, "@danypops", "jittor"), { recursive: true });
+		writeFileSync(
+			join(nodeModules, "@danypops", "jittor", "package.json"),
+			JSON.stringify({ name: "@danypops/jittor", version: "0.18.1" }),
+		);
+		mkdirSync(join(nodeModules, "@danypops", "pi-a", "node_modules", "@danypops", "jittor"), { recursive: true });
+		writeFileSync(
+			join(nodeModules, "@danypops", "pi-a", "node_modules", "@danypops", "jittor", "package.json"),
+			JSON.stringify({ name: "@danypops/jittor", version: "0.14.0" }),
+		);
+
+		const report = await runDoctor(home);
+
+		expect(report.duplicateDependencies).toHaveLength(1);
+		expect(report.duplicateDependencies[0]?.name).toBe("@danypops/jittor");
+		expect(report.ok).toBe(true); // informational only -- never fails the run by itself
+
+		const text = formatDoctorReport(report, false);
+		expect(text).toContain("DUPLICATE_DEPENDENCY_VERSION @danypops/jittor");
+		expect(text).toContain("0.18.1");
+		expect(text).toContain("0.14.0");
+	});
 });
 
 class NoopRegistry implements Registry {
@@ -313,7 +347,7 @@ describe("doctor.run — module freshness (a long-running daemon process's own s
 });
 
 describe("formatDoctorReport — module freshness rendering", () => {
-	const base = { ok: true, conflicts: [], extensions: [], scanned: 0, truncated: false, serviceUnits: [] };
+	const base = { ok: true, conflicts: [], extensions: [], scanned: 0, truncated: false, serviceUnits: [], duplicateDependencies: [] };
 
 	it("prints a STALE_MODULE_CACHE line with an actionable restart hint for each stale entry, and nothing for a fresh one", () => {
 		const text = formatDoctorReport(

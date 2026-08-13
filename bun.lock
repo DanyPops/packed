@@ -31,7 +31,7 @@
     },
     "packages/pi-packed": {
       "name": "@danypops/pi-packed",
-      "version": "0.22.5",
+      "version": "0.23.0",
       "bin": {
         "packed": "service/src/cli/cli.ts",
       },
@@ -40,7 +40,7 @@
         "@danypops/packed": "^0.7.0",
         "@danypops/pi-extension-harness": "^0.7.0",
         "@danypops/vehicle-client": "^0.8.1",
-        "@danypops/vehicle-client-pi": "^0.39.0",
+        "@danypops/vehicle-client-pi": "^0.40.1",
         "@danypops/vehicle-core": "^0.15.0",
         "@danypops/vehicle-server": "^0.22.0",
         "jiti": "^2.7.0",
@@ -130,7 +130,7 @@
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.5.7", "", { "os": "win32", "cpu": "x64" }, "sha512-V+0wu/nrj2S+MhP4EQ0uHNolP0IALEsz45pg0WoKkHfDeh0+ItHwP/p7bX5RPoMOl9NkpHYWdYPhIcy2mACHvQ=="],
 
-    "@danypops/armada": ["@danypops/armada@0.4.3", "", { "dependencies": { "typebox": "^1.3.6" }, "bin": { "armada": "dist/cli.js" } }, "sha512-Nc8oPw8OQLHWtwJT2zCh0UBT9WwMZ3fIPa2PMh6s/gbyb6+LDKWqhx1oSFtDneGnWODNRIr8bVTVI22ywetFNA=="],
+    "@danypops/armada": ["@danypops/armada@0.4.4", "", { "dependencies": { "typebox": "^1.3.6" }, "bin": { "armada": "dist/cli.js" } }, "sha512-stJl4y/wchf2+QpBf1jUZvDbey2yXMOFU66hLNqc99sKo3CiaMTE8m9bdKIHPJ5MnFHx6NUiCX5Y5T5BfR6K5w=="],
 
     "@danypops/packed": ["@danypops/packed@workspace:packages/packed"],
 
@@ -142,7 +142,7 @@
 
     "@danypops/vehicle-client": ["@danypops/vehicle-client@0.8.2", "", { "dependencies": { "@danypops/vehicle-core": "^0.15.0", "@danypops/vehicle-server": "^0.22.0" } }, "sha512-zYfy6S0iFh+ctVUEbTxFrPzPyH8zgTdrs4sC+sW9t6q+RXuWLsp7RXi6c+jcaci7cvbqtcSIjq6Ql+5v/iM6dQ=="],
 
-    "@danypops/vehicle-client-pi": ["@danypops/vehicle-client-pi@0.39.0", "", { "dependencies": { "@danypops/pi-extension-harness": "^0.7.0", "@danypops/vehicle-client": "^0.9.1", "@danypops/vehicle-core": "^0.17.0", "@danypops/vehicle-server": "^0.24.1", "malevich-tui-components": "^0.27.0" }, "peerDependencies": { "@earendil-works/pi-agent-core": "*", "@earendil-works/pi-coding-agent": "*", "@earendil-works/pi-tui": "*", "typebox": "*" }, "optionalPeers": ["@earendil-works/pi-tui"] }, "sha512-+QeRjLlHGV7uUf+TT8rFGXcg5GKB7x5l/Ta0JIN/RNe97ZbC2op6J6UQJVYcE6eDAVWCDQD7wrfnef2AZibvsg=="],
+    "@danypops/vehicle-client-pi": ["@danypops/vehicle-client-pi@0.40.1", "", { "dependencies": { "@danypops/pi-extension-harness": "^0.7.0", "@danypops/vehicle-client": "^0.9.1", "@danypops/vehicle-core": "^0.17.0", "@danypops/vehicle-server": "^0.24.1", "malevich-tui-components": "^0.28.0" }, "peerDependencies": { "@earendil-works/pi-agent-core": "*", "@earendil-works/pi-coding-agent": "*", "@earendil-works/pi-tui": "*", "typebox": "*" }, "optionalPeers": ["@earendil-works/pi-tui"] }, "sha512-Ih8rrB8UkVqORhDS8liCMBHm8vI8U1V1/HnjLv1zggJUXF7IqjDuZ60yUrne1IDTpBFCXmMDQCqgLp56CRKmlA=="],
 
     "@danypops/vehicle-core": ["@danypops/vehicle-core@0.15.0", "", {}, "sha512-2IWDriuNZmndpgpqCJ5DF56ZCBTxjJL7kxyws9H9jkLjxF5U412R4GNpdcbNvYY0NHmL5P5lk4/oCFZHC+XXOA=="],
 
@@ -638,7 +638,9 @@
 
     "@danypops/vehicle-client-pi/@danypops/vehicle-server": ["@danypops/vehicle-server@0.24.1", "", { "dependencies": { "@danypops/armada": "^0.4.4", "@danypops/vehicle-core": "^0.17.0", "pino": "^10.3.1" } }, "sha512-3tC0WYnYq47mj0QFT1K1n+70LqjdEQZR/DceXT40fkpxZJwtlKu5XoDXIkry4LhP9gOvdwVHCqrr1MMy4Yqrww=="],
 
-    "@danypops/vehicle-client-pi/malevich-tui-components": ["malevich-tui-components@0.27.0", "", {}, "sha512-F7JftZhZFERXfDiSr9ofEDILr/1Ikd7wkjXi0Zgec+WtBLVImGjbM24P0m6YTaCPsEIyqT9jWmy88nw72F7jBQ=="],
+    "@danypops/vehicle-client-pi/malevich-tui-components": ["malevich-tui-components@0.28.0", "", {}, "sha512-tjAAIkfEzLjKG6UMH/IMV88baqhR3vuhoWckSaMS9yXdHoM02cRyv8x72G6KMOM9wp49BLa7a3C0j2t5as+f5g=="],
+
+    "@danypops/vehicle-server/@danypops/armada": ["@danypops/armada@0.4.3", "", { "dependencies": { "typebox": "^1.3.6" }, "bin": { "armada": "dist/cli.js" } }, "sha512-Nc8oPw8OQLHWtwJT2zCh0UBT9WwMZ3fIPa2PMh6s/gbyb6+LDKWqhx1oSFtDneGnWODNRIr8bVTVI22ywetFNA=="],
 
     "@earendil-works/pi-agent-core/typebox": ["typebox@1.1.38", "", {}, "sha512-pZ0aQPmMmXoUvSbeuWf/Hzsc+avNw/Zd6VeE8CFgkVGWyuHPJvqeJJDeJqLve+K70LvjYIoleGcoJHPT17cWoA=="],
 
@@ -665,7 +667,5 @@
     "p-retry/retry": ["retry@0.13.1", "", {}, "sha512-XQBQ3I8W1Cge0Seh+6gjj03LbmRFWuoszgK9ooCpwYIrhhoO80pfq4cUkU5DkknwfOfFteRwlZ56PYOGYyFWdg=="],
 
     "thread-stream/real-require": ["real-require@1.0.0", "", {}, "sha512-P4nbQYQfePJxRSmY+v/KINxVucm4NF3p3s7pJveMTtom52FR4YGltUQLB8idDXwDDWW+eYrWDFbuzUnjoWHF7g=="],
-
-    "@danypops/vehicle-client-pi/@danypops/vehicle-server/@danypops/armada": ["@danypops/armada@0.4.4", "", { "dependencies": { "typebox": "^1.3.6" }, "bin": { "armada": "dist/cli.js" } }, "sha512-stJl4y/wchf2+QpBf1jUZvDbey2yXMOFU66hLNqc99sKo3CiaMTE8m9bdKIHPJ5MnFHx6NUiCX5Y5T5BfR6K5w=="],
   }
 }

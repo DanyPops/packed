@@ -10,7 +10,8 @@
  *    activate through this path, matching this file's own doc comment about not letting the
  *    model set `approved` itself.
  */
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { __resetInProcessVehicleRegistryForTests, __resetVehicleShellHandleForTests } from "@danypops/vehicle-client-pi/test-utils";
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { resetVehicleClientTargetResolverForTests, setVehicleClientTargetResolverForTests } from "../extension/src/vehicle-target.ts";
 import { registerPackedVehicle } from "../extension/src/vehicle-tools.ts";
@@ -92,6 +93,16 @@ function fakePi() {
 }
 
 describe("registerPackedVehicle opts into Vehicle Shell activation", () => {
+	// registerVehicleTools()'s shared Vehicle Shell handle and in-process vehicle registry are both
+	// process-wide globalThis singletons -- bun test runs this whole package's test files in one
+	// process, so an earlier test's own registration would otherwise silently "win" the shared
+	// handle forever, leaving a later test's own fresh fake api with tools_list/tools_man never
+	// registered on it at all. See @danypops/vehicle-client-pi/test-utils's own doc comment.
+	beforeEach(() => {
+		__resetVehicleShellHandleForTests();
+		__resetInProcessVehicleRegistryForTests();
+	});
+
 	afterEach(() => {
 		resetVehicleClientTargetResolverForTests();
 	});
@@ -139,7 +150,7 @@ describe("registerPackedVehicle opts into Vehicle Shell activation", () => {
 			expect(man).toBeDefined();
 			const readResult = (await man!.execute(
 				"call-1",
-				{ names: ["package.check"] } as never,
+				{ names: ["packed:package.check"] } as never,
 				undefined as never,
 				undefined as never,
 				undefined as never,
@@ -149,7 +160,7 @@ describe("registerPackedVehicle opts into Vehicle Shell activation", () => {
 
 			const writeResult = (await man!.execute(
 				"call-2",
-				{ names: ["package.install"] } as never,
+				{ names: ["packed:package.install"] } as never,
 				undefined as never,
 				undefined as never,
 				undefined as never,
@@ -161,7 +172,7 @@ describe("registerPackedVehicle opts into Vehicle Shell activation", () => {
 		}
 	});
 
-	it('enables Vehicle Shell broker mode under ownVehicleName "pi-packed" -- tools_list actually advertises cross-daemon discovery -- enable-vehicle-shell-broker-mode-in-pi-packed', async () => {
+	it("tools_list's own description advertises namespaced cross-vehicle discovery, the neutral shared-owner shape", async () => {
 		const { baseUrl, stop } = manifestServer();
 		try {
 			setVehicleClientTargetResolverForTests(() => ({ baseUrl, token: "test-token" }));

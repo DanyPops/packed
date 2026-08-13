@@ -31,12 +31,12 @@
     },
     "packages/pi-packed": {
       "name": "@danypops/pi-packed",
-      "version": "0.25.0",
+      "version": "0.25.2",
       "bin": {
         "packed": "service/src/cli/cli.ts",
       },
       "dependencies": {
-        "@danypops/armada": "^0.4.6",
+        "@danypops/armada": "^0.4.8",
         "@danypops/packed": "^0.7.0",
         "@danypops/pi-extension-harness": "^0.7.0",
         "@danypops/vehicle-client": "^0.8.1",
@@ -130,7 +130,7 @@
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.5.7", "", { "os": "win32", "cpu": "x64" }, "sha512-V+0wu/nrj2S+MhP4EQ0uHNolP0IALEsz45pg0WoKkHfDeh0+ItHwP/p7bX5RPoMOl9NkpHYWdYPhIcy2mACHvQ=="],
 
-    "@danypops/armada": ["@danypops/armada@0.4.6", "", { "dependencies": { "typebox": "^1.3.6" }, "bin": { "armada": "dist/cli.js" } }, "sha512-gezKcyi4VJHoKg7eecpXCRdmbLAu0KHxCkMsOqgDal3eQwh9JR/wDiA+vDrQ82hCnJ3nXowEoghMgGwht0fHmA=="],
+    "@danypops/armada": ["@danypops/armada@0.4.8", "", { "dependencies": { "typebox": "^1.3.6" }, "bin": { "armada": "dist/cli.js" } }, "sha512-VS3rAZSa5l0puXD0sbS6WgxmHMskRSAbXD8xB25+yo6hQ92Wzg7GH35nYPr5ppEwTTxGjpvUUA1fpSSXzYiWxw=="],
 
     "@danypops/packed": ["@danypops/packed@workspace:packages/packed"],
 

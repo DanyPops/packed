@@ -161,6 +161,39 @@ function resolveDependencyCandidate(depDir: string, depName: string): ResolvedDa
 	return undefined;
 }
 
+/** Strips a leading "pi-" from an unscoped package name, e.g. "pi-papyrus" -> "papyrus", "pipes" ->
+ * "pipes" unchanged. Mirrors the real, universal naming convention every pi-* extension in this
+ * house follows for its own namesake daemon package (pi-lector/lector, pi-jittor/jittor,
+ * pi-tickets/tickets, pi-pipes/pipes, pi-web-spider/web-spider, pi-papyrus/papyrus). */
+function namesakeDaemonName(unscopedPackageName: string): string | undefined {
+	return unscopedPackageName.startsWith("pi-") ? unscopedPackageName.slice("pi-".length) : undefined;
+}
+
+/** Resolves every dependency-name candidate for one dependency, across both its nested and
+ * hoisted layout (see resolveDependencyCandidate) -- factored out so detectVehicleDaemonService
+ * can collect candidates across EVERY dependency name before picking one, instead of returning
+ * on the first name that resolves at all. */
+function resolveDependencyNameCandidate(
+	packageDir: string,
+	depName: string,
+	hoistedNodeModulesDir: string | undefined,
+): ResolvedDaemonEntrypoint | undefined {
+	const candidateDirs = [join(packageDir, "node_modules", depName), ...(hoistedNodeModulesDir ? [join(hoistedNodeModulesDir, depName)] : [])];
+	const resolved = candidateDirs
+		.map((depDir) => resolveDependencyCandidate(depDir, depName))
+		.filter((entry): entry is ResolvedDaemonEntrypoint => entry !== undefined);
+	if (resolved.length === 0) return undefined;
+	if (resolved.length === 1) return resolved[0];
+	// Nested and hoisted both resolved for the same dependency (the real jittor incident:
+	// a stale nested copy always won just because it's checked first). Prefer the newer
+	// version; a genuine tie keeps the nested result, preserving papyrus's intentional case.
+	let best = resolved[0]!;
+	for (const candidate of resolved.slice(1)) {
+		if (versionAtLeast(candidate.version, best.version) && candidate.version !== best.version) best = candidate;
+	}
+	return best;
+}
+
 export function detectVehicleDaemonService(
 	packageDir: string,
 	fallbackName: string,
@@ -174,26 +207,24 @@ export function detectVehicleDaemonService(
 		return { binPath: join(packageDir, ownBin), args: ["serve"], name: unscopedName(own.name ?? fallbackName), version: own.version };
 	}
 
+	// A pi-X package can carry OTHER Vehicle-shaped dependencies for unrelated reasons (e.g.
+	// pi-papyrus depends on @danypops/jittor only for Context Hub types) -- confirmed live: a
+	// naive "first dependency name that resolves" scan returned jittor's spec for pi-papyrus
+	// (dependencies happened to list "@danypops/jittor" before "@danypops/papyrus"), silently
+	// mis-registering pi-papyrus's own Armada vehicle as another package's daemon entirely. Collect
+	// every resolvable candidate across ALL dependency names first, then prefer the one whose own
+	// resolved vehicle name matches this package's namesake convention (pi-X -> X) before falling
+	// back to the first-found candidate for a package that doesn't follow that convention.
+	const byName = unscopedName(own.name ?? fallbackName);
+	const wantedNamesake = namesakeDaemonName(byName);
+	const candidates: ResolvedDaemonEntrypoint[] = [];
 	for (const depName of Object.keys(own.dependencies ?? {})) {
-		const candidateDirs = [
-			join(packageDir, "node_modules", depName),
-			...(hoistedNodeModulesDir ? [join(hoistedNodeModulesDir, depName)] : []),
-		];
-		const resolved = candidateDirs
-			.map((depDir) => resolveDependencyCandidate(depDir, depName))
-			.filter((entry): entry is ResolvedDaemonEntrypoint => entry !== undefined);
-		if (resolved.length === 0) continue;
-		if (resolved.length === 1) return resolved[0];
-		// Nested and hoisted both resolved for the same dependency (the real jittor incident:
-		// a stale nested copy always won just because it's checked first). Prefer the newer
-		// version; a genuine tie keeps the nested result, preserving papyrus's intentional case.
-		let best = resolved[0]!;
-		for (const candidate of resolved.slice(1)) {
-			if (versionAtLeast(candidate.version, best.version) && candidate.version !== best.version) best = candidate;
-		}
-		return best;
+		const resolved = resolveDependencyNameCandidate(packageDir, depName, hoistedNodeModulesDir);
+		if (!resolved) continue;
+		if (wantedNamesake !== undefined && resolved.name === wantedNamesake) return resolved;
+		candidates.push(resolved);
 	}
-	return undefined;
+	return candidates[0];
 }
 
 /**

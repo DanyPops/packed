@@ -189,6 +189,38 @@ describe("resolveDaemonServiceSpec", () => {
 		expect(result.spec.name).toBe("papyrus");
 	});
 
+	it("prefers the dependency matching its own pi-X -> X namesake convention over an unrelated Vehicle-shaped dependency listed first -- the real live incident: pi-papyrus's own dependency scan resolved to jittor (a Context Hub-types-only dependency) instead of papyrus, because 'jittor' sorted before 'papyrus' in the dependencies object", () => {
+		const piHome = fakePiHome();
+		const extDir = join(piHome, "npm", "node_modules", "@danypops/pi-papyrus");
+		// Real on-disk order: @danypops/jittor genuinely does sort before @danypops/papyrus.
+		writeRawPackage(extDir, {
+			name: "@danypops/pi-papyrus",
+			version: "1.0.0",
+			dependencies: { "@danypops/jittor": "^0.18.0", "@danypops/papyrus": "^0.54.0" },
+		});
+		const jittorDir = join(extDir, "node_modules", "@danypops/jittor");
+		writeRawPackage(jittorDir, {
+			name: "@danypops/jittor",
+			version: "0.18.0",
+			bin: { jittor: "src/cli.ts" },
+			dependencies: { "@danypops/vehicle-server": "^0.24.0" },
+		});
+		const papyrusDir = join(extDir, "node_modules", "@danypops/papyrus");
+		writeRawPackage(papyrusDir, {
+			name: "@danypops/papyrus",
+			version: "0.54.0",
+			bin: { papyrus: "src/cli.ts" },
+			dependencies: { "@danypops/vehicle-server": "^0.24.0" },
+			packed: { daemonService: { binPath: "src/cli.ts", args: ["serve"], handleFilename: "vehicle-handle.json" } },
+		});
+
+		const result = resolveDaemonServiceSpec(piHome, "npm:@danypops/pi-papyrus");
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error("expected ok");
+		expect(result.spec.name).toBe("papyrus");
+		expect(result.spec.binPath).toBe(join(papyrusDir, "src/cli.ts"));
+	});
+
 	it("honors a nested dependency's own explicit packed.daemonService manifest, not just bin+dependency convention -- confirmed live: papyrus's real handle file is 'vehicle-handle.json', not the 'daemon.json' convention guess, and papyrus is only ever discovered this way (one level into pi-papyrus's own dependencies), never installed directly by name", () => {
 		const piHome = fakePiHome();
 		const extDir = join(piHome, "npm", "node_modules", "@danypops/pi-papyrus");

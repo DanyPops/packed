@@ -127,6 +127,19 @@ export function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOpt
 			intervalMs: envMs(ENV.RECONCILE_SECS, RECONCILE_INTERVAL_DEFAULT_MS),
 			run: async () => {
 				const result = await reconcileAllDaemonServices(piHome, undefined, daemonServiceInstaller);
+				// A package updated through a route pi-packed never sees at all (e.g. the generic,
+				// daemon-unaware `pi update --extension` / pkg_update path -- see
+				// pkg-update-never-restarts-vehicle-daemon) leaves this as the ONLY thing that ever
+				// notices and restarts the stale daemon. Logging only on failure made every silent
+				// success indistinguishable from "this never ran" -- there was no way to confirm a
+				// restart this task performed actually happened, short of checking the process's own
+				// PID by hand.
+				if (result.reconciled.some((entry) => entry.installed) || result.pruned.length > 0) {
+					logger.info("vehicle-reconcile applied changes", {
+						reconciled: result.reconciled.filter((entry) => entry.installed).map((entry) => entry.vehicleName),
+						pruned: result.pruned.map((entry) => entry.vehicleName),
+					});
+				}
 				if (result.failed.length > 0) {
 					logger.warn("vehicle-reconcile completed with failures", {
 						reconciled: result.reconciled.length,
@@ -171,28 +184,23 @@ export function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOpt
 	};
 }
 
-function runInitialMaintenance(maintenanceTasks: MaintenanceTask[] | undefined): void {
-	for (const task of maintenanceTasks ?? []) {
-		void Promise.resolve(task.run()).catch((error) =>
-			logger.error(`maintenance task failed: ${task.name}`, { error: error instanceof Error ? error.message : String(error) }),
-		);
-	}
-}
-
+// startDaemon() itself now runs every maintenance task once immediately at startup (in
+// addition to its own interval) -- see @danypops/vehicle-server's own daemon.ts. This used to
+// be a bespoke wrapper here (runInitialMaintenance(), called after startDaemon() returned, or
+// from serveMain()'s onListen) working around a bare setInterval() never firing until its full
+// interval first elapsed; kept here would now double-run every task on every startup. Every
+// OTHER vehicle-server-based daemon (lector, jittor, papyrus, pipes, tickets,
+// web-spider-daemon) never had this workaround at all and now gets the same fix for free from
+// the shared implementation, instead of needing to independently reinvent it.
 export async function startPackedDaemon(options: StartPackedDaemonOptions = {}): Promise<RunningDaemon> {
-	const configured = daemonOptions(options);
-	const running = await startDaemon(configured);
-	runInitialMaintenance(configured.maintenanceTasks);
-	return running;
+	return startDaemon(daemonOptions(options));
 }
 
 export function serveMain(): void {
-	const configured = daemonOptions({});
 	runDaemonProcess({
-		...configured,
+		...daemonOptions({}),
 		onListen: ({ host, port }) => {
 			logger.info("listening", { host, port });
-			runInitialMaintenance(configured.maintenanceTasks);
 		},
 	});
 }

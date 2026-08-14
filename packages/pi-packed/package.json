@@ -1,6 +1,6 @@
 {
   "name": "@danypops/pi-packed",
-  "version": "0.27.3",
+  "version": "0.27.4",
   "description": "Pi package lifecycle, validation, daemon, tools, profiles, and TUI",
   "type": "module",
   "bin": {
@@ -33,7 +33,7 @@
     "@danypops/vehicle-client": "^0.10.0",
     "@danypops/vehicle-client-pi": "^0.40.1",
     "@danypops/vehicle-core": "^0.15.0",
-    "@danypops/vehicle-server": "^0.24.1",
+    "@danypops/vehicle-server": "^0.24.2",
     "jiti": "^2.7.0",
     "malevich-tui-components": "^0.21.1",
     "publint": "0.3.22",

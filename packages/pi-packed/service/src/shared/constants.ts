@@ -52,7 +52,17 @@ export const INDEX_OPERATION_TIMEOUT_MS = 10 * 60_000;
 export const WATCH_INTERVAL_DEFAULT_MS = 30 * 60_000; // updates diff cadence
 export const CATALOG_INTERVAL_DEFAULT_MS = 6 * 3_600_000; // full mirror TTL
 export const INDEX_INTERVAL_DEFAULT_MS = 6 * 3_600_000; // static index regeneration TTL, same cadence as the catalog mirror it reads from
-export const RECONCILE_INTERVAL_DEFAULT_MS = 30 * 60_000; // Vehicle-service drift sweep cadence -- catches an out-of-band npm install/update a running daemon never picked up
+// Vehicle-service drift sweep cadence -- catches an out-of-band npm install/update a running
+// daemon never picked up (e.g. a plain `pkg_update`/`pi update --extension`, which has no way to
+// notify Armada/pi-packed at all -- see pkg-update-never-restarts-vehicle-daemon). Now that
+// startDaemon() also runs every maintenance task once immediately at startup (see
+// vehicle-server's own daemon.ts), a restart of pi-packed itself no longer waits out this
+// interval at all -- this cadence now only bounds the OTHER case: an out-of-band update that
+// lands while pi-packed's own daemon is already running and stays up. 30 minutes was tuned for
+// a background safety net, not an interactive "I just updated something" workflow; 5 minutes
+// keeps the same self-healing guarantee at a much more reasonable latency for a per-pass cost
+// that's still just a handful of cheap native-service inspections for a fleet this size.
+export const RECONCILE_INTERVAL_DEFAULT_MS = 5 * 60_000;
 export const IDLE_BUDGET_DEFAULT_MS = 10 * 60_000; // on-demand self-exit
 export const WATCHDOG_TICK_MS = 15_000;
 

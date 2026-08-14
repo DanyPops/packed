@@ -226,6 +226,33 @@ describe("startPackedDaemon's own maintenance-task wiring (self-heals Vehicle dr
 		}
 	});
 
+	/**
+	 * Regression guard for the double-execution risk this file's own daemon.ts (startPackedDaemon/
+	 * serveMain) used to carry: a bespoke runInitialMaintenance() wrapper called explicitly, on top
+	 * of what startDaemon() (vehicle-server) itself now already does since it started running every
+	 * maintenance task once immediately at startup. Removed entirely -- this proves it stayed
+	 * removed, not just that a task runs at least once (the test above already covers that).
+	 */
+	it("runs each maintenance task exactly once at startup, never twice", async () => {
+		const piHome = fakePiHome([]);
+		const paths = fakePaths();
+		let runs = 0;
+		const task: MaintenanceTask = {
+			name: "probe-exactly-once",
+			intervalMs: RECONCILE_INTERVAL_DEFAULT_MS,
+			run: () => {
+				runs++;
+			},
+		};
+		const running = await startPackedDaemon({ paths, reg: registry, inst: installer, piHome, maintenanceTasks: [task] });
+		try {
+			await new Promise((resolve) => setTimeout(resolve, 30));
+			expect(runs).toBe(1);
+		} finally {
+			await running.stop();
+		}
+	});
+
 	it("does not reconcile Armada before the daemon has published its readiness handle", async () => {
 		const piHome = fakePiHome(["npm:@danypops/pi-packed", "npm:@danypops/probe"]);
 		const paths = fakePaths();

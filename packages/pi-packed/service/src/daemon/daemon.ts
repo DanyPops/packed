@@ -134,9 +134,10 @@ export function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOpt
 				// success indistinguishable from "this never ran" -- there was no way to confirm a
 				// restart this task performed actually happened, short of checking the process's own
 				// PID by hand.
-				if (result.reconciled.some((entry) => entry.installed) || result.pruned.length > 0) {
+				const changed = result.reconciled.filter((entry) => entry.installed && entry.versionChanged);
+				if (changed.length > 0 || result.pruned.length > 0) {
 					logger.info("vehicle-reconcile applied changes", {
-						reconciled: result.reconciled.filter((entry) => entry.installed).map((entry) => entry.vehicleName),
+						reconciled: changed.map((entry) => entry.vehicleName),
 						pruned: result.pruned.map((entry) => entry.vehicleName),
 					});
 				}

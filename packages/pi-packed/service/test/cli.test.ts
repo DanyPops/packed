@@ -120,7 +120,7 @@ class FakeDaemonServiceInstaller {
 		return {
 			ok: true,
 			output: "reconciled 1 Vehicle(s), skipped 0 non-daemon package(s)",
-			reconciled: [{ packageName: "@danypops/probe", vehicleName: "probe", installed: true }],
+			reconciled: [{ packageName: "@danypops/probe", vehicleName: "probe", installed: true, versionChanged: true }],
 			skipped: 0,
 			failed: [],
 			pruned: [],
@@ -604,7 +604,7 @@ describe("CLI", () => {
 		expect(JSON.parse(json.out)).toEqual({
 			ok: true,
 			output: "reconciled 1 Vehicle(s), skipped 0 non-daemon package(s)",
-			reconciled: [{ packageName: "@danypops/probe", vehicleName: "probe", installed: true }],
+			reconciled: [{ packageName: "@danypops/probe", vehicleName: "probe", installed: true, versionChanged: true }],
 			skipped: 0,
 			failed: [],
 			pruned: [],

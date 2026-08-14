@@ -455,7 +455,13 @@ export function listManagedPackages(piHome: string, projectRoot?: string): Insta
 }
 
 export interface ReconcileAllResult {
-	reconciled: Array<{ packageName: string; vehicleName: string; installed: boolean; reason?: string }>;
+	/** `versionChanged` is true only when this pass's newly-resolved version genuinely differs
+	 * from what Armada had registered before this sweep started -- `installed: true` alone means
+	 * only "the register call itself succeeded", which is true on every healthy pass whether or
+	 * not anything actually changed underneath (register()/reconcile() is a safe no-op against
+	 * unchanged desired state). A caller wanting to know whether this pass genuinely restarted
+	 * something (vs. just re-confirmed a healthy, unchanged fleet) must check this, not `installed`. */
+	reconciled: Array<{ packageName: string; vehicleName: string; installed: boolean; versionChanged: boolean; reason?: string }>;
 	skipped: number;
 	failed: Array<{ packageName: string; reason: string }>;
 	/** Every Vehicle unregistered because this sweep no longer discovers it at all -- see pruneStaleVehicles. */
@@ -555,6 +561,13 @@ export async function reconcileAllDaemonServices(
 	const failed: ReconcileAllResult["failed"] = [];
 	const seen = new Set<string>();
 	let skipped = 0;
+	// Snapshot BEFORE this sweep's own install() calls mutate Armada's registration -- the only
+	// way to tell "this pass's register() call genuinely changed something" from "register()
+	// succeeded against an already-current registration", since install()'s own ServiceInstallResult
+	// reports only the latter.
+	const previousVersions = new Map<string, string>(
+		(await installer.listRegisteredVehicles()).map((vehicle) => [String(vehicle.name), vehicle.version]),
+	);
 	for (const pkg of packages) {
 		// Re-registering the daemon from inside its own process makes Armada stop
 		// that process before registration can start the replacement.
@@ -577,6 +590,7 @@ export async function reconcileAllDaemonServices(
 			packageName: pkg.name,
 			vehicleName: resolved.spec.name,
 			installed: resolved.result.installed,
+			versionChanged: previousVersions.get(resolved.spec.name) !== resolved.spec.version,
 			...(resolved.result.installed ? {} : { reason: resolved.result.reason }),
 		});
 	}

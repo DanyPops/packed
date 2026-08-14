@@ -343,6 +343,46 @@ describe("startPackedDaemon's own maintenance-task wiring (self-heals Vehicle dr
 		});
 	});
 
+	/**
+	 * Real gap this closes: install()'s own ServiceInstallResult reports `installed: true`
+	 * whenever register()/reconcile() SUCCEEDS -- which is true on every healthy pass whether or
+	 * not anything actually changed underneath (register() is a safe no-op against unchanged
+	 * desired state). A caller logging "applied changes" off `installed` alone would say so on
+	 * literally every tick of a healthy, unchanged fleet -- see pkg-update-never-restarts-
+	 * vehicle-daemon. versionChanged is the honest signal instead.
+	 */
+	describe("reconcileAllDaemonServices reports versionChanged honestly, not just installed", () => {
+		it("is true on a package's first-ever registration, false on an unchanged re-sweep, true again once its on-disk version actually moves", async () => {
+			const piHome = fakePiHome(["npm:@danypops/probe"]);
+			installMockDaemon(piHome, "@danypops/probe");
+			const harness = await createArmadaTestHarness();
+			try {
+				const installer = new RealDaemonServiceInstaller(harness.registrar);
+
+				const first = await reconcileAllDaemonServices(piHome, undefined, installer);
+				expect(first.reconciled).toEqual([
+					{ packageName: "@danypops/probe", vehicleName: "probe", installed: true, versionChanged: true },
+				]);
+
+				const second = await reconcileAllDaemonServices(piHome, undefined, installer);
+				expect(second.reconciled).toEqual([
+					{ packageName: "@danypops/probe", vehicleName: "probe", installed: true, versionChanged: false },
+				]);
+
+				writeFileSync(
+					join(piHome, "npm", "node_modules", "@danypops", "probe", "package.json"),
+					JSON.stringify({ name: "@danypops/probe", version: "1.1.0", packed: { daemonService: { binPath: "cli.ts", args: ["serve"] } } }),
+				);
+				const third = await reconcileAllDaemonServices(piHome, undefined, installer);
+				expect(third.reconciled).toEqual([
+					{ packageName: "@danypops/probe", vehicleName: "probe", installed: true, versionChanged: true },
+				]);
+			} finally {
+				await harness.dispose();
+			}
+		});
+	});
+
 	describe("reconcileAllDaemonServices pruning (the-armada-registrar-jittor-web-spider-daemon-collision)", () => {
 		function stalePiHomeVehicle(piHome: string, name: string): VehicleSpec {
 			return {

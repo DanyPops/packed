@@ -13,6 +13,7 @@ import {
 	RealDaemonServiceInstaller,
 	resolveDaemonServiceSpec,
 	scheduleSelfRestart,
+	selfRestartCommand,
 	type SelfRestartScheduler,
 } from "../src/daemon/daemon-service.ts";
 
@@ -497,6 +498,36 @@ describe("RealDaemonServiceInstaller -- Armada registration through the in-proce
 	it("scheduleSelfRestart resolves armada's real CLI module -- proves the wiring is live, not just typechecked", () => {
 		expect(() => import.meta.resolve("@danypops/armada/cli")).not.toThrow();
 		expect(typeof scheduleSelfRestart).toBe("function");
+	});
+
+	it("selfRestartCommand routes through systemd-run's own transient unit on Linux, not a bare detached spawn", () => {
+		// A bare `spawn(..., {detached:true}).unref()` alone does NOT escape systemd's
+		// KillMode=control-group -- confirmed live: it was killed mid-restart the instant the
+		// unit it was spawned from was stopped, because cgroups (unlike a Unix process group)
+		// aren't escaped by setsid(). systemd-run's own transient unit has an independent cgroup.
+		const result = selfRestartCommand("linux", "/usr/bin/node", "/opt/armada/dist/cli.js", "armada-selfrestart-pi-packed-123-456");
+		expect(result.command).toBe("systemd-run");
+		expect(result.arguments).toEqual([
+			"--user",
+			"--collect",
+			"--unit=armada-selfrestart-pi-packed-123-456",
+			"--",
+			"/usr/bin/node",
+			"/opt/armada/dist/cli.js",
+			"restart",
+			PACKED_VEHICLE_NAME,
+			"--json",
+		]);
+	});
+
+	it("selfRestartCommand spawns the CLI directly on non-Linux platforms -- no systemd cgroup to escape", () => {
+		for (const platform of ["darwin", "win32"] as const) {
+			const result = selfRestartCommand(platform, "/usr/local/bin/node", "/opt/armada/dist/cli.js", "unused-on-this-platform");
+			expect(result).toEqual({
+				command: "/usr/local/bin/node",
+				arguments: ["/opt/armada/dist/cli.js", "restart", PACKED_VEHICLE_NAME, "--json"],
+			});
+		}
 	});
 
 	it("install() reports a non-daemon package without touching Armada", async () => {

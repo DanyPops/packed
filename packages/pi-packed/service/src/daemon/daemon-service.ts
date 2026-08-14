@@ -446,12 +446,38 @@ const SELF_RESTART_SCHEDULED_REASON = "self-restart scheduled via a detached arm
  * detached child's `armada restart` stops this very process. */
 const SELF_RESTART_DELAY_MS = 500;
 
-/** Fire-and-forget: schedule Packed's own Vehicle to restart from OUTSIDE this process. Packed
- * can't safely stop+start itself in-process (the `stop` step would kill the very process handling
- * this request before it could `start` again) -- so this spawns a detached `armada restart
- * pi-packed` a beat later, after the response reporting "scheduled" has had time to flush, and lets
- * it outlive this process via detached+unref. Swallows a resolution failure silently: worst case is
- * the pre-existing behavior (a human restarts the service by hand), never a crash. */
+/**
+ * Builds the command to launch armada's own `restart pi-packed` out-of-process. Plain
+ * `spawn(..., { detached: true }).unref()` is NOT enough on Linux: systemd's default
+ * KillMode=control-group kills every process in a unit's cgroup on `stop`, including a
+ * detached+unref'd child -- setsid() escapes a Unix process group, not a cgroup. Confirmed
+ * live: a bare detached spawn was killed mid-restart the instant the child's own `armada
+ * restart`'s `stop` step fired, because the child was still inside armada-pi-packed's own
+ * cgroup. `systemd-run --user --collect --unit=<name>` launches it as an independent
+ * transient unit with its own cgroup instead, immune to this unit's stop (confirmed live:
+ * a probe unit's child outlived its own service being stopped). launchd/Windows don't tear
+ * down a detached child's process tree the same way, so they use a plain spawn.
+ */
+export function selfRestartCommand(
+	platform: NodeJS.Platform,
+	execPath: string,
+	cliPath: string,
+	unitName: string,
+): { readonly command: string; readonly arguments: readonly string[] } {
+	if (platform === "linux") {
+		return {
+			command: "systemd-run",
+			arguments: ["--user", "--collect", `--unit=${unitName}`, "--", execPath, cliPath, "restart", PACKED_VEHICLE_NAME, "--json"],
+		};
+	}
+	return { command: execPath, arguments: [cliPath, "restart", PACKED_VEHICLE_NAME, "--json"] };
+}
+
+/** Fire-and-forget: schedule Packed's own Vehicle to restart from OUTSIDE this process (see
+ * selfRestartCommand for why a plain detached spawn alone doesn't survive on Linux). Runs a
+ * beat later so the response reporting "scheduled" has time to flush first. Swallows a
+ * resolution/spawn failure silently: worst case is the pre-existing behavior (a human restarts
+ * the service by hand), never a crash. */
 export type SelfRestartScheduler = (spec: ServiceSpec) => void;
 
 export const scheduleSelfRestart: SelfRestartScheduler = (_spec) => {
@@ -463,10 +489,9 @@ export const scheduleSelfRestart: SelfRestartScheduler = (_spec) => {
 	}
 	setTimeout(() => {
 		try {
-			const child = spawn(process.execPath, [cliPath, "restart", PACKED_VEHICLE_NAME, "--json"], {
-				detached: true,
-				stdio: "ignore",
-			});
+			const unitName = `armada-selfrestart-${PACKED_VEHICLE_NAME}-${process.pid}-${Date.now()}`;
+			const { command, arguments: arguments_ } = selfRestartCommand(process.platform, process.execPath, cliPath, unitName);
+			const child = spawn(command, arguments_, { detached: true, stdio: "ignore" });
 			child.unref();
 		} catch {
 			/* best-effort -- a human can still restart the service by hand */

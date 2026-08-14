@@ -64,12 +64,18 @@ export async function registerPackedVehicle(pi: ExtensionAPI): Promise<void> {
 	const target = currentVehicleClientTarget();
 	if (!target) return;
 	try {
+		// connectRetry:true (vehicle-client's own bounded background retry budget) covers a
+		// daemon that crashed and is mid systemd-restart -- without it, the very first call
+		// during that window fails immediately instead of waiting the ~2s restart out.
 		const client = withoutExcludedOperations(
-			createReconnectingVehicleClient(async () => {
-				const resolved = currentVehicleClientTarget();
-				if (!resolved) throw new Error("Packed daemon is not running");
-				return new RemoteVehicleClient({ baseUrl: resolved.baseUrl, token: resolved.token });
-			}),
+			createReconnectingVehicleClient(
+				async () => {
+					const resolved = currentVehicleClientTarget();
+					if (!resolved) throw new Error("Packed daemon is not running");
+					return new RemoteVehicleClient({ baseUrl: resolved.baseUrl, token: resolved.token });
+				},
+				{ connectRetry: true },
+			),
 		);
 		await registerVehicleTools(pi, client, {
 			permissions: ["packed:read"],

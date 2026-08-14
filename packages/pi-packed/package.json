@@ -30,7 +30,7 @@
     "@danypops/armada": "^0.4.9",
     "@danypops/packed": "^0.7.0",
     "@danypops/pi-extension-harness": "^0.7.0",
-    "@danypops/vehicle-client": "^0.8.1",
+    "@danypops/vehicle-client": "^0.10.0",
     "@danypops/vehicle-client-pi": "^0.40.1",
     "@danypops/vehicle-core": "^0.15.0",
     "@danypops/vehicle-server": "^0.24.1",

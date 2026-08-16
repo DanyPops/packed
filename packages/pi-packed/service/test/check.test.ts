@@ -441,4 +441,37 @@ describe("dependencyCheck false-positive regressions (packed check)", () => {
 		const report = await checkPackage(root, { generic: false });
 		expect(codes(report.diagnostics)).not.toContain("RUNTIME_DEPENDENCY_MISSING");
 	});
+
+	it("a real (non-*) peerDependency range genuinely satisfies a shipped-code import -- npm's own documented mechanism for a shared-singleton runtime dependency, distinct from CORE_PACKAGES' own peers[name] === '*' contract", async () => {
+		const root = fixture(
+			{
+				...base,
+				files: ["extensions", "README.md", "LICENSE"],
+				peerDependencies: { ...base.peerDependencies, "@scope/shared-singleton": "^1.2.3" },
+				devDependencies: { "@scope/shared-singleton": "^1.2.3" },
+			},
+			{
+				"extensions/index.ts": 'import { thing } from "@scope/shared-singleton";\nexport default function () { return thing; }\n',
+				"README.md": "# Example",
+				LICENSE: "MIT",
+			},
+		);
+		const report = await checkPackage(root, { generic: false });
+		expect(codes(report.diagnostics)).not.toContain("RUNTIME_DEPENDENCY_MISSING");
+	});
+
+	it("still flags a shipped-code import declared only as a devDependency, even though a peerDependency-shaped exception now exists", async () => {
+		const root = fixture(
+			{ ...base, files: ["extensions", "README.md", "LICENSE"], devDependencies: { "leftover-dev-only": "1.0.0" } },
+			{
+				"extensions/index.ts": 'import thing from "leftover-dev-only";\nexport default function () { return thing; }\n',
+				"README.md": "# Example",
+				LICENSE: "MIT",
+			},
+		);
+		const report = await checkPackage(root, { generic: false });
+		expect(codes(report.diagnostics)).toContain("RUNTIME_DEPENDENCY_MISSING");
+		const diagnostic = report.diagnostics.find((d) => d.code === "RUNTIME_DEPENDENCY_MISSING")!;
+		expect(diagnostic.message).toContain("only a devDependency");
+	});
 });

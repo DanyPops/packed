@@ -566,8 +566,14 @@ function dependencyCheck(context: Context): void {
 						path: file,
 						message: `${name} must be declared as peerDependencies[${name}] = *`,
 					});
-			} else if (dependencies[name] === undefined && optional[name] === undefined) {
-				const misplaced = dev[name] !== undefined ? "devDependency" : peers[name] !== undefined ? "peerDependency" : undefined;
+			} else if (dependencies[name] === undefined && optional[name] === undefined && peers[name] === undefined) {
+				// A real (non-"*") peerDependency range genuinely satisfies this -- npm's own
+				// documented mechanism for "a real runtime dependency the host is expected to
+				// already share a single instance of," distinct from CORE_PACKAGES' own stricter
+				// peers[name] === "*" contract (Pi's own always-exactly-one-host-version packages,
+				// checked separately above). A devDependency alone still doesn't count -- it
+				// guarantees nothing for a real consumer's own install.
+				const misplaced = dev[name] !== undefined ? "devDependency" : undefined;
 				context.add({
 					code: "RUNTIME_DEPENDENCY_MISSING",
 					severity: "error",

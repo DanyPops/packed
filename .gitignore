@@ -5,3 +5,4 @@ node_modules/
 /packages/packed/dist/
 /packages/pi-packed/dist/
 
+pi-setup.json

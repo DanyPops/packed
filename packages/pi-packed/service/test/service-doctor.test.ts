@@ -37,6 +37,7 @@ function fakeDeps(status: unknown, fileExists = true): ServiceDoctorDeps {
 	return {
 		armadaCliPath: "/armada/cli.js",
 		fileExists: () => fileExists,
+		getMtimeMs: () => undefined,
 		runCommand: () => ({ ok: true, output: JSON.stringify(status) }),
 	};
 }
@@ -123,6 +124,59 @@ describe("checkServiceUnitPaths", () => {
 				},
 			],
 		});
+	});
+
+	it("reports a running Vehicle whose process predates its own package.json as stale code, not an error", () => {
+		const home = piHome(["npm:fakedaemon"]);
+		const dir = installDaemonPackage(home, "fakedaemon");
+		const deps: ServiceDoctorDeps = {
+			armadaCliPath: "/armada/cli.js",
+			fileExists: () => true,
+			getMtimeMs: () => Date.now(),
+			runCommand: (command) =>
+				command === "ps"
+					? { ok: true, output: new Date(Date.now() - 60_000).toString() }
+					: {
+							ok: true,
+							output: JSON.stringify({
+								vehicles: [{ name: "fakedaemon", executable: join(dir, "cli.ts"), nativeStatus: "running", nativePid: 4242 }],
+							}),
+						},
+		};
+		const report = checkServiceUnitPaths(home, undefined, deps);
+		expect(report).toEqual({
+			ok: false,
+			checked: 1,
+			diagnostics: [
+				{
+					code: "SERVICE_STALE_CODE",
+					severity: "warning",
+					package: "fakedaemon",
+					unitName: "fakedaemon",
+					message: expect.stringContaining("pid 4242"),
+				},
+			],
+		});
+	});
+
+	it("never flags a running Vehicle whose process started after its own package.json was last written", () => {
+		const home = piHome(["npm:fakedaemon"]);
+		const dir = installDaemonPackage(home, "fakedaemon");
+		const deps: ServiceDoctorDeps = {
+			armadaCliPath: "/armada/cli.js",
+			fileExists: () => true,
+			getMtimeMs: () => Date.now() - 60_000,
+			runCommand: (command) =>
+				command === "ps"
+					? { ok: true, output: new Date().toString() }
+					: {
+							ok: true,
+							output: JSON.stringify({
+								vehicles: [{ name: "fakedaemon", executable: join(dir, "cli.ts"), nativeStatus: "running", nativePid: 4242 }],
+							}),
+						},
+		};
+		expect(checkServiceUnitPaths(home, undefined, deps)).toEqual({ ok: true, diagnostics: [], checked: 1 });
 	});
 
 	it("reports Armada status failure without guessing from native descriptors", () => {

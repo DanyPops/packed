@@ -6,7 +6,7 @@
  * kind of collision at actual startup, one package at a time; doctor
  * answers the same question proactively, before pi ever runs.
  */
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { createNodeServiceInstallDeps } from "@danypops/vehicle-server/service";
 import { listPackageResources, type PackageResources, resolveInstalledDir } from "../packages/resources.ts";
@@ -134,6 +134,13 @@ export async function runDoctor(piHome: string, projectRoot?: string, options: S
 	const serviceReport = checkServiceUnitPaths(piHome, projectRoot, {
 		...createNodeServiceInstallDeps(),
 		fileExists: existsSync,
+		getMtimeMs: (path) => {
+			try {
+				return statSync(path).mtimeMs;
+			} catch {
+				return undefined;
+			}
+		},
 	});
 
 	return {

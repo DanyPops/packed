@@ -1,9 +1,10 @@
+import { join } from "node:path";
 import type { ServiceInstallDeps } from "@danypops/vehicle-server/service";
 import { readInstalledPackagesAcrossScopes } from "../packages/installed.ts";
 import { resolveDaemonServiceSpec } from "../daemon/daemon-service.ts";
 
 export interface ServiceUnitDiagnostic {
-	code: "SERVICE_EXEC_PATH_MISSING" | "SERVICE_NOT_RUNNING" | "SERVICE_STATUS_UNAVAILABLE";
+	code: "SERVICE_EXEC_PATH_MISSING" | "SERVICE_NOT_RUNNING" | "SERVICE_STATUS_UNAVAILABLE" | "SERVICE_STALE_CODE";
 	severity: "error" | "warning";
 	package: string;
 	unitName: string;
@@ -18,10 +19,23 @@ export interface ServiceDoctorReport {
 
 export interface ServiceDoctorDeps extends ServiceInstallDeps {
 	fileExists(path: string): boolean;
+	/** Undefined (never throws) when the path doesn't exist or can't be stat'd. */
+	getMtimeMs(path: string): number | undefined;
 }
 
 interface ArmadaStatus {
-	vehicles?: Array<{ name?: string; executable?: string; nativeStatus?: string; ready?: boolean }>;
+	vehicles?: Array<{ name?: string; executable?: string; nativeStatus?: string; ready?: boolean; nativePid?: number }>;
+}
+
+/** A boot/registration race can leave a process's own start time a few seconds behind its package.json's write; only a gap past this is treated as a genuinely stale running daemon. */
+const STALE_CODE_GRACE_MS = 15_000;
+
+/** Undefined (never throws) when `pid` isn't a running process this host can inspect, or `ps` isn't available. */
+function processStartTimeMs(pid: number, deps: ServiceDoctorDeps): number | undefined {
+	const result = deps.runCommand("ps", ["-o", "lstart=", "-p", String(pid)]);
+	if (!result.ok) return undefined;
+	const parsed = Date.parse(result.output.trim());
+	return Number.isNaN(parsed) ? undefined : parsed;
 }
 
 export function checkServiceUnitPaths(
@@ -96,6 +110,20 @@ export function checkServiceUnitPaths(
 				unitName: managedPackage.spec.name,
 				message: `${managedPackage.spec.name}'s Armada service is ${vehicle.nativeStatus}; start it through Armada before connecting`,
 			});
+			continue;
+		}
+		if (vehicle.nativePid !== undefined) {
+			const packageJsonMtime = deps.getMtimeMs(join(piHome, "npm", "node_modules", managedPackage.packageName, "package.json"));
+			const startedAt = processStartTimeMs(vehicle.nativePid, deps);
+			if (packageJsonMtime !== undefined && startedAt !== undefined && startedAt < packageJsonMtime - STALE_CODE_GRACE_MS) {
+				diagnostics.push({
+					code: "SERVICE_STALE_CODE",
+					severity: "warning",
+					package: managedPackage.packageName,
+					unitName: managedPackage.spec.name,
+					message: `${managedPackage.spec.name}'s process (pid ${vehicle.nativePid}) started before its own package.json was last written -- it is very likely still running old in-memory code; restart it through Armada`,
+				});
+			}
 		}
 	}
 	return { ok: diagnostics.length === 0, diagnostics, checked };

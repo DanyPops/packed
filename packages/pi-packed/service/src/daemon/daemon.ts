@@ -8,6 +8,7 @@ import {
 	startDaemon,
 } from "@danypops/vehicle-server/daemon";
 import { ensureAuthToken } from "@danypops/vehicle-server/paths";
+import { openVehicleMetricsStore } from "@danypops/vehicle-server/metrics";
 import { captureLoadedModules, checkModuleFreshnessAll, ownRuntimeDependencyNames } from "../adoption/module-freshness.ts";
 import {
 	type DaemonServiceInstaller,
@@ -81,6 +82,7 @@ export function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOpt
 	const reg = options.reg ?? new HttpRegistry();
 	const piHome = options.piHome ?? defaultPiHome();
 	const database = openDb(paths.database);
+	const vehicleMetrics = openVehicleMetricsStore(paths.metrics);
 	const moduleSnapshot = captureOwnModuleSnapshot();
 	// Wires ExecInstaller.update()'s own out-of-range cross-check to the exact
 	// same registry-mirror source of truth the package-update-check task below
@@ -180,8 +182,12 @@ export function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOpt
 				piHome,
 				daemonServiceInstaller,
 				moduleFreshness: () => checkModuleFreshnessAll(moduleSnapshot),
+				vehicleMetrics,
 			}),
-		onShutdown: () => database.close(),
+		onShutdown: () => {
+			database.close();
+			vehicleMetrics.close();
+		},
 	};
 }
 

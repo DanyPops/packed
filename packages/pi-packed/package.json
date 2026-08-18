@@ -30,9 +30,9 @@
     "@danypops/armada": "^0.4.10",
     "@danypops/packed": "^0.7.0",
     "@danypops/pi-extension-harness": "^0.7.0",
-    "@danypops/vehicle-client": "^0.10.1",
+    "@danypops/vehicle-client": "^0.10.3",
     "@danypops/vehicle-core": "^0.17.1",
-    "@danypops/vehicle-server": "^0.24.5",
+    "@danypops/vehicle-server": "^0.25.2",
     "jiti": "^2.7.0",
     "malevich-tui-components": "^0.21.1",
     "publint": "0.3.22",
@@ -40,11 +40,11 @@
   },
   "devDependencies": {
     "@danypops/pi-tui-harness": "^0.0.1",
-    "@danypops/vehicle-client-pi": "^0.42.1",
+    "@danypops/vehicle-client-pi": "^0.43.1",
     "@types/semver": "^7.7.1"
   },
   "peerDependencies": {
-    "@danypops/vehicle-client-pi": "^0.42.1",
+    "@danypops/vehicle-client-pi": "^0.43.1",
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",
     "typebox": "*"

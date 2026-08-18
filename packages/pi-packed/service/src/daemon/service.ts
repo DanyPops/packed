@@ -6,6 +6,9 @@
 
 import { existsSync as fileExistsSync } from "node:fs";
 import { VehicleRegistry } from "@danypops/vehicle-server";
+import { createVehicleMetricsMiddleware } from "@danypops/vehicle-server/metrics-middleware";
+import { registerVehicleMetricsOperations } from "@danypops/vehicle-server/metrics-operations";
+import type { VehicleMetricsStore } from "@danypops/vehicle-server/metrics";
 import { createVehicleHttpApp } from "@danypops/vehicle-server/http";
 import { errorResponse, healthResponse, jsonResponse, readyResponse, requireBearerToken } from "@danypops/vehicle-server/rpc-http";
 import type { ServiceSpec } from "@danypops/vehicle-server/service";
@@ -88,6 +91,8 @@ export interface Deps {
 	moduleFreshness?: () => ModuleFreshnessDiagnostic[];
 	piVersion?: { check(options?: { timeoutMs?: number }): Promise<PiVersionReport> };
 	advisories?: { scan(installed: Record<string, string>): Promise<AdvisoryReport> };
+	/** Tool/operation usage metrics store -- see the vehicleRegistry construction below. Opened/closed by daemon.ts. */
+	vehicleMetrics?: VehicleMetricsStore;
 }
 
 export type OperationName =
@@ -287,6 +292,16 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 	// is on disk at startup, then tracks every /security POST from here on (see below) --
 	// never a fixed per-deployment constant baked in once and forgotten.
 	vehicleRegistry.configureApprovals({ enabled: readSecuritySettings(deps.stateDir).mutationApproval === "always" });
+	// Records how often each real operation is invoked (server-side, every caller) plus, via
+	// metrics.recordClientEvent, client-observed Vehicle Shell meta-tool calls -- see
+	// @danypops/vehicle-server's own metrics README section. The store itself is opened/closed by
+	// daemon.ts (same lifecycle as the packages db), not here -- createApp() only wires it onto
+	// this registry when given one, so a caller that omits vehicleMetrics (e.g. a unit test) is
+	// unaffected.
+	if (deps.vehicleMetrics) {
+		vehicleRegistry.useExecutionMiddleware(createVehicleMetricsMiddleware(deps.vehicleMetrics, "packed"));
+		registerVehicleMetricsOperations(vehicleRegistry, deps.vehicleMetrics, "packed");
+	}
 	const vehicleApp = createVehicleHttpApp({ registry: vehicleRegistry, token: deps.token });
 
 	function authorize(operation: PackageOperation, approved: boolean): Response | undefined {

@@ -26,6 +26,7 @@ export function resolvePackedPaths(options: PathEnvironment = {}): PackedPaths {
 			token: join(directory, PATH_NAMES.tokenFilename),
 			handle: join(directory, PATH_NAMES.handleFilename),
 			serviceDescriptor: join(directory, PATH_NAMES.systemdUnitName),
+			metrics: join(directory, "metrics.sqlite"),
 			stateDirectory: directory,
 		};
 	}

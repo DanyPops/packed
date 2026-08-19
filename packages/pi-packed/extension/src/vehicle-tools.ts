@@ -35,7 +35,7 @@ import { RemoteVehicleClient } from "@danypops/vehicle-client/http";
 import { registerVehicleTools } from "@danypops/vehicle-client-pi";
 import type { VehicleClient, VehicleManifest } from "@danypops/vehicle-core";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { renderDoctorRunResult } from "./doctor-render.js";
+import { createDoctorRunRenderResult } from "./doctor-render.js";
 import { currentVehicleClientTarget } from "./vehicle-target.js";
 
 /** Already covered by their own dedicated, approval-aware tools in tools.ts -- see this file's own doc comment. */
@@ -98,7 +98,7 @@ export async function registerPackedVehicle(pi: ExtensionAPI): Promise<void> {
 			// ensureVehicleShellHandle) -- no ownVehicleName/broker option needed here anymore; every
 			// vehicle in the process (including packed's own) is discovered and namespaced uniformly.
 			shell: { coreOperations: CORE_OPERATIONS },
-			renderPresenters: { "doctor.run": renderDoctorRunResult },
+			renderers: (descriptor) => (descriptor.name === "doctor.run" ? { renderResult: createDoctorRunRenderResult(descriptor) } : undefined),
 			renderCoverage: { operations: REVIEWED_OPERATIONS },
 		});
 	} catch {

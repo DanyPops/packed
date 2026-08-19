@@ -34,7 +34,7 @@
     "@danypops/vehicle-core": "^0.17.1",
     "@danypops/vehicle-server": "^0.25.2",
     "jiti": "^2.7.0",
-    "malevich-tui-components": "^0.21.1",
+    "malevich-tui-components": "^0.32.1",
     "publint": "0.3.22",
     "semver": "^7.8.5"
   },

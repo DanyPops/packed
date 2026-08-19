@@ -9,6 +9,7 @@
  * Install: pi install git:github.com/DanyPops/pi-packed
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { DoctorOverlay } from "./doctor-overlay.js";
 import { formatUpdateNotice } from "./model.js";
 import { createNatives } from "./packed.js";
 import { registerProfiles } from "./profile.js";
@@ -42,6 +43,7 @@ export default async function (pi: ExtensionAPI) {
 	// the identical pi-papyrus/pi-tickets bug). session_start fires only after that initialization
 	// completes, and Pi awaits every session_start handler before the model's first turn, so
 	// registering here is both safe and still visible on turn one.
+	let doctorOverlay: DoctorOverlay | undefined;
 	pi.on("session_start", async (_event, ctx) => {
 		await registerPackedVehicle(pi);
 		if (!ctx.hasUI) return;
@@ -53,5 +55,12 @@ export default async function (pi: ExtensionAPI) {
 		} catch {
 			// mirror missing or unreadable — stay silent, never block startup.
 		}
+		doctorOverlay ??= new DoctorOverlay();
+		doctorOverlay.setUI(ctx.ui);
+		await doctorOverlay.refresh();
+		doctorOverlay.startPolling();
+	});
+	pi.on("session_shutdown", async () => {
+		doctorOverlay?.dispose();
 	});
 }

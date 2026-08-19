@@ -6,7 +6,16 @@
     "declaration": true,
     "declarationMap": true,
     "declarationDir": "../dist",
-    "rootDir": "src/public"
+    // doctor-format.ts's type-only cross-references (DuplicateDependencyDiagnostic,
+    // ModuleFreshnessDiagnostic, ServiceUnitDiagnostic, SmokeRegistrations) still pull their
+    // declaring files into tsc's program for declaration emission even though bun build's own
+    // JS bundle erases them entirely -- rootDir must cover the whole service tree for that, not
+    // just this entrypoint's own directory. The resulting nested .d.ts paths (dist/public/*.d.ts,
+    // dist/adoption/*.d.ts, ...) are an internal build-output detail: package.json's own
+    // `exports` map is what consumers actually resolve against, and its `types` paths are kept
+    // in sync with this layout independently of `import` (still flat, from bun build's own
+    // entry-point-basename output).
+    "rootDir": "src"
   },
-  "include": ["src/public/client.ts", "src/public/protocol.ts"]
+  "include": ["src/public/client.ts", "src/public/protocol.ts", "src/public/doctor-format.ts"]
 }

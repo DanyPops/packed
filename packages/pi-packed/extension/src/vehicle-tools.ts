@@ -35,6 +35,7 @@ import { RemoteVehicleClient } from "@danypops/vehicle-client/http";
 import { registerVehicleTools } from "@danypops/vehicle-client-pi";
 import type { VehicleClient, VehicleManifest } from "@danypops/vehicle-core";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { renderDoctorRunResult } from "./doctor-render.js";
 import { currentVehicleClientTarget } from "./vehicle-target.js";
 
 /** Already covered by their own dedicated, approval-aware tools in tools.ts -- see this file's own doc comment. */
@@ -60,6 +61,19 @@ function withoutExcludedOperations(client: VehicleClient): VehicleClient {
  */
 const CORE_OPERATIONS = ["package.installed", "package.updates", "pi.status"];
 
+/**
+ * Operations whose rendering has actually been reviewed and found acceptable -- either via a
+ * dedicated renderPresenters entry (doctor.run) or by eyeballing the generic Vehicle renderer's
+ * own shape-probing output for a real result and confirming it reads cleanly. Everything NOT
+ * listed here logs a renderCoverage gap warning naming exactly which operations still need that
+ * review, rather than a human discovering an unreviewed one only by stumbling on a raw JSON dump
+ * in the TUI (the live incident doctor.run itself was, before renderDoctorRunResult existed).
+ * Deliberately starts narrow and honest rather than pre-declaring the other ~27 operations
+ * reviewed when they haven't been -- add an operation here only once its own rendering has
+ * actually been checked.
+ */
+const REVIEWED_OPERATIONS = ["doctor.run"];
+
 export async function registerPackedVehicle(pi: ExtensionAPI): Promise<void> {
 	const target = currentVehicleClientTarget();
 	if (!target) return;
@@ -84,6 +98,8 @@ export async function registerPackedVehicle(pi: ExtensionAPI): Promise<void> {
 			// ensureVehicleShellHandle) -- no ownVehicleName/broker option needed here anymore; every
 			// vehicle in the process (including packed's own) is discovered and namespaced uniformly.
 			shell: { coreOperations: CORE_OPERATIONS },
+			renderPresenters: { "doctor.run": renderDoctorRunResult },
+			renderCoverage: { operations: REVIEWED_OPERATIONS },
 		});
 	} catch {
 		// Daemon state is stale/unreachable -- degrade silently, matching

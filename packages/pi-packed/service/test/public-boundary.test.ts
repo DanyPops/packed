@@ -46,7 +46,11 @@ describe("compiled public boundary", () => {
 		]);
 		expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
 		expect(stdout.trim()).toBe("function");
-		const publicFiles = ["client.js", "client.d.ts", "protocol.d.ts"]
+		// client.js/protocol.js stay flat (bun build's own entry-point-basename output), but their
+		// .d.ts siblings nest under dist/public/ -- tsconfig.public.json's rootDir covers the whole
+		// service tree now (doctor-format.ts's type-only cross-references require it), which changes
+		// where tsc emits declarations without touching the flat JS bundle layout at all.
+		const publicFiles = ["client.js", "public/client.d.ts", "public/protocol.d.ts"]
 			.map((name) => readFileSync(join(root, "dist", name), "utf8"))
 			.join("\n");
 		expect(publicFiles).not.toMatch(/\bBun\b|bun:sqlite|\.\.\/(?:daemon|db|check)/);

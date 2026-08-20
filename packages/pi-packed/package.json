@@ -40,13 +40,13 @@
   },
   "devDependencies": {
     "@danypops/pi-tui-harness": "^0.0.1",
-    "@danypops/vehicle-client-pi": "^0.43.1",
+    "@danypops/vehicle-client-pi": "^0.44.0",
     "@danypops/vehicle-conformance": "^0.4.0",
     "@types/semver": "^7.7.1",
     "follow-redirects": "^1.16.0"
   },
   "peerDependencies": {
-    "@danypops/vehicle-client-pi": "^0.43.1",
+    "@danypops/vehicle-client-pi": "^0.44.0",
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",
     "typebox": "*"

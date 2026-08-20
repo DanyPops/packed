@@ -8,6 +8,15 @@ interface Registrations {
 	providers: string[];
 	events: string[];
 	renderers: string[];
+	/**
+	 * Names, within tools/commands/shortcuts/flags respectively, whose registration call carried an
+	 * explicit `shared: true` marker -- see @danypops/vehicle-client-pi's own markSharedRegistration.
+	 * doctor.ts only suppresses a name's conflict once EVERY one of its claimants marked it shared.
+	 */
+	sharedTools: string[];
+	sharedCommands: string[];
+	sharedShortcuts: string[];
+	sharedFlags: string[];
 }
 
 const MAX_REGISTRATIONS_TOTAL = 100;
@@ -43,6 +52,10 @@ const registrations: Registrations = {
 	providers: [],
 	events: [],
 	renderers: [],
+	sharedTools: [],
+	sharedCommands: [],
+	sharedShortcuts: [],
+	sharedFlags: [],
 };
 
 function capture(kind: keyof Registrations, value: unknown): void {
@@ -51,19 +64,33 @@ function capture(kind: keyof Registrations, value: unknown): void {
 	registrations[kind].push(name.slice(0, MAX_NAME_LENGTH));
 }
 
+const SHARED_KIND: Partial<Record<keyof Registrations, keyof Registrations>> = {
+	tools: "sharedTools",
+	commands: "sharedCommands",
+	shortcuts: "sharedShortcuts",
+	flags: "sharedFlags",
+};
+
+/** Captures the plain registration as usual, plus a parallel sharedX entry when the caller's own definition/options object carried an explicit `shared: true` marker. */
+function captureWithSharedMarker(kind: keyof Registrations, value: unknown, sharedMarker: unknown): void {
+	capture(kind, value);
+	const sharedKind = SHARED_KIND[kind];
+	if (sharedKind && sharedMarker === true) capture(sharedKind, value);
+}
+
 const api = new Proxy<Record<string, unknown>>(
 	{},
 	{
 		get(_target, property) {
 			switch (property) {
 				case "registerTool":
-					return (definition: { name?: unknown }) => capture("tools", definition?.name);
+					return (definition: { name?: unknown; shared?: unknown }) => captureWithSharedMarker("tools", definition?.name, definition?.shared);
 				case "registerCommand":
-					return (name: unknown) => capture("commands", name);
+					return (name: unknown, options?: { shared?: unknown }) => captureWithSharedMarker("commands", name, options?.shared);
 				case "registerShortcut":
-					return (name: unknown) => capture("shortcuts", name);
+					return (name: unknown, options?: { shared?: unknown }) => captureWithSharedMarker("shortcuts", name, options?.shared);
 				case "registerFlag":
-					return (name: unknown) => capture("flags", name);
+					return (name: unknown, options?: { shared?: unknown }) => captureWithSharedMarker("flags", name, options?.shared);
 				case "registerProvider":
 					return (name: unknown) => capture("providers", name);
 				case "registerMessageRenderer":

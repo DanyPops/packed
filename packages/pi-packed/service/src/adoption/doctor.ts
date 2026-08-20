@@ -31,6 +31,18 @@ const CONFLICT_KIND: Record<RegistrationKind, "tool" | "command" | "shortcut" | 
 	shortcuts: "shortcut",
 	flags: "flag",
 };
+/**
+ * Maps each RegistrationKind to the smoke result's own parallel "which of these names were marked
+ * shared" field (see smoke.ts's own SmokeRegistrations doc comment). A name is only exempted from
+ * conflict reporting once EVERY one of its claimants marked it shared -- see runDoctor's own
+ * allSharedByName tracking below.
+ */
+const SHARED_REGISTRATION_KIND: Record<RegistrationKind, "sharedTools" | "sharedCommands" | "sharedShortcuts" | "sharedFlags"> = {
+	tools: "sharedTools",
+	commands: "sharedCommands",
+	shortcuts: "sharedShortcuts",
+	flags: "sharedFlags",
+};
 
 const MAX_EXTENSIONS_SCANNED = 50;
 
@@ -63,6 +75,11 @@ export async function runDoctor(piHome: string, projectRoot?: string, options: S
 	const bounded = jobs.slice(0, MAX_EXTENSIONS_SCANNED);
 
 	const claims = new Map<RegistrationKind, Map<string, DoctorClaim[]>>(REGISTRATION_KINDS.map((kind) => [kind, new Map()]));
+	// True for a (kind, name) pair only while EVERY claimant seen so far marked that exact
+	// registration shared: true -- a single unmarked claimant permanently flips it false, since an
+	// unmarked registration is a genuinely ambiguous case, not the coordinated-by-design pattern
+	// shared:true exists to exempt.
+	const allSharedByName = new Map<RegistrationKind, Map<string, boolean>>(REGISTRATION_KINDS.map((kind) => [kind, new Map()]));
 	const extensions: DoctorExtensionResult[] = [];
 	let anyNotOk = false;
 
@@ -82,14 +99,20 @@ export async function runDoctor(piHome: string, projectRoot?: string, options: S
 		const claim: DoctorClaim = { name: job.group.name, source: job.group.source, scope: job.group.scope, extension: job.extension };
 		for (const kind of REGISTRATION_KINDS) {
 			const byName = claims.get(kind)!;
-			for (const name of result.registrations[kind]) byName.set(name, [...(byName.get(name) ?? []), claim]);
+			const sharedFlags = allSharedByName.get(kind)!;
+			const sharedNamesHere = new Set(result.registrations[SHARED_REGISTRATION_KIND[kind]]);
+			for (const name of result.registrations[kind]) {
+				byName.set(name, [...(byName.get(name) ?? []), claim]);
+				sharedFlags.set(name, (sharedFlags.get(name) ?? true) && sharedNamesHere.has(name));
+			}
 		}
 	}
 
 	const conflicts: DoctorConflict[] = [];
 	for (const kind of REGISTRATION_KINDS) {
+		const sharedFlags = allSharedByName.get(kind)!;
 		for (const [name, claimants] of claims.get(kind)!) {
-			if (claimants.length > 1) conflicts.push({ kind: CONFLICT_KIND[kind], name, claimants });
+			if (claimants.length > 1 && !sharedFlags.get(name)) conflicts.push({ kind: CONFLICT_KIND[kind], name, claimants });
 		}
 	}
 	conflicts.sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));

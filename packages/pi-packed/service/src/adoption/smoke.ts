@@ -13,6 +13,15 @@ export interface SmokeRegistrations {
 	providers: string[];
 	events: string[];
 	renderers: string[];
+	/**
+	 * Names, within tools/commands/shortcuts/flags respectively, whose registration call carried an
+	 * explicit `shared: true` marker -- see @danypops/vehicle-client-pi's own markSharedRegistration.
+	 * doctor.ts only suppresses a name's conflict once EVERY one of its claimants marked it shared.
+	 */
+	sharedTools: string[];
+	sharedCommands: string[];
+	sharedShortcuts: string[];
+	sharedFlags: string[];
 }
 
 export interface ExtensionSmokeResult {
@@ -43,6 +52,10 @@ const EMPTY_REGISTRATIONS: SmokeRegistrations = {
 	providers: [],
 	events: [],
 	renderers: [],
+	sharedTools: [],
+	sharedCommands: [],
+	sharedShortcuts: [],
+	sharedFlags: [],
 };
 
 function bounded(value: number | undefined, fallback: number, maximum: number): number {
@@ -282,6 +295,10 @@ function normalizeRegistrations(value: unknown): SmokeRegistrations {
 		providers: names("providers"),
 		events: names("events"),
 		renderers: names("renderers"),
+		sharedTools: names("sharedTools"),
+		sharedCommands: names("sharedCommands"),
+		sharedShortcuts: names("sharedShortcuts"),
+		sharedFlags: names("sharedFlags"),
 	};
 }
 

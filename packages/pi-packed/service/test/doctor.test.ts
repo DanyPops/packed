@@ -132,6 +132,57 @@ describeIfSandboxed("runDoctor", () => {
 		expect(report.conflicts).toEqual([]);
 	});
 
+	it("never flags a conflict when every claimant self-declared the shared name via shared: true -- e.g. registerSharedSecretsCommand's own /secrets command, or Vehicle Shell's tools_list/tools_man/tools_type, both of which every claimant's own smoke scan sees as 'the first (and only) one' since each runs in its own isolated sandbox", async () => {
+		const home = piHome(["npm:pi-a", "npm:pi-b"]);
+		installNpmPackage(
+			home,
+			"pi-a",
+			{ extensions: ["extension/index.ts"] },
+			{
+				"extension/index.ts": 'export default function (pi: any) { pi.registerCommand("secrets", { handler() {}, shared: true }); }',
+			},
+		);
+		installNpmPackage(
+			home,
+			"pi-b",
+			{ extensions: ["extension/index.ts"] },
+			{
+				"extension/index.ts": 'export default function (pi: any) { pi.registerCommand("secrets", { handler() {}, shared: true }); }',
+			},
+		);
+
+		const report = await runDoctor(home);
+
+		expect(report.ok).toBe(true);
+		expect(report.conflicts).toEqual([]);
+	});
+
+	it("still flags a conflict when only SOME claimants self-declared the name shared -- an unmarked claimant is a genuinely ambiguous case, not the coordinated-by-design pattern shared: true exists to exempt", async () => {
+		const home = piHome(["npm:pi-a", "npm:pi-b"]);
+		installNpmPackage(
+			home,
+			"pi-a",
+			{ extensions: ["extension/index.ts"] },
+			{
+				"extension/index.ts": 'export default function (pi: any) { pi.registerCommand("secrets", { handler() {}, shared: true }); }',
+			},
+		);
+		installNpmPackage(
+			home,
+			"pi-b",
+			{ extensions: ["extension/index.ts"] },
+			{
+				"extension/index.ts": 'export default function (pi: any) { pi.registerCommand("secrets", { handler() {} }); }',
+			},
+		);
+
+		const report = await runDoctor(home);
+
+		expect(report.ok).toBe(false);
+		expect(report.conflicts).toHaveLength(1);
+		expect(report.conflicts[0]).toMatchObject({ kind: "command", name: "secrets" });
+	});
+
 	it("surfaces a genuinely crashing extension as a non-ok result without treating it as a conflict", async () => {
 		const home = piHome(["npm:pi-broken"]);
 		installNpmPackage(

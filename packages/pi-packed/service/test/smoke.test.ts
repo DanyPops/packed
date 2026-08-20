@@ -151,6 +151,35 @@ describeIfSandboxed("isolated extension smoke runner", () => {
 		expect((await runExtensionSmoke(output.root, output.path, { maxOutputBytes: 4_096 })).status).toBe("output-limit");
 	});
 
+	it("resolves a dependency hoisted to a shared ancestor node_modules -- confirmed live bug: packed doctor's own widget reported 5/8 real extensions as crashing on a plain 'Cannot find module' for a sibling dependency npm/bun hoisted above the package's own node_modules, though Pi's own real, unsandboxed process resolves the exact same import fine", async () => {
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "packed-smoke-hoisted-"));
+		roots.push(workspaceRoot);
+		const sharedNodeModules = join(workspaceRoot, "node_modules");
+		writeFakeDependency(sharedNodeModules, "hoisted-sibling");
+		const packageDir = join(sharedNodeModules, "@fixture", "pi-smoke-hoisted");
+		mkdirSync(join(packageDir, "extension"), { recursive: true });
+		const extensionPath = join(packageDir, "extension", "index.ts");
+		writeFileSync(
+			extensionPath,
+			'import pkg from "hoisted-sibling/package.json" with { type: "json" };\nexport default function (pi: any) { pi.registerCommand(pkg.name, { handler() {} }); }\n',
+		);
+		writeFileSync(
+			join(packageDir, "package.json"),
+			JSON.stringify({
+				name: "@fixture/pi-smoke-hoisted",
+				version: "1.0.0",
+				keywords: ["pi-package"],
+				files: ["extension"],
+				pi: { extensions: ["extension/index.ts"] },
+			}),
+		);
+
+		const result = await runExtensionSmoke(packageDir, extensionPath);
+
+		expect(result.status).toBe("ok");
+		expect(result.registrations.commands).toEqual(["hoisted-sibling"]);
+	});
+
 	it("keeps default package checks static and adds smoke results only when requested", async () => {
 		const fixture = extension(
 			'import { writeFileSync } from "node:fs"; export default function (pi: any) { writeFileSync("executed", "yes"); pi.registerCommand("x", { handler() {} }); }',

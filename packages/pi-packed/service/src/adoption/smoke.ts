@@ -54,6 +54,34 @@ function addReadOnlyBind(args: string[], path: string): void {
 	if (existsSync(path)) args.push("--ro-bind", path, path);
 }
 
+const MAX_ANCESTOR_WALK = 32;
+
+/**
+ * Every ancestor directory's own node_modules from packageRoot's parent up to
+ * the filesystem root -- mirrors Node's real module-resolution walk
+ * (require.resolve checks <dir>/node_modules at every level up to /).
+ * Confirmed live: packed doctor's own widget reported real extensions
+ * (pi-lector, pi-pipes, pi-tickets, pi-jittor, pi-web-spider) as "crash" on a
+ * plain Cannot-find-module for a sibling dependency npm/bun hoisted to a
+ * shared ancestor node_modules, though Pi's own real, unsandboxed process
+ * resolves the exact same import fine -- the sandbox only ever bound the
+ * package's own root, never the hoisted siblings one or more levels above it.
+ * Bounded to MAX_ANCESTOR_WALK levels as a defensive cap; a real filesystem
+ * hierarchy never gets remotely close to that before reaching /.
+ */
+function collectAncestorNodeModulesDirs(packageRoot: string): string[] {
+	const dirs: string[] = [];
+	let current = dirname(packageRoot);
+	for (let i = 0; i < MAX_ANCESTOR_WALK; i++) {
+		const candidate = join(current, "node_modules");
+		if (existsSync(candidate)) dirs.push(realpathSync(candidate));
+		const parent = dirname(current);
+		if (parent === current) break;
+		current = parent;
+	}
+	return dirs;
+}
+
 /**
  * Resolves an installed dependency's real on-disk package directory via
  * Node's own module-resolution algorithm (require.resolve against its
@@ -85,7 +113,6 @@ function sandboxCommand(packageRoot: string, extensionPath: string, maxProcesses
 	const jitiModules = resolveDependencyModulesDir(packageDirectory, "jiti");
 	if (!jitiModules) return undefined;
 	const bun = realpathSync(process.execPath);
-	const relativeExtension = relative(packageRoot, extensionPath).split(sep).join("/");
 	const args = [
 		"/usr/bin/bwrap",
 		"--unshare-user",
@@ -116,9 +143,6 @@ function sandboxCommand(packageRoot: string, extensionPath: string, maxProcesses
 		jitiModules,
 		"/runner/node_modules/jiti",
 		"--ro-bind",
-		packageRoot,
-		"/package",
-		"--ro-bind",
 		bun,
 		"/bun",
 		"--dev",
@@ -131,6 +155,17 @@ function sandboxCommand(packageRoot: string, extensionPath: string, maxProcesses
 		"/tmp",
 		"--dir",
 		"/tmp/home",
+	);
+	// Package-related identity binds go AFTER the virtual/tmpfs mounts above --
+	// bwrap applies mounts in argument order, so a bind whose real path happens
+	// to sit under one of those special mounts (e.g. a test fixture under
+	// /tmp, which --tmpfs /tmp would otherwise shadow) must come later to win.
+	addReadOnlyBind(args, packageRoot);
+	// Real-path identity binds so a hoisted sibling dependency resolves exactly
+	// as it would in Pi's own real, unsandboxed process -- see
+	// collectAncestorNodeModulesDirs's own doc comment for why this is needed.
+	for (const dir of collectAncestorNodeModulesDirs(packageRoot)) addReadOnlyBind(args, dir);
+	args.push(
 		"--remount-ro",
 		"/",
 		"--clearenv",
@@ -147,7 +182,7 @@ function sandboxCommand(packageRoot: string, extensionPath: string, maxProcesses
 		"NODE_PATH",
 		"/runner/node_modules",
 		"--chdir",
-		"/package",
+		packageRoot,
 		"--",
 		"/usr/bin/prlimit",
 		`--nproc=${maxProcesses}`,
@@ -158,7 +193,7 @@ function sandboxCommand(packageRoot: string, extensionPath: string, maxProcesses
 		"--",
 		"/bun",
 		"/runner/src/smoke-child.ts",
-		`/package/${relativeExtension}`,
+		extensionPath,
 	);
 	return args;
 }

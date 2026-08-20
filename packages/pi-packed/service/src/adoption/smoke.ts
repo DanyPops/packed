@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -105,6 +105,41 @@ export function resolveDependencyModulesDir(fromDir: string, name: string): stri
 	}
 }
 
+const MAX_PROCESS_SCAN_ENTRIES = 100_000;
+
+/**
+ * RLIMIT_NPROC (prlimit's own --nproc) is a per-real-UID, system-wide limit -- NOT scoped to
+ * this sandbox's own process tree. A small absolute constant breaks the instant the invoking
+ * user's REAL total process count already exceeds it (routine on a heavily-used workstation
+ * with several long-running agent sessions): any further thread/fork Bun's own runtime needs
+ * internally (confirmed live: its native TS transpiler spawns one) immediately fails, surfacing
+ * as an unrecoverable SIGABRT (exit 134) with no output at all, not a catchable error. Correct
+ * enforcement of "at most N NEW processes the sandboxed extension can spawn" requires an offset
+ * from the CURRENT real count, not an absolute cap. Returns 0 (never throws) if /proc can't be
+ * read at all -- the caller's own maxProcesses then applies as an absolute floor, same as before
+ * this existed.
+ */
+function currentProcessCountForUid(uid: number): number {
+	let entries: string[];
+	try {
+		entries = readdirSync("/proc");
+	} catch {
+		return 0;
+	}
+	let count = 0;
+	for (const entry of entries.slice(0, MAX_PROCESS_SCAN_ENTRIES)) {
+		if (!/^\d+$/.test(entry)) continue;
+		try {
+			const status = readFileSync(`/proc/${entry}/status`, "utf8");
+			const match = status.match(/^Uid:\s+(\d+)/m);
+			if (match && Number(match[1]) === uid) count++;
+		} catch {
+			// The process exited mid-scan, or is otherwise unreadable -- not this sandbox's concern.
+		}
+	}
+	return count;
+}
+
 function sandboxCommand(packageRoot: string, extensionPath: string, maxProcesses: number): string[] | undefined {
 	if (process.platform !== "linux" || !existsSync("/usr/bin/bwrap") || !existsSync("/usr/bin/prlimit")) return undefined;
 	const serviceRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
@@ -185,7 +220,7 @@ function sandboxCommand(packageRoot: string, extensionPath: string, maxProcesses
 		packageRoot,
 		"--",
 		"/usr/bin/prlimit",
-		`--nproc=${maxProcesses}`,
+		`--nproc=${(typeof process.getuid === "function" ? currentProcessCountForUid(process.getuid()) : 0) + maxProcesses}`,
 		"--nofile=64",
 		"--fsize=16777216",
 		"--as=8589934592",

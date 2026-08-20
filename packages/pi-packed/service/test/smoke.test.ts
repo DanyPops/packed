@@ -213,6 +213,24 @@ describeIfSandboxed("isolated extension smoke runner", () => {
 		expect(result.registrations.commands).toEqual(["object"]);
 	});
 
+	it("never breaks under a real per-UID process count that already exceeds the sandbox's own maxProcesses budget -- confirmed live: prlimit's --nproc is a per-real-UID, system-wide limit, not scoped to this sandbox's own process tree, so a small absolute cap unconditionally breaks the instant the invoking user's REAL total process count exceeds it (routine on a busy multi-session workstation) -- any further thread Bun's own runtime needs internally (its native TS transpiler spawns one) immediately fails, aborting with SIGABRT and zero output, not a catchable error", async () => {
+		const dummyProcessCount = 40;
+		const dummies = Array.from({ length: dummyProcessCount }, () => Bun.spawn(["/usr/bin/sleep", "20"], { stdin: "ignore", stdout: "ignore", stderr: "ignore" }));
+		try {
+			const fixture = extension(`export default function (pi: any) {
+				pi.registerCommand("hello", { handler() {} });
+			}`);
+
+			const result = await runExtensionSmoke(fixture.root, fixture.path, { maxProcesses: 5 });
+
+			expect(result.status).toBe("ok");
+			expect(result.registrations.commands).toEqual(["hello"]);
+		} finally {
+			for (const dummy of dummies) dummy.kill("SIGKILL");
+			await Promise.all(dummies.map((dummy) => dummy.exited));
+		}
+	});
+
 	it("keeps default package checks static and adds smoke results only when requested", async () => {
 		const fixture = extension(
 			'import { writeFileSync } from "node:fs"; export default function (pi: any) { writeFileSync("executed", "yes"); pi.registerCommand("x", { handler() {} }); }',

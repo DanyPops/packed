@@ -99,7 +99,16 @@ async function main(): Promise<void> {
 	const extensionPath = process.argv[2];
 	if (!extensionPath) throw new Error("extension path is required");
 	try {
-		const jiti = createJiti(import.meta.url, { interopDefault: true, tryNative: false });
+		// tryNative matches loader.ts's own real, non-Bun-binary Pi extension loading convention:
+		// prefer Bun's native TS/ESM transform, falling back to jiti's own Babel transform only for
+		// what native genuinely can't handle. Confirmed live: tryNative:false forced EVERY
+		// transitive dependency (including plain CJS libraries that never needed a Babel transform,
+		// e.g. follow-redirects) through jiti's Babel path -- which has its own real, reproducible
+		// bug interacting with a library that calls Error.captureStackTrace on a not-yet-initialized
+		// Error instance during module-level prototype setup (confirmed outside this sandbox too,
+		// given a cold jiti transform cache), surfacing as an opaque "First argument must be an
+		// Error object" crash unrelated to the extension's own code.
+		const jiti = createJiti(import.meta.url, { interopDefault: true, tryNative: true });
 		const factory = (await jiti.import(extensionPath, { default: true })) as unknown;
 		if (typeof factory !== "function") throw new Error("extension has no default factory export");
 		await factory(api);

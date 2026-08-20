@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { createRequire } from "node:module";
 import { checkPackage } from "../src/adoption/check.ts";
 import { resolveDependencyModulesDir, runExtensionSmoke } from "../src/adoption/smoke.ts";
 
@@ -178,6 +179,38 @@ describeIfSandboxed("isolated extension smoke runner", () => {
 
 		expect(result.status).toBe("ok");
 		expect(result.registrations.commands).toEqual(["hoisted-sibling"]);
+	});
+
+	it("never routes a plain CJS dependency through jiti's own Babel transform path -- confirmed live: forcing every transitive dependency through Babel (tryNative:false) hit a real, reproducible upstream bug in jiti's own Babel-installed Error.prepareStackTrace hook, triggered by follow-redirects' own module-level Error.captureStackTrace call during its chained error-type prototype setup, surfacing as an opaque 'First argument must be an Error object' crash unrelated to the scanned extension's own code -- reproduces with a cold jiti transform cache regardless of this sandbox specifically, so a real npm package (not a synthetic fixture) is the only faithful way to prove it stays fixed", async () => {
+		const require = createRequire(import.meta.url);
+		const followRedirectsDir = dirname(require.resolve("follow-redirects/package.json"));
+
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "packed-smoke-follow-redirects-"));
+		roots.push(workspaceRoot);
+		const sharedNodeModules = join(workspaceRoot, "node_modules");
+		cpSync(followRedirectsDir, join(sharedNodeModules, "follow-redirects"), { recursive: true });
+		const packageDir = join(sharedNodeModules, "@fixture", "pi-smoke-follow-redirects");
+		mkdirSync(join(packageDir, "extension"), { recursive: true });
+		const extensionPath = join(packageDir, "extension", "index.ts");
+		writeFileSync(
+			extensionPath,
+			'import { http } from "follow-redirects";\nexport default function (pi: any) { pi.registerCommand(String(typeof http), { handler() {} }); }\n',
+		);
+		writeFileSync(
+			join(packageDir, "package.json"),
+			JSON.stringify({
+				name: "@fixture/pi-smoke-follow-redirects",
+				version: "1.0.0",
+				keywords: ["pi-package"],
+				files: ["extension"],
+				pi: { extensions: ["extension/index.ts"] },
+			}),
+		);
+
+		const result = await runExtensionSmoke(packageDir, extensionPath);
+
+		expect(result.status).toBe("ok");
+		expect(result.registrations.commands).toEqual(["object"]);
 	});
 
 	it("keeps default package checks static and adds smoke results only when requested", async () => {

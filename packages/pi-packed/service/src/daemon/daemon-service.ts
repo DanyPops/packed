@@ -706,8 +706,10 @@ export class RealDaemonServiceInstaller implements DaemonServiceInstaller {
 			return resolved;
 		}
 		const result = await registerVehicleService(resolved.spec, this.registrar);
+		// Armada may have started the process before a later readiness/reconciliation step reports
+		// failure. Never delete an executable after registration has observed it; retain the candidate
+		// for diagnosis/retry and prune old roots only after an unambiguous success.
 		if (result.installed) materialized.commit();
-		else materialized.rollback();
 		return { ok: true, result, spec: resolved.spec };
 	}
 
@@ -751,7 +753,6 @@ export class RealDaemonServiceInstaller implements DaemonServiceInstaller {
 		}
 		const result = await registerVehicleService(isolated.spec, this.registrar);
 		if (result.installed) materialized.commit();
-		else materialized.rollback();
 		return {
 			ok: true,
 			restarted: result.installed,

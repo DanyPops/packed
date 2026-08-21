@@ -672,7 +672,7 @@ describe("RealDaemonServiceInstaller -- Armada registration through the in-proce
 		}
 	});
 
-	it("surfaces a failed Armada registration's diagnostics in-band", async () => {
+	it("surfaces a failed Armada registration's diagnostics without deleting the executable Armada may already have started", async () => {
 		const piHome = fakePiHome();
 		writePackage(piHome, "@danypops/web-spider-daemon", { binPath: "dist/cli.js", args: ["serve"] });
 		const registrar: VehicleRegistrar = {
@@ -681,10 +681,22 @@ describe("RealDaemonServiceInstaller -- Armada registration through the in-proce
 			isRegistered: async () => false,
 			listRegistered: async () => [],
 		};
-		const installer = new RealDaemonServiceInstaller(registrar);
+		let rolledBack = 0;
+		const materializer: DaemonPackageMaterializer = {
+			materialize: async (_home, source) => ({
+				piHome,
+				source,
+				commit() {},
+				rollback: () => rolledBack++,
+			}),
+			remove() {},
+			ownsExecutable: () => true,
+		};
+		const installer = new RealDaemonServiceInstaller(registrar, undefined, materializer);
 
 		const outcome = await installer.install(piHome, "npm:@danypops/web-spider-daemon");
 
 		expect(outcome).toMatchObject({ ok: true, result: { installed: false, reason: "native failure" } });
+		expect(rolledBack).toBe(0);
 	});
 });

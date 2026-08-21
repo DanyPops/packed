@@ -31,7 +31,7 @@
     },
     "packages/pi-packed": {
       "name": "@danypops/pi-packed",
-      "version": "0.28.6",
+      "version": "0.28.7",
       "bin": {
         "packed": "service/src/cli/cli.ts",
       },

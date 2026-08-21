@@ -3,7 +3,9 @@ import { join, sep } from "node:path";
 import { npmPackageName } from "../packages/installed.ts";
 
 const MAX_VERSION_DIRECTORIES = 20;
+const MAX_TEMP_DIRECTORY_SCAN = 100;
 const RETAINED_VERSION_DIRECTORIES = 2;
+const STALE_TEMP_DIRECTORY_MS = 5 * 60 * 1_000;
 const MAX_INSTALL_OUTPUT_BYTES = 64 * 1024;
 const VERSION_DIRECTORY_RE = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,127}$/;
 
@@ -98,6 +100,8 @@ export class IsolatedDaemonPackageMaterializer implements DaemonPackageMateriali
 		const finalDirectory = join(packageRoot, version);
 		const finalPiHome = isolatedPiHome(finalDirectory);
 		const finalPackageJson = resolvedPackageJson(finalPiHome, packageName);
+		mkdirSync(packageRoot, { recursive: true, mode: 0o700 });
+		this.pruneTemporaryDirectories(packageRoot);
 		if (readVersion(finalPackageJson) === version) {
 			return {
 				piHome: finalPiHome,
@@ -107,7 +111,6 @@ export class IsolatedDaemonPackageMaterializer implements DaemonPackageMateriali
 			};
 		}
 
-		mkdirSync(packageRoot, { recursive: true, mode: 0o700 });
 		if (existsSync(finalDirectory)) rmSync(finalDirectory, { recursive: true, force: true });
 		const temporaryDirectory = join(packageRoot, `.${version}.${process.pid}.${crypto.randomUUID()}.tmp`);
 		const temporaryPiHome = isolatedPiHome(temporaryDirectory);
@@ -176,6 +179,26 @@ export class IsolatedDaemonPackageMaterializer implements DaemonPackageMateriali
 		return path.startsWith(join(this.stateDirectory, "services") + sep);
 	}
 
+	private pruneTemporaryDirectories(packageRoot: string): void {
+		let names: string[];
+		try {
+			names = readdirSync(packageRoot)
+				.filter((name) => name.startsWith(".") && name.endsWith(".tmp"))
+				.slice(0, MAX_TEMP_DIRECTORY_SCAN);
+		} catch {
+			return;
+		}
+		const staleBefore = Date.now() - STALE_TEMP_DIRECTORY_MS;
+		for (const name of names) {
+			const path = join(packageRoot, name);
+			try {
+				if (statSync(path).mtimeMs < staleBefore) rmSync(path, { recursive: true, force: true });
+			} catch {
+				// A concurrent materializer may have renamed or removed the candidate.
+			}
+		}
+	}
+
 	private prune(packageRoot: string, activeDirectory: string): void {
 		let directories: string[];
 		try {
@@ -188,7 +211,8 @@ export class IsolatedDaemonPackageMaterializer implements DaemonPackageMateriali
 			return;
 		}
 		directories.sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs);
-		const retained = new Set([activeDirectory, ...directories.slice(0, RETAINED_VERSION_DIRECTORIES)]);
+		const prior = directories.filter((directory) => directory !== activeDirectory).slice(0, RETAINED_VERSION_DIRECTORIES - 1);
+		const retained = new Set([activeDirectory, ...prior]);
 		for (const directory of directories) {
 			if (!retained.has(directory)) rmSync(directory, { recursive: true, force: true });
 		}

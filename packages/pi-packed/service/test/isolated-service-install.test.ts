@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { IsolatedDaemonPackageMaterializer } from "../src/daemon/isolated-service-install.ts";
@@ -115,6 +115,44 @@ describe("IsolatedDaemonPackageMaterializer", () => {
 
 		result.rollback();
 		expect(existsSync(versionDirectory)).toBe(false);
+	});
+
+	it("retains only the active and immediately previous committed versions", async () => {
+		const root = temporaryRoot();
+		const piHome = join(root, "pi");
+		const stateDirectory = join(root, "state");
+		const materializer = new IsolatedDaemonPackageMaterializer(stateDirectory, writeFakeNpm(root));
+		for (const version of ["1.0.0", "1.1.0", "1.2.0"]) {
+			writeInstalledPackage(piHome, "daemon", version);
+			const installed = await materializer.materialize(piHome, "npm:daemon");
+			installed.commit();
+		}
+
+		expect(readdirSync(join(stateDirectory, "services", "daemon")).filter((name) => !name.startsWith(".")).sort()).toEqual([
+			"1.1.0",
+			"1.2.0",
+		]);
+	});
+
+	it("cleans bounded stale crash candidates without touching a fresh concurrent candidate", async () => {
+		const root = temporaryRoot();
+		const piHome = join(root, "pi");
+		const stateDirectory = join(root, "state");
+		const packageRoot = join(stateDirectory, "services", "daemon");
+		const stale = join(packageRoot, ".stale.tmp");
+		const fresh = join(packageRoot, ".fresh.tmp");
+		mkdirSync(stale, { recursive: true });
+		mkdirSync(fresh, { recursive: true });
+		const old = new Date(Date.now() - 10 * 60 * 1_000);
+		utimesSync(stale, old, old);
+		writeInstalledPackage(piHome, "daemon", "1.0.0");
+		const materializer = new IsolatedDaemonPackageMaterializer(stateDirectory, writeFakeNpm(root));
+
+		const installed = await materializer.materialize(piHome, "npm:daemon");
+
+		expect(existsSync(stale)).toBe(false);
+		expect(existsSync(fresh)).toBe(true);
+		installed.rollback();
 	});
 
 	it("rejects an unsafe installed version before creating a service directory", async () => {

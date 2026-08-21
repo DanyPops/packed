@@ -30,6 +30,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const project = JSON.parse(fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8"));
 if (project.overrides) throw new Error("host overrides leaked into isolated project");
+if (project.packedServiceInstallFormat !== 1) throw new Error("missing isolated install format marker");
 const [name, version] = Object.entries(project.dependencies)[0];
 const vehicleVersions = ${JSON.stringify(vehicleVersions)};
 const vehicleVersion = typeof vehicleVersions === "string" ? vehicleVersions : vehicleVersions[name];

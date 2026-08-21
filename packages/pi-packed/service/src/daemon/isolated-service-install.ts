@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, s
 import { join, sep } from "node:path";
 import { npmPackageName } from "../packages/installed.ts";
 
+const INSTALL_FORMAT_VERSION = 1;
 const MAX_VERSION_DIRECTORIES = 20;
 const MAX_TEMP_DIRECTORY_SCAN = 100;
 const RETAINED_VERSION_DIRECTORIES = 2;
@@ -64,6 +65,17 @@ function resolvedPackageJson(piHome: string, packageName: string): string {
 	return join(packageDirectory(piHome, packageName), "package.json");
 }
 
+function hasCurrentInstallFormat(piHome: string): boolean {
+	try {
+		const project = JSON.parse(readFileSync(join(piHome, "npm", "package.json"), "utf8")) as {
+			packedServiceInstallFormat?: unknown;
+		};
+		return project.packedServiceInstallFormat === INSTALL_FORMAT_VERSION;
+	} catch {
+		return false;
+	}
+}
+
 export class PassThroughDaemonPackageMaterializer implements DaemonPackageMaterializer {
 	async materialize(piHome: string, source: string): Promise<MaterializedDaemonPackage> {
 		return { piHome, source, commit() {}, rollback() {} };
@@ -102,7 +114,7 @@ export class IsolatedDaemonPackageMaterializer implements DaemonPackageMateriali
 		const finalPackageJson = resolvedPackageJson(finalPiHome, packageName);
 		mkdirSync(packageRoot, { recursive: true, mode: 0o700 });
 		this.pruneTemporaryDirectories(packageRoot);
-		if (readVersion(finalPackageJson) === version) {
+		if (readVersion(finalPackageJson) === version && hasCurrentInstallFormat(finalPiHome)) {
 			return {
 				piHome: finalPiHome,
 				source: `npm:${packageName}@${version}`,
@@ -118,7 +130,16 @@ export class IsolatedDaemonPackageMaterializer implements DaemonPackageMateriali
 		mkdirSync(projectDirectory, { recursive: true, mode: 0o700 });
 		writeFileSync(
 			join(projectDirectory, "package.json"),
-			JSON.stringify({ name: `packed-service-${installKey(packageName)}`, private: true, dependencies: { [packageName]: version } }, null, 2),
+			JSON.stringify(
+				{
+					name: `packed-service-${installKey(packageName)}`,
+					private: true,
+					packedServiceInstallFormat: INSTALL_FORMAT_VERSION,
+					dependencies: { [packageName]: version },
+				},
+				null,
+				2,
+			),
 		);
 
 		let publishedByThisCall = false;
@@ -130,7 +151,6 @@ export class IsolatedDaemonPackageMaterializer implements DaemonPackageMateriali
 					"--ignore-scripts",
 					"--no-audit",
 					"--no-fund",
-					"--install-strategy=nested",
 					"--loglevel=error",
 				],
 				{ cwd: projectDirectory, stdout: "pipe", stderr: "pipe", env: process.env },

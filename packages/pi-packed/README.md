@@ -10,7 +10,7 @@ The extension connects to Packed's authenticated user daemon and starts the pack
 
 ## Isolated daemon services
 
-Packed materializes every managed daemon into a private, versioned npm project under its state directory (`services/<package>/<version>/`). Each root has its own `package.json`, lockfile, and `node_modules`; Pi's shared global project, root-level `overrides`, hoisting, and unrelated package updates therefore cannot rewrite a daemon's dependency closure. Downloads still use npm's shared cache.
+Packed materializes every managed daemon into a private, versioned npm project under its state directory (`services/<package>/<version>/`). Each root has its own `package.json`, lockfile, and `node_modules`; Pi's shared global project, root-level `overrides`, hoisting, and unrelated package updates therefore cannot rewrite a daemon's dependency closure. npm may hoist dependencies inside that one private root for ordinary package compatibility, but never across service roots. Downloads still use npm's shared cache.
 
 A complete root is activated only after installation and manifest validation, using an atomic directory rename. Armada switches the persistent service to that root, and Packed retains the previous root for rollback while pruning older versions within a fixed bound. Removing the service removes its private roots. Pi extensions remain installed in Pi's own package project; only their daemon processes run from the isolated closure.
 

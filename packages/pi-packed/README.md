@@ -8,6 +8,12 @@ pi install npm:@danypops/pi-packed
 
 The extension connects to Packed's authenticated user daemon and starts the package-local `packed serve` process when no healthy daemon is available. It contains no SQLite, registry, package execution, or daemon implementation code.
 
+## Isolated daemon services
+
+Packed materializes every managed daemon into a private, versioned npm project under its state directory (`services/<package>/<version>/`). Each root has its own `package.json`, lockfile, and `node_modules`; Pi's shared global project, root-level `overrides`, hoisting, and unrelated package updates therefore cannot rewrite a daemon's dependency closure. Downloads still use npm's shared cache.
+
+A complete root is activated only after installation and manifest validation, using an atomic directory rename. Armada switches the persistent service to that root, and Packed retains the previous root for rollback while pruning older versions within a fixed bound. Removing the service removes its private roots. Pi extensions remain installed in Pi's own package project; only their daemon processes run from the isolated closure.
+
 ## Commands
 
 - `/packed` -- one floating overlay, four tabs (Packages/Find/Config/Settings), always shown in a persistent tab bar at the top: the focused tab reverses the theme's text color for high contrast in both dark and light modes, unfocused tabs show only a foreground color with their own first letter highlighted as a jump mnemonic (the focused tab needs no mnemonic -- there's nothing to jump to when you're already there). `Tab`/`Shift-Tab` (or `←`/`→`) sweep between them -- recognized under legacy CSI, xterm's modifyOtherKeys, and the Kitty keyboard protocol alike, not just one hardcoded encoding; from any tab other than Packages, `p`/`f`/`c`/`s` also jump straight to the matching one (never stolen while that tab's own filter/query box is capturing text). `Esc` returns to Packages from anywhere else, or closes the panel from Packages itself. Every approval and reload confirmation, on any tab, renders inline on this same panel (`y`/`n` keys), never a separate popup or native dialog. A standing test (`keymap.test.ts`, using Malevich's tree-style `findMnemonicConflicts`) verifies no two actions genuinely reachable at once share a key.

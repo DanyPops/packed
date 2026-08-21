@@ -41,6 +41,10 @@ import {
 import { npmPackageName, readInstalledPackagesAcrossScopes, readPackageDeclarations } from "../packages/installed.ts";
 import type { InstalledPkg } from "../packages/package.ts";
 import { versionAtLeast } from "../publish/publish.ts";
+import {
+	type DaemonPackageMaterializer,
+	PassThroughDaemonPackageMaterializer,
+} from "./isolated-service-install.ts";
 
 export interface DaemonServiceManifest {
 	/** Relative to the installed package's own root directory. */
@@ -612,7 +616,7 @@ export async function reconcileAllDaemonServices(
 async function pruneStaleVehicles(
 	piHome: string,
 	discovered: ReadonlySet<string>,
-	installer: Pick<DaemonServiceInstaller, "listRegisteredVehicles" | "unregisterVehicleByName">,
+	installer: Pick<DaemonServiceInstaller, "listRegisteredVehicles" | "unregisterVehicleByName" | "ownsExecutable">,
 ): Promise<Pick<ReconcileAllResult, "pruned" | "pruneFailed">> {
 	const managedRoot = join(piHome, "npm", "node_modules") + "/";
 	const pruned: ReconcileAllResult["pruned"] = [];
@@ -621,7 +625,7 @@ async function pruneStaleVehicles(
 	for (const vehicle of registered) {
 		if (vehicle.name === PACKED_VEHICLE_NAME) continue;
 		if (discovered.has(vehicle.name)) continue;
-		if (!vehicle.executable.startsWith(managedRoot)) continue;
+		if (!vehicle.executable.startsWith(managedRoot) && !installer.ownsExecutable?.(vehicle.executable)) continue;
 		const outcome = await installer.unregisterVehicleByName(vehicle.name);
 		if (outcome.ok) pruned.push({ vehicleName: vehicle.name, executable: vehicle.executable });
 		else pruneFailed.push({ vehicleName: vehicle.name, reason: outcome.diagnostics.map((d) => d.message).join("; ") || "unregister failed" });
@@ -651,6 +655,8 @@ export interface DaemonServiceInstaller {
 	 * whatever used to produce it.
 	 */
 	unregisterVehicleByName(name: string): Promise<VehicleRegistrationOutcome>;
+	/** True when an executable lives in this installer's private managed-service roots. */
+	ownsExecutable?(path: string): boolean;
 }
 
 /**
@@ -664,6 +670,7 @@ export class RealDaemonServiceInstaller implements DaemonServiceInstaller {
 	constructor(
 		private readonly registrar: VehicleRegistrar = createVehicleRegistrar(),
 		private readonly selfRestart: SelfRestartScheduler = scheduleSelfRestart,
+		private readonly materializer: DaemonPackageMaterializer = new PassThroughDaemonPackageMaterializer(),
 	) {}
 
 	async listRegisteredVehicles(): Promise<readonly VehicleSpec[]> {
@@ -674,16 +681,33 @@ export class RealDaemonServiceInstaller implements DaemonServiceInstaller {
 		return this.registrar.unregister(name);
 	}
 
+	ownsExecutable(path: string): boolean {
+		return this.materializer.ownsExecutable(path);
+	}
+
 	async install(
 		piHome: string,
 		source: string,
 	): Promise<{ ok: true; result: ServiceInstallResult; spec: ServiceSpec } | { ok: false; reason: string; notADaemon?: boolean }> {
-		const resolved = resolveDaemonServiceSpec(piHome, source);
-		if (!resolved.ok) return resolved;
-		if (resolved.spec.name === PACKED_VEHICLE_NAME) {
-			return { ok: true, result: { installed: false, reason: SELF_REGISTRATION_REASON }, spec: resolved.spec };
+		const discovered = resolveDaemonServiceSpec(piHome, source);
+		if (!discovered.ok) return discovered;
+		if (discovered.spec.name === PACKED_VEHICLE_NAME) {
+			return { ok: true, result: { installed: false, reason: SELF_REGISTRATION_REASON }, spec: discovered.spec };
+		}
+		let materialized;
+		try {
+			materialized = await this.materializer.materialize(piHome, source);
+		} catch (error) {
+			return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+		}
+		const resolved = resolveDaemonServiceSpec(materialized.piHome, materialized.source);
+		if (!resolved.ok) {
+			materialized.rollback();
+			return resolved;
 		}
 		const result = await registerVehicleService(resolved.spec, this.registrar);
+		if (result.installed) materialized.commit();
+		else materialized.rollback();
 		return { ok: true, result, spec: resolved.spec };
 	}
 
@@ -697,6 +721,7 @@ export class RealDaemonServiceInstaller implements DaemonServiceInstaller {
 			return { ok: true, result: { installed: false, reason: SELF_REGISTRATION_REASON }, spec: resolved.spec };
 		}
 		const result = await unregisterVehicleService(resolved.spec.name, this.registrar);
+		if (result.installed) this.materializer.remove(source);
 		return { ok: true, result, spec: resolved.spec };
 	}
 
@@ -713,12 +738,25 @@ export class RealDaemonServiceInstaller implements DaemonServiceInstaller {
 		if (!(await isVehicleServiceRegistered(resolved.spec.name, this.registrar))) {
 			return { ok: true, restarted: false, reason: `no persistent service is registered for ${resolved.spec.name}`, spec: resolved.spec };
 		}
-		const result = await registerVehicleService(resolved.spec, this.registrar);
+		let materialized;
+		try {
+			materialized = await this.materializer.materialize(piHome, source);
+		} catch (error) {
+			return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+		}
+		const isolated = resolveDaemonServiceSpec(materialized.piHome, materialized.source);
+		if (!isolated.ok) {
+			materialized.rollback();
+			return isolated;
+		}
+		const result = await registerVehicleService(isolated.spec, this.registrar);
+		if (result.installed) materialized.commit();
+		else materialized.rollback();
 		return {
 			ok: true,
 			restarted: result.installed,
 			...(result.installed ? {} : { reason: result.reason }),
-			spec: resolved.spec,
+			spec: isolated.spec,
 		};
 	}
 }

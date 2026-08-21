@@ -36,6 +36,7 @@ import { createLogger } from "../shared/log.ts";
 import { legacyPackedStateDirectory, migrateLegacyPackedState, type PackedPaths, resolvePackedPaths } from "../shared/paths.ts";
 import { envMs } from "../shared/state.ts";
 import { createApp } from "./service.ts";
+import { IsolatedDaemonPackageMaterializer } from "./isolated-service-install.ts";
 import { checkUpdates, saveUpdates } from "./watcher.ts";
 
 const logger = createLogger("daemon");
@@ -89,7 +90,9 @@ export function daemonOptions(options: StartPackedDaemonOptions): StartDaemonOpt
 	// already uses via checkUpdates() -- one mirror, two consumers, never two
 	// notions of "the real latest version".
 	const inst = options.inst ?? new ExecInstaller(undefined, piHome, undefined, undefined, undefined, (name) => latestVersion(database, name));
-	const daemonServiceInstaller = options.daemonServiceInstaller ?? new RealDaemonServiceInstaller();
+	const daemonServiceInstaller =
+		options.daemonServiceInstaller ??
+		new RealDaemonServiceInstaller(undefined, undefined, new IsolatedDaemonPackageMaterializer(paths.stateDirectory));
 	const configuredMaintenanceTasks = options.maintenanceTasks ?? [
 		{
 			name: "package-update-check",

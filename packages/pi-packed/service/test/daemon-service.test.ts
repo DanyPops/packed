@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { VehicleRegistrar } from "@danypops/armada";
 import { createArmadaTestHarness } from "@danypops/armada/testing";
+import type { DaemonPackageMaterializer } from "../src/daemon/isolated-service-install.ts";
 import {
 	classifyUpdateSource,
 	detectVehicleDaemonService,
@@ -485,6 +486,38 @@ describe("RealDaemonServiceInstaller -- Armada registration through the in-proce
 				"start:armada-web-spider-daemon.service",
 				"ready:web-spider-daemon",
 			]);
+		} finally {
+			await harness.dispose();
+		}
+	});
+
+	it("install() registers the isolated executable and commits that root only after Armada accepts it", async () => {
+		const piHome = fakePiHome();
+		const isolatedPiHome = fakePiHome();
+		writePackage(piHome, "@danypops/lector", { binPath: "src/cli.ts", args: ["serve"] });
+		writePackage(isolatedPiHome, "@danypops/lector", { binPath: "src/cli.ts", args: ["serve"] });
+		let committed = 0;
+		let rolledBack = 0;
+		const materializer: DaemonPackageMaterializer = {
+			materialize: async () => ({
+				piHome: isolatedPiHome,
+				source: "npm:@danypops/lector@1.0.0",
+				commit: () => committed++,
+				rollback: () => rolledBack++,
+			}),
+			remove() {},
+			ownsExecutable: (path) => path.startsWith(isolatedPiHome),
+		};
+		const harness = await createArmadaTestHarness();
+		try {
+			const installer = new RealDaemonServiceInstaller(harness.registrar, undefined, materializer);
+			const outcome = await installer.install(piHome, "npm:@danypops/lector");
+
+			expect(outcome.ok).toBe(true);
+			if (!outcome.ok) throw new Error("expected ok");
+			expect(outcome.spec.binPath).toBe(join(isolatedPiHome, "npm", "node_modules", "@danypops/lector", "src/cli.ts"));
+			expect(committed).toBe(1);
+			expect(rolledBack).toBe(0);
 		} finally {
 			await harness.dispose();
 		}

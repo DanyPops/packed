@@ -22,7 +22,7 @@
     "@danypops/pi-packed": "workspace:*",
     "@earendil-works/pi-coding-agent": "^0.82.1",
     "@earendil-works/pi-tui": "^0.82.1",
-    "@types/node": "^22.0.0",
+    "@types/node": "^26.1.2",
     "bun-types": "latest",
     "eslint": "^10.8.0",
     "eslint-import-resolver-typescript": "^4.4.5",

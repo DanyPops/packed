@@ -109,7 +109,7 @@ export class IsolatedDaemonPackageMaterializer implements DaemonPackageMateriali
 		if (!VERSION_DIRECTORY_RE.test(version)) throw new Error(`cannot isolate ${packageName}: installed package version is unsafe`);
 
 		const packageRoot = join(this.stateDirectory, "services", installKey(packageName));
-		const finalDirectory = join(packageRoot, version);
+		const finalDirectory = join(packageRoot, `${version}-f${INSTALL_FORMAT_VERSION}`);
 		const finalPiHome = isolatedPiHome(finalDirectory);
 		const finalPackageJson = resolvedPackageJson(finalPiHome, packageName);
 		mkdirSync(packageRoot, { recursive: true, mode: 0o700 });
@@ -123,7 +123,6 @@ export class IsolatedDaemonPackageMaterializer implements DaemonPackageMateriali
 			};
 		}
 
-		if (existsSync(finalDirectory)) rmSync(finalDirectory, { recursive: true, force: true });
 		const temporaryDirectory = join(packageRoot, `.${version}.${process.pid}.${crypto.randomUUID()}.tmp`);
 		const temporaryPiHome = isolatedPiHome(temporaryDirectory);
 		const projectDirectory = join(temporaryPiHome, "npm");
@@ -164,6 +163,10 @@ export class IsolatedDaemonPackageMaterializer implements DaemonPackageMateriali
 				throw new Error(`isolated npm install did not resolve ${packageName}@${version}`);
 			}
 			try {
+				// A damaged directory for this exact format is replaced only after the complete
+				// candidate exists. Format migrations use a different final path, so the service's
+				// currently registered executable remains present throughout installation.
+				if (existsSync(finalDirectory)) rmSync(finalDirectory, { recursive: true, force: true });
 				renameSync(temporaryDirectory, finalDirectory);
 				publishedByThisCall = true;
 			} catch (error) {

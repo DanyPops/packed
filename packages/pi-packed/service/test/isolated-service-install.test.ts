@@ -118,6 +118,23 @@ describe("IsolatedDaemonPackageMaterializer", () => {
 		expect(existsSync(versionDirectory)).toBe(false);
 	});
 
+	it("uses format-versioned paths so a migration never removes the currently registered executable", async () => {
+		const root = temporaryRoot();
+		const piHome = join(root, "pi");
+		const stateDirectory = join(root, "state");
+		const legacyExecutable = join(stateDirectory, "services", "daemon", "1.0.0", "pi-home", "npm", "node_modules", "daemon", "cli.ts");
+		mkdirSync(join(legacyExecutable, ".."), { recursive: true });
+		writeFileSync(legacyExecutable, "// running legacy executable\n");
+		writeInstalledPackage(piHome, "daemon", "1.0.0");
+		const materializer = new IsolatedDaemonPackageMaterializer(stateDirectory, writeFakeNpm(root));
+
+		const installed = await materializer.materialize(piHome, "npm:daemon");
+
+		expect(existsSync(legacyExecutable)).toBe(true);
+		expect(installed.piHome).toContain("1.0.0-f1");
+		installed.commit();
+	});
+
 	it("retains only the active and immediately previous committed versions", async () => {
 		const root = temporaryRoot();
 		const piHome = join(root, "pi");
@@ -130,8 +147,8 @@ describe("IsolatedDaemonPackageMaterializer", () => {
 		}
 
 		expect(readdirSync(join(stateDirectory, "services", "daemon")).filter((name) => !name.startsWith(".")).sort()).toEqual([
-			"1.1.0",
-			"1.2.0",
+			"1.1.0-f1",
+			"1.2.0-f1",
 		]);
 	});
 

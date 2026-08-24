@@ -1,6 +1,6 @@
 {
   "name": "@danypops/pi-packed",
-  "version": "0.28.11",
+  "version": "0.28.12",
   "description": "Pi package lifecycle, validation, daemon, tools, profiles, and TUI",
   "type": "module",
   "bin": {
@@ -9,6 +9,11 @@
   "keywords": ["pi-package"],
   "pi": {
     "extensions": ["extension/src/index.ts"]
+  },
+  "zodiac": {
+    "integrations": [
+      { "kind": "vehicle-surface", "vehicleName": "pi-packed", "title": "Packed" }
+    ]
   },
   "packed": {
     "daemonService": {

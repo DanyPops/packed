@@ -30,7 +30,7 @@
     "@danypops/armada": "^0.5.1",
     "@danypops/packed": "^0.7.0",
     "@danypops/pi-extension-harness": "^0.7.0",
-    "@danypops/vehicle-client": "^0.10.5",
+    "@danypops/vehicle-client": "^0.10.6",
     "@danypops/vehicle-core": "^0.18.4",
     "@danypops/vehicle-server": "^0.26.1",
     "jiti": "^2.7.0",
@@ -40,7 +40,7 @@
   },
   "devDependencies": {
     "@danypops/pi-tui-harness": "^0.0.1",
-    "@danypops/vehicle-client-pi": "^0.45.0",
+    "@danypops/vehicle-client-pi": "^0.45.2",
     "@danypops/vehicle-conformance": "^0.4.0",
     "@types/semver": "^7.7.1",
     "follow-redirects": "^1.16.0"

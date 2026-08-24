@@ -27,12 +27,12 @@
     "typecheck": "bunx tsc --noEmit"
   },
   "dependencies": {
-    "@danypops/armada": "^0.5.0",
+    "@danypops/armada": "^0.5.1",
     "@danypops/packed": "^0.7.0",
     "@danypops/pi-extension-harness": "^0.7.0",
     "@danypops/vehicle-client": "^0.10.5",
     "@danypops/vehicle-core": "^0.18.4",
-    "@danypops/vehicle-server": "^0.26.0",
+    "@danypops/vehicle-server": "^0.26.1",
     "jiti": "^2.7.0",
     "malevich-tui-components": "^0.32.1",
     "publint": "0.3.22",

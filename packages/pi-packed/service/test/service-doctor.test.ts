@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { createArmadaTestHarness } from "@danypops/armada/testing";
 import type { ServiceDoctorDeps } from "../src/adoption/service-doctor.ts";
 import { checkServiceUnitPaths } from "../src/adoption/service-doctor.ts";
+import { RECONCILE_INTERVAL_DEFAULT_MS } from "../src/shared/constants.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -126,16 +127,19 @@ describe("checkServiceUnitPaths", () => {
 		});
 	});
 
-	it("reports a running Vehicle whose process predates its own package.json as stale code, not an error", () => {
+	it("reports a running Vehicle whose process predates its own package.json well past Armada's own reconcile cadence as stale code, not an error", () => {
 		const home = piHome(["npm:fakedaemon"]);
 		const dir = installDaemonPackage(home, "fakedaemon");
+		// Past two full reconcile cycles -- a genuinely broken operator, not a gap a healthy
+		// vehicle-reconcile pass would already have self-healed.
+		const gapMs = RECONCILE_INTERVAL_DEFAULT_MS * 2 + 60_000;
 		const deps: ServiceDoctorDeps = {
 			armadaCliPath: "/armada/cli.js",
 			fileExists: () => true,
 			getMtimeMs: () => Date.now(),
 			runCommand: (command) =>
 				command === "ps"
-					? { ok: true, output: new Date(Date.now() - 60_000).toString() }
+					? { ok: true, output: new Date(Date.now() - gapMs).toString() }
 					: {
 							ok: true,
 							output: JSON.stringify({
@@ -157,6 +161,26 @@ describe("checkServiceUnitPaths", () => {
 				},
 			],
 		});
+	});
+
+	it("no longer flags a gap within Armada's own reconcile cadence -- a healthy self-healing operator closes that within one resync, not Doctor", () => {
+		const home = piHome(["npm:fakedaemon"]);
+		const dir = installDaemonPackage(home, "fakedaemon");
+		const deps: ServiceDoctorDeps = {
+			armadaCliPath: "/armada/cli.js",
+			fileExists: () => true,
+			getMtimeMs: () => Date.now(),
+			runCommand: (command) =>
+				command === "ps"
+					? { ok: true, output: new Date(Date.now() - 60_000).toString() }
+					: {
+							ok: true,
+							output: JSON.stringify({
+								vehicles: [{ name: "fakedaemon", executable: join(dir, "cli.ts"), nativeStatus: "running", nativePid: 4242 }],
+							}),
+						},
+		};
+		expect(checkServiceUnitPaths(home, undefined, deps)).toEqual({ ok: true, diagnostics: [], checked: 1 });
 	});
 
 	it("never flags a running Vehicle whose process started after its own package.json was last written", () => {

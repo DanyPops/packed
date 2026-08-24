@@ -26,6 +26,7 @@
  * on disk instead of asking for one more declaration.
  */
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -81,6 +82,7 @@ interface ResolvedDaemonEntrypoint {
 	restartOnFailure?: boolean;
 	restartSec?: number;
 	version: string;
+	contentSignature?: string;
 }
 
 interface InstalledPackageJson {
@@ -94,6 +96,20 @@ interface InstalledPackageJson {
 function readPackageJson(dir: string): InstalledPackageJson | undefined {
 	try {
 		return JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as InstalledPackageJson;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * A hash of the installed package's own package.json bytes -- a content-derived signal distinct
+ * from its declared `version` string, so Armada's own drift detection can react to real content
+ * changes (a local rebuild, a dependency bump) even when a caller never bumped the version.
+ * Undefined (never throws) when the file can't be read.
+ */
+function packageContentSignature(dir: string): string | undefined {
+	try {
+		return createHash("sha256").update(readFileSync(join(dir, "package.json"))).digest("hex");
 	} catch {
 		return undefined;
 	}
@@ -156,11 +172,18 @@ function resolveDependencyCandidate(depDir: string, depName: string): ResolvedDa
 			restartOnFailure: depManifest.restartOnFailure,
 			restartSec: depManifest.restartSec,
 			version: dep.version,
+			contentSignature: packageContentSignature(depDir),
 		};
 	}
 	const depBin = firstBinPath(dep);
 	if (depBin && dependsOnVehicle(dep) && dep.version) {
-		return { binPath: join(depDir, depBin), args: ["serve"], name: unscopedName(dep.name ?? depName), version: dep.version };
+		return {
+			binPath: join(depDir, depBin),
+			args: ["serve"],
+			name: unscopedName(dep.name ?? depName),
+			version: dep.version,
+			contentSignature: packageContentSignature(depDir),
+		};
 	}
 	return undefined;
 }
@@ -208,7 +231,13 @@ export function detectVehicleDaemonService(
 
 	const ownBin = firstBinPath(own);
 	if (ownBin && dependsOnVehicle(own) && own.version) {
-		return { binPath: join(packageDir, ownBin), args: ["serve"], name: unscopedName(own.name ?? fallbackName), version: own.version };
+		return {
+			binPath: join(packageDir, ownBin),
+			args: ["serve"],
+			name: unscopedName(own.name ?? fallbackName),
+			version: own.version,
+			contentSignature: packageContentSignature(packageDir),
+		};
 	}
 
 	// A pi-X package can carry OTHER Vehicle-shaped dependencies for unrelated reasons (e.g.
@@ -256,6 +285,7 @@ function buildSpec(entry: ResolvedDaemonEntrypoint): ServiceSpec {
 		name: entry.name,
 		displayName: entry.displayName,
 		version: entry.version,
+		...(entry.contentSignature === undefined ? {} : { contentSignature: entry.contentSignature }),
 		binPath: entry.binPath,
 		args: entry.args,
 		handlePath: paths.handle,
@@ -294,6 +324,7 @@ export function resolveDaemonServiceSpec(piHome: string, source: string): Resolv
 				restartOnFailure: manifest.restartOnFailure,
 				restartSec: manifest.restartSec,
 				version: pkg.version ?? "0.0.0",
+				contentSignature: packageContentSignature(packageDir),
 			}),
 		};
 	}

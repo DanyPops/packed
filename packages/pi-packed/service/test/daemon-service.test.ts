@@ -60,6 +60,7 @@ describe("resolveDaemonServiceSpec", () => {
 				name: "web-spider-daemon",
 				displayName: undefined,
 				version: "1.0.0",
+				contentSignature: expect.any(String) as unknown as string,
 				binPath: join(piHome, "npm", "node_modules", "@danypops/web-spider-daemon", "dist/cli.js"),
 				args: ["serve"],
 				handlePath: expect.stringContaining("web-spider-daemon") as unknown as string,
@@ -68,6 +69,32 @@ describe("resolveDaemonServiceSpec", () => {
 				restartSec: 2,
 			},
 		});
+	});
+
+	it("derives contentSignature from the installed package.json's own bytes, changing when content drifts even though version does not", () => {
+		const piHome = fakePiHome();
+		writePackage(piHome, "@danypops/web-spider-daemon", { binPath: "dist/cli.js", args: ["serve"] });
+		const first = resolveDaemonServiceSpec(piHome, "npm:@danypops/web-spider-daemon");
+		expect(first.ok).toBe(true);
+		if (!first.ok) throw new Error("expected ok");
+
+		// Same declared version, different real bytes -- e.g. a local rebuild or a dependency bump
+		// that never touched the version field.
+		writeFileSync(
+			join(piHome, "npm", "node_modules", "@danypops/web-spider-daemon", "package.json"),
+			JSON.stringify({
+				name: "@danypops/web-spider-daemon",
+				version: "1.0.0",
+				dependencies: { "some-new-dep": "^1.0.0" },
+				packed: { daemonService: { binPath: "dist/cli.js", args: ["serve"] } },
+			}),
+		);
+		const second = resolveDaemonServiceSpec(piHome, "npm:@danypops/web-spider-daemon");
+		expect(second.ok).toBe(true);
+		if (!second.ok) throw new Error("expected ok");
+
+		expect(second.spec.version).toBe(first.spec.version);
+		expect(second.spec.contentSignature).not.toBe(first.spec.contentSignature);
 	});
 
 	it("honors an explicit name/displayName override instead of deriving one from the npm package name", () => {
@@ -122,6 +149,7 @@ describe("resolveDaemonServiceSpec", () => {
 				name: "papyrus",
 				displayName: undefined,
 				version: "1.0.0",
+				contentSignature: expect.any(String) as unknown as string,
 				binPath: join(dir, "src/cli.ts"),
 				args: ["serve"],
 				handlePath: expect.stringContaining("papyrus") as unknown as string,

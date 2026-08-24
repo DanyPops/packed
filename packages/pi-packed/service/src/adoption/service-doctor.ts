@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { ServiceInstallDeps } from "@danypops/vehicle-server/service";
 import { readInstalledPackagesAcrossScopes } from "../packages/installed.ts";
 import { resolveDaemonServiceSpec } from "../daemon/daemon-service.ts";
+import { RECONCILE_INTERVAL_DEFAULT_MS } from "../shared/constants.ts";
 
 export interface ServiceUnitDiagnostic {
 	code: "SERVICE_EXEC_PATH_MISSING" | "SERVICE_NOT_RUNNING" | "SERVICE_STATUS_UNAVAILABLE" | "SERVICE_STALE_CODE";
@@ -27,8 +28,15 @@ interface ArmadaStatus {
 	vehicles?: Array<{ name?: string; executable?: string; nativeStatus?: string; ready?: boolean; nativePid?: number }>;
 }
 
-/** A boot/registration race can leave a process's own start time a few seconds behind its package.json's write; only a gap past this is treated as a genuinely stale running daemon. */
-const STALE_CODE_GRACE_MS = 15_000;
+/**
+ * Armada's own "vehicle-reconcile" maintenance task already self-heals a Vehicle whose content
+ * (not just its declared version) drifted, within one RECONCILE_INTERVAL_DEFAULT_MS resync --
+ * see @danypops/armada's contentSignature. This grace period is set well past two full resync
+ * cycles so SERVICE_STALE_CODE only ever fires as a backstop for a genuinely broken operator
+ * (the reconcile task itself not running, or erroring every pass), never as the routine, expected
+ * path for ordinary content drift a healthy operator already corrects on its own.
+ */
+const STALE_CODE_GRACE_MS = RECONCILE_INTERVAL_DEFAULT_MS * 2;
 
 /** Undefined (never throws) when `pid` isn't a running process this host can inspect, or `ps` isn't available. */
 function processStartTimeMs(pid: number, deps: ServiceDoctorDeps): number | undefined {

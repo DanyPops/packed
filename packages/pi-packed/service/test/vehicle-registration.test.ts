@@ -70,14 +70,16 @@ async function invoke(app: { fetch(request: Request): Promise<Response> }, name:
 }
 
 describe("packed's daemon operation surface, through the real Vehicle wire protocol", () => {
-	it("GET /vehicle/manifest lists all 29 operations plus the registry's own vehicle.approval.resolve, authenticated the same as /api/v1/ops", async () => {
+	it("GET /vehicle/manifest lists all 29 operations plus the registry's own vehicle.approval.resolve/vehicle.approval.status, authenticated the same as /api/v1/ops", async () => {
 		const app = createApp(deps());
 		const unauthorized = await app.fetch(new Request("http://packed.internal/vehicle/manifest"));
 		expect(unauthorized.status).toBe(401);
 		const response = await app.fetch(new Request("http://packed.internal/vehicle/manifest", { headers: { authorization: "Bearer test-token" } }));
 		expect(response.status).toBe(200);
 		const body = (await response.json()) as { operations: Array<{ name: string }> };
-		expect(body.operations.map((o) => o.name).sort()).toEqual([...OPERATION_NAMES, "vehicle.approval.resolve"].sort());
+		expect(body.operations.map((o) => o.name).sort()).toEqual(
+			[...OPERATION_NAMES, "vehicle.approval.resolve", "vehicle.approval.status"].sort(),
+		);
 	});
 
 	it("a mutation's approvalRequired reflects security.ts's own per-operation classification, not a coarse effect default -- restart_service is gated despite sharing external-write with the never-gated catalog.sync", async () => {

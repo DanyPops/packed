@@ -50,6 +50,8 @@ import {
 export interface DaemonServiceManifest {
 	/** Relative to the installed package's own root directory. */
 	binPath: string;
+	/** Executes the entrypoint through Packed's absolute Bun runtime instead of its PATH-dependent shebang. */
+	runtime?: "bun";
 	args?: string[];
 	/** Defaults to the bare npm package name (scope stripped). */
 	name?: string;
@@ -74,6 +76,7 @@ function unscopedName(packageName: string): string {
 /** A resolved daemon entrypoint, already an absolute binPath -- the common shape both an explicit manifest and detection converge to before a ServiceSpec is built. */
 interface ResolvedDaemonEntrypoint {
 	binPath: string;
+	runtime?: "bun";
 	args?: string[];
 	name: string;
 	displayName?: string;
@@ -164,6 +167,7 @@ function resolveDependencyCandidate(depDir: string, depName: string): ResolvedDa
 	if (depManifest && typeof depManifest.binPath === "string" && depManifest.binPath.length > 0 && dep.version) {
 		return {
 			binPath: join(depDir, depManifest.binPath),
+			runtime: depManifest.runtime,
 			args: depManifest.args,
 			name: depManifest.name ?? unscopedName(dep.name ?? depName),
 			displayName: depManifest.displayName,
@@ -281,13 +285,14 @@ function buildSpec(entry: ResolvedDaemonEntrypoint): ServiceSpec {
 		handleFilename: entry.handleFilename ?? DEFAULT_DETECTED_HANDLE_FILENAME,
 		systemdUnitName: `${entry.name}.service`,
 	});
+	const daemonArgs = entry.args ?? [];
 	return {
 		name: entry.name,
 		displayName: entry.displayName,
 		version: entry.version,
 		...(entry.contentSignature === undefined ? {} : { contentSignature: entry.contentSignature }),
-		binPath: entry.binPath,
-		args: entry.args,
+		binPath: entry.runtime === "bun" ? process.execPath : entry.binPath,
+		args: entry.runtime === "bun" ? [entry.binPath, ...daemonArgs] : entry.args,
 		handlePath: paths.handle,
 		workingDirectory: entry.workingDirectory,
 		...(entry.restartOnFailure === undefined ? {} : { restartOnFailure: entry.restartOnFailure }),
@@ -316,6 +321,7 @@ export function resolveDaemonServiceSpec(piHome: string, source: string): Resolv
 			ok: true,
 			spec: buildSpec({
 				binPath: join(packageDir, manifest.binPath),
+				runtime: manifest.runtime,
 				args: manifest.args,
 				name: manifest.name ?? unscopedName(packageName),
 				displayName: manifest.displayName,

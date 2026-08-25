@@ -48,11 +48,13 @@ describe("resolveDaemonServiceSpec", () => {
 		const piHome = fakePiHome();
 		writePackage(piHome, "@danypops/web-spider-daemon", {
 			binPath: "dist/cli.js",
+			runtime: "bun",
 			args: ["serve"],
 			restartOnFailure: true,
 			restartSec: 2,
 		});
 
+		const daemonEntry = join(piHome, "npm", "node_modules", "@danypops/web-spider-daemon", "dist/cli.js");
 		const result = resolveDaemonServiceSpec(piHome, "npm:@danypops/web-spider-daemon");
 		expect(result).toEqual({
 			ok: true,
@@ -61,8 +63,8 @@ describe("resolveDaemonServiceSpec", () => {
 				displayName: undefined,
 				version: "1.0.0",
 				contentSignature: expect.any(String) as unknown as string,
-				binPath: join(piHome, "npm", "node_modules", "@danypops/web-spider-daemon", "dist/cli.js"),
-				args: ["serve"],
+				binPath: process.execPath,
+				args: [daemonEntry, "serve"],
 				handlePath: expect.stringContaining("web-spider-daemon") as unknown as string,
 				workingDirectory: undefined,
 				restartOnFailure: true,

@@ -79,6 +79,11 @@ export class DoctorOverlay {
 			this.registered = false;
 			this.tui = undefined;
 		}
+		try {
+			this.render();
+		} catch {
+			// Cached doctor state is best-effort UI and must not affect session startup.
+		}
 	}
 
 	/** Never throws: called from a poll timer and from session_start, neither of which should turn

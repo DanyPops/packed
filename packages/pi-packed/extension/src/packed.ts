@@ -80,7 +80,7 @@ async function connectDefaultDaemon(): Promise<PackageDaemonPort> {
 	return ensurePackedClient();
 }
 
-export async function createNatives(connect: PackageDaemonConnector = connectDefaultDaemon): Promise<Natives> {
+export function createNatives(connect: PackageDaemonConnector = connectDefaultDaemon): Natives {
 	// connectRetry:true (vehicle-client's own bounded background retry budget) covers a
 	// daemon that crashed and is mid systemd-restart -- without it, the very first call
 	// during that window fails immediately instead of waiting the ~2s restart out.

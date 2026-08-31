@@ -302,7 +302,12 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 		vehicleRegistry.useExecutionMiddleware(createVehicleMetricsMiddleware(deps.vehicleMetrics, "packed"));
 		registerVehicleMetricsOperations(vehicleRegistry, deps.vehicleMetrics, "packed");
 	}
-	const vehicleApp = createVehicleHttpApp({ registry: vehicleRegistry, token: deps.token });
+	const permissions = [...new Set(vehicleRegistry.manifest().operations.flatMap((operation) => operation.permissions))];
+	const vehicleApp = createVehicleHttpApp({
+		registry: vehicleRegistry,
+		token: deps.token,
+		invocationAuthority: { mode: "attested", resolve: () => ({ permissions, principal: { id: "packed-authenticated-client" } }) },
+	});
 
 	function authorize(operation: PackageOperation, approved: boolean): Response | undefined {
 		try {

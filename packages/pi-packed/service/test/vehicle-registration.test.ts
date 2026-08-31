@@ -97,6 +97,24 @@ describe("packed's daemon operation surface, through the real Vehicle wire proto
 		expect(byName.get("setup.update")).toBe(false);
 	});
 
+	it("derives Vehicle permissions from authenticated server state", async () => {
+		const app = createApp(deps());
+		const response = await app.fetch(
+			new Request("http://packed.internal/vehicle/invoke", {
+				method: "POST",
+				headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+				body: JSON.stringify({
+					name: "package.search",
+					version: 1,
+					input: { query: "lsp", limit: 10 },
+					permissions: [],
+					principal: { id: "forged-caller" },
+				}),
+			}),
+		);
+		expect(response.status).toBe(200);
+	});
+
 	it("package.search round-trips through /vehicle/invoke, matching /api/v1/ops's own shape", async () => {
 		const app = createApp(deps());
 		const result = await invoke(app, "package.search", { query: "lsp", limit: 10 });

@@ -60,17 +60,21 @@ function realisticOperations() {
 	];
 }
 
-function manifestServer(): { baseUrl: string; stop: () => void } {
+function manifestServer(): { baseUrl: string; requestPaths: string[]; stop: () => void } {
+	const requestPaths: string[] = [];
 	const server = Bun.serve({
 		port: 0,
 		fetch(request) {
-			if (new URL(request.url).pathname === "/vehicle/manifest") {
+			const pathname = new URL(request.url).pathname;
+			requestPaths.push(pathname);
+			if (pathname === "/vehicle/negotiate") return Response.json({ agreement: { version: 1, capabilities: [] } });
+			if (pathname === "/vehicle/manifest") {
 				return Response.json({ name: "packed", version: "1.0.0", description: "Packed.", operations: realisticOperations() });
 			}
 			return new Response("not found", { status: 404 });
 		},
 	});
-	return { baseUrl: `http://127.0.0.1:${server.port}`, stop: () => server.stop(true) };
+	return { baseUrl: `http://127.0.0.1:${server.port}`, requestPaths, stop: () => server.stop(true) };
 }
 
 function fakePi() {
@@ -115,12 +119,13 @@ describe("registerPackedVehicle opts into Vehicle Shell activation", () => {
 	});
 
 	it("activates only the core read operations plus tools_list/tools_man, excludes package.search/info, and permanently blocks every mutation", async () => {
-		const { baseUrl, stop } = manifestServer();
+		const { baseUrl, requestPaths, stop } = manifestServer();
 		try {
 			setVehicleClientTargetResolverForTests(() => ({ baseUrl, token: "test-token" }));
 			const { api, registeredTools, getActiveTools } = fakePi();
 
 			await registerPackedVehicle(api);
+			expect(requestPaths.slice(0, 2)).toEqual(["/vehicle/negotiate", "/vehicle/manifest"]);
 
 			// package.search/package.info are filtered out of the projected manifest entirely --
 			// already covered by pkg_search/pkg_info's own dedicated tools.

@@ -86,7 +86,9 @@ export async function registerPackedVehicle(pi: ExtensionAPI): Promise<void> {
 				async () => {
 					const resolved = currentVehicleClientTarget();
 					if (!resolved) throw new Error("Packed daemon is not running");
-					return new RemoteVehicleClient({ baseUrl: resolved.baseUrl, token: resolved.token });
+					const remote = new RemoteVehicleClient({ baseUrl: resolved.baseUrl, token: resolved.token });
+					await remote.negotiate({ minimumVersion: 1, maximumVersion: 1, requiredCapabilities: [], optionalCapabilities: [] });
+					return remote;
 				},
 				{ connectRetry: true },
 			),

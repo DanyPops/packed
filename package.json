@@ -7,6 +7,7 @@
   ],
   "scripts": {
     "build": "bun run --cwd packages/packed build && bun run --cwd packages/pi-packed build",
+    "benchmark:packed": "bun packages/pi-packed/service/benchmarks/baseline.ts",
     "test": "bun run build && bun test packages/packed/test packages/pi-packed/service/test packages/pi-packed/test",
     "typecheck": "bun run build && bunx tsc --noEmit && bunx tsc -p packages/packed/tsconfig.json --noEmit && bunx tsc -p packages/packed/tsconfig.consumer.json && bunx tsc -p packages/pi-packed/tsconfig.json --noEmit && bunx tsc -p packages/pi-packed/service/tsconfig.consumer.json", 
     "prepare": "git config core.hooksPath .githooks",

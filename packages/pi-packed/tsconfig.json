@@ -5,5 +5,5 @@
     "types": ["bun-types", "node"],
     "noEmit": true
   },
-  "include": ["extension/**/*.ts", "service/src/**/*.ts", "service/test/**/*.ts", "test/**/*.ts"]
+  "include": ["extension/**/*.ts", "service/src/**/*.ts", "service/test/**/*.ts", "service/benchmarks/**/*.ts", "test/**/*.ts"]
 }

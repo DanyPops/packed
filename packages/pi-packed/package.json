@@ -42,7 +42,8 @@
     "jiti": "^2.7.0",
     "malevich-tui-components": "^0.32.1",
     "publint": "0.3.22",
-    "semver": "^7.8.5"
+    "semver": "^7.8.5",
+    "typescript": "^5.9.3"
   },
   "devDependencies": {
     "@danypops/pi-tui-harness": "^0.0.1",

@@ -1,5 +1,6 @@
 import { existsSync, lstatSync, opendirSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import * as ts from "typescript";
 import { publint } from "publint";
 import { formatMessage } from "publint/utils";
 import { type ExtensionSmokeResult, runExtensionSmoke } from "./smoke.ts";
@@ -510,27 +511,28 @@ function shippedSourceFiles(context: Context): string[] {
 	);
 }
 
-/**
- * Strips line and block comments before the import-specifier regex below runs
- * -- a comment can contain an arbitrary quoted "from ..." substring the regex
- * would otherwise match as if it were real code (confirmed live against a
- * JSDoc comment describing a bug fix in prose that happened to contain
- * exactly that shape). Not a full lexer: a string literal that itself
- * contains a comment delimiter could still confuse this, a pre-existing
- * limit of a regex-based scan, not a regression this introduces.
- */
-function stripComments(source: string): string {
-	return source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, "");
-}
-
 /** Every import/require specifier literal in one file, bounded by
  * MAX_SOURCE_BYTES -- undefined when the file is too large to read (the
  * caller's own bound, never silently truncated mid-scan). */
 function importSpecifiersIn(context: Context, file: string): string[] | undefined {
 	const absolute = join(context.root, file);
 	if (lstatSync(absolute).size > MAX_SOURCE_BYTES) return undefined;
-	const source = stripComments(readFileSync(absolute, "utf8"));
-	return [...source.matchAll(/(?:from\s*|import\s*\(|require\s*\()\s*["']([^"']+)["']/g)].map((match) => match[1]!);
+	const source = ts.createSourceFile(file, readFileSync(absolute, "utf8"), ts.ScriptTarget.Latest, false);
+	const specifiers: string[] = [];
+	const add = (node: ts.Node | undefined): void => {
+		if (node && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))) specifiers.push(node.text);
+	};
+	const visit = (node: ts.Node): void => {
+		if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) add(node.moduleSpecifier);
+		else if (ts.isExternalModuleReference(node)) add(node.expression);
+		else if (ts.isCallExpression(node) && (
+			node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+			(ts.isIdentifier(node.expression) && node.expression.text === "require")
+		)) add(node.arguments[0]);
+		ts.forEachChild(node, visit);
+	};
+	visit(source);
+	return specifiers;
 }
 
 function dependencyCheck(context: Context): void {

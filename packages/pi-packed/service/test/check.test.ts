@@ -34,6 +34,30 @@ const base = {
 	peerDependencies: { "@earendil-works/pi-coding-agent": "*" },
 };
 
+describe("syntax-aware dependency discovery", () => {
+	it("ignores import-shaped strings while retaining real missing dependencies", async () => {
+		const root = fixture(base, { "extensions/index.ts": `
+const from = Math.max(0, Number(url.searchParams.get("from") ?? 0));
+const size = Math.min(20, Math.max(1, Number(url.searchParams.get("size") ?? 5)));
+const text = "import('fake-string')";
+const template = \`require('fake-template')\`;
+// import 'fake-comment';
+import 'missing-side-effect';
+export { value } from 'missing-export';
+import value from 'missing-static';
+const dynamic = import('missing-dynamic');
+const common = require('missing-common');
+import legacy = require('missing-legacy');
+const liveTemplate = \`value: \${require('missing-template-expression')}\`;
+` });
+		const report = await checkPackage(root);
+		const missing = report.diagnostics.filter((item) => item.code === "RUNTIME_DEPENDENCY_MISSING");
+		expect(missing.map((item) => item.message.split(" is imported")[0]).sort()).toEqual([
+			"missing-common", "missing-dynamic", "missing-export", "missing-legacy", "missing-side-effect", "missing-static", "missing-template-expression",
+		]);
+	});
+});
+
 function codes(diagnostics: Diagnostic[]): string[] {
 	return diagnostics.map((diagnostic) => diagnostic.code);
 }

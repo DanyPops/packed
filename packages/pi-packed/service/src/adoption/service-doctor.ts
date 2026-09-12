@@ -5,7 +5,8 @@ import { resolveDaemonServiceSpec } from "../daemon/daemon-service.ts";
 import { RECONCILE_INTERVAL_DEFAULT_MS } from "../shared/constants.ts";
 
 export interface ServiceUnitDiagnostic {
-	code: "SERVICE_EXEC_PATH_MISSING" | "SERVICE_NOT_RUNNING" | "SERVICE_STATUS_UNAVAILABLE" | "SERVICE_STALE_CODE";
+	code: "SERVICE_EXEC_PATH_MISSING" | "SERVICE_NOT_RUNNING" | "SERVICE_STATUS_UNAVAILABLE" | "SERVICE_STALE_CODE"
+		| "SERVICE_VERSION_MISMATCH" | "SERVICE_NOT_REGISTERED" | "SERVICE_DESCRIPTOR_DRIFT" | "SERVICE_REQUIREMENT_UNRESOLVED";
 	severity: "error" | "warning";
 	package: string;
 	unitName: string;
@@ -25,7 +26,7 @@ export interface ServiceDoctorDeps extends ServiceInstallDeps {
 }
 
 interface ArmadaStatus {
-	vehicles?: Array<{ name?: string; executable?: string; nativeStatus?: string; ready?: boolean; nativePid?: number }>;
+	vehicles?: Array<{ name?: string; version?: string; descriptorDrift?: boolean; executable?: string; nativeStatus?: string; ready?: boolean; nativePid?: number }>;
 }
 
 /**
@@ -51,11 +52,16 @@ export function checkServiceUnitPaths(
 	projectRoot: string | undefined,
 	deps: ServiceDoctorDeps,
 ): ServiceDoctorReport {
+	const resolutionDiagnostics: ServiceUnitDiagnostic[] = [];
 	const managedPackages = readInstalledPackagesAcrossScopes(piHome, projectRoot).flatMap((pkg) => {
 		const resolved = resolveDaemonServiceSpec(piHome, `npm:${pkg.name}`);
+		if (!resolved.ok && !resolved.notADaemon) resolutionDiagnostics.push({
+			code: "SERVICE_REQUIREMENT_UNRESOLVED", severity: "error", package: pkg.name,
+			unitName: pkg.name, message: resolved.reason,
+		});
 		return resolved.ok ? [{ packageName: pkg.name, spec: resolved.spec }] : [];
 	});
-	if (managedPackages.length === 0) return { ok: true, diagnostics: [], checked: 0 };
+	if (managedPackages.length === 0) return { ok: resolutionDiagnostics.length === 0, diagnostics: resolutionDiagnostics, checked: 0 };
 
 	const statusResult = deps.runCommand(process.execPath, [deps.armadaCliPath, "status", "--json"]);
 	if (!statusResult.ok) {
@@ -94,12 +100,33 @@ export function checkServiceUnitPaths(
 	}
 
 	const vehicles = new Map((status.vehicles ?? []).flatMap((vehicle) => (vehicle.name ? [[vehicle.name, vehicle]] : [])));
-	const diagnostics: ServiceUnitDiagnostic[] = [];
+	const diagnostics: ServiceUnitDiagnostic[] = [...resolutionDiagnostics];
 	let checked = 0;
 	for (const managedPackage of managedPackages) {
 		const vehicle = vehicles.get(managedPackage.spec.name);
-		if (!vehicle) continue;
 		checked++;
+		if (!vehicle) {
+			diagnostics.push({
+				code: "SERVICE_NOT_REGISTERED", severity: "error", package: managedPackage.packageName,
+				unitName: managedPackage.spec.name,
+				message: `${managedPackage.spec.name} has no Armada registration; install its persistent service through Packed`,
+			});
+			continue;
+		}
+		if (vehicle.version !== undefined && vehicle.version !== managedPackage.spec.version) {
+			diagnostics.push({
+				code: "SERVICE_VERSION_MISMATCH", severity: "error", package: managedPackage.packageName,
+				unitName: managedPackage.spec.name,
+				message: `${managedPackage.spec.name} resolves to ${managedPackage.spec.version}, but Armada declares ${vehicle.version}; reconcile this package's service through Packed, then verify readiness; session reload alone cannot adopt a daemon`,
+			});
+		}
+		if (vehicle.descriptorDrift === true) {
+			diagnostics.push({
+				code: "SERVICE_DESCRIPTOR_DRIFT", severity: "error", package: managedPackage.packageName,
+				unitName: managedPackage.spec.name,
+				message: `${managedPackage.spec.name}'s native descriptor differs from Armada's declaration; reconcile the service through Armada`,
+			});
+		}
 		const executable = vehicle.executable ?? managedPackage.spec.binPath;
 		if (!deps.fileExists(executable)) {
 			diagnostics.push({

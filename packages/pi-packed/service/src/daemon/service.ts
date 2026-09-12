@@ -164,7 +164,10 @@ interface MutationResponse {
 	ok: boolean;
 	output: string;
 }
-interface UpdateMutationResponse extends MutationResponse, Partial<Omit<UpdateOutcome, "output">> {}
+interface UpdateMutationResponse extends MutationResponse, Partial<Omit<UpdateOutcome, "output">> {
+	packageUpdated?: boolean;
+	serviceReconciled?: boolean;
+}
 interface UpdateAllMutationResponse extends MutationResponse {
 	results: Array<{ source: string; ok: boolean; output: string; serviceReconciled?: boolean } & Partial<Omit<UpdateOutcome, "output">>>;
 	reresolveError?: string;
@@ -598,9 +601,15 @@ export function createApp(deps: Deps): { fetch: (req: Request) => Promise<Respon
 				const service = await daemonServiceInstaller.restart(piHomeForServiceInstall, restartSource);
 				if (!service.ok) {
 					if (service.notADaemon) return json({ ok: true, source, ...outcome });
-					return json({ ok: false, source, ...outcome, output: `${outcome.output}\n${service.reason}` });
+					return json({ ok: false, source, ...outcome, packageUpdated: !outcome.alreadyUpToDate,
+						serviceReconciled: false,
+						output: `${outcome.output}\nDaemon adoption required: ${service.reason}. Session reload alone is insufficient.` });
 				}
-				return json({ ok: true, source, ...outcome, serviceReconciled: service.restarted });
+				if (!service.restarted) return json({
+					ok: false, source, ...outcome, packageUpdated: !outcome.alreadyUpToDate, serviceReconciled: false,
+					output: `${outcome.output}\nDaemon adoption required for ${service.spec.name}: ${service.reason ?? "reconciliation incomplete"}. Use Packed's targeted install-service operation; session reload alone is insufficient.`,
+				});
+				return json({ ok: true, source, ...outcome, serviceReconciled: true });
 			} catch (error) {
 				return json({ ok: false, source, output: error instanceof Error ? error.message : String(error), reloadRequired: false });
 			}

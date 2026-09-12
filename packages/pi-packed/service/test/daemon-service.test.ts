@@ -44,6 +44,37 @@ function writeRawPackage(dir: string, pkg: Record<string, unknown>): void {
 }
 
 describe("resolveDaemonServiceSpec", () => {
+	it("selects a daemon satisfying the extension range rather than a newer incompatible hoist", () => {
+		const home = fakePiHome();
+		const extension = join(home, "npm/node_modules/@scope/pi-lector");
+		writeRawPackage(extension, { name: "@scope/pi-lector", version: "0.17.2", dependencies: { "@scope/lector": "^0.23.1" } });
+		writeRawPackage(join(extension, "node_modules/@scope/lector"), {
+			name: "@scope/lector", version: "0.23.1", packed: { daemonService: { binPath: "cli.ts" } },
+		});
+		writeRawPackage(join(home, "npm/node_modules/@scope/lector"), {
+			name: "@scope/lector", version: "0.24.0", packed: { daemonService: { binPath: "cli.ts" } },
+		});
+		const result = resolveDaemonServiceSpec(home, "npm:@scope/pi-lector");
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error(result.reason);
+		expect(result.spec.version).toBe("0.23.1");
+	});
+
+	it("fails visibly when the only daemon installation violates the extension range", () => {
+		const home = fakePiHome();
+		writeRawPackage(join(home, "npm/node_modules/@scope/pi-lector"), {
+			name: "@scope/pi-lector", version: "0.17.2", dependencies: { "@scope/lector": "^0.23.1" },
+		});
+		writeRawPackage(join(home, "npm/node_modules/@scope/lector"), {
+			name: "@scope/lector", version: "0.21.0", packed: { daemonService: { binPath: "cli.ts" } },
+		});
+		const result = resolveDaemonServiceSpec(home, "npm:@scope/pi-lector");
+		expect(result.ok).toBe(false);
+		if (result.ok) throw new Error("incompatible daemon was accepted");
+		expect(result.notADaemon).not.toBe(true);
+		expect(result.reason).toContain("^0.23.1");
+	});
+
 	it("builds a ServiceSpec from a package's packed.daemonService manifest", () => {
 		const piHome = fakePiHome();
 		writePackage(piHome, "@danypops/web-spider-daemon", {
@@ -275,12 +306,10 @@ describe("resolveDaemonServiceSpec", () => {
 		expect(result.spec.restartSec).toBe(2);
 	});
 
-	it("prefers the higher-semver candidate when BOTH a nested and hoisted copy of the same dependency resolve via bin+dependency convention -- the real jittor incident: a stale nested copy must never win over a correctly-versioned hoisted one just because it's checked first", () => {
+	it("prefers the higher-semver candidate when nested and hoisted copies both satisfy the declared range", () => {
 		const piHome = fakePiHome();
 		const extDir = join(piHome, "npm", "node_modules", "@danypops/pi-papyrus");
-		writeRawPackage(extDir, { name: "@danypops/pi-papyrus", version: "1.0.0", dependencies: { "@danypops/jittor": "^0.14.0" } });
-		// A stale nested copy pi-papyrus's own outdated floor forced npm to keep private, instead of
-		// deduping to the shared, correctly-versioned, hoisted copy every other consumer already uses.
+		writeRawPackage(extDir, { name: "@danypops/pi-papyrus", version: "1.0.0", dependencies: { "@danypops/jittor": ">=0.14.0 <0.19.0" } });
 		const nestedDir = join(extDir, "node_modules", "@danypops/jittor");
 		writeRawPackage(nestedDir, {
 			name: "@danypops/jittor",

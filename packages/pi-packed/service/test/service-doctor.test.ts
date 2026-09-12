@@ -44,6 +44,47 @@ function fakeDeps(status: unknown, fileExists = true): ServiceDoctorDeps {
 }
 
 describe("checkServiceUnitPaths", () => {
+	it("reports version drift even after the old daemon has restarted", () => {
+		const home = piHome(["npm:fakedaemon"]);
+		const dir = installDaemonPackage(home, "fakedaemon");
+		const report = checkServiceUnitPaths(home, undefined, fakeDeps({ vehicles: [{
+			name: "fakedaemon", executable: join(dir, "cli.ts"), version: "0.21.0",
+			nativeStatus: "running", ready: true,
+		}] }));
+		expect(report.ok).toBe(false);
+		expect(report.diagnostics).toContainEqual(expect.objectContaining({
+			code: "SERVICE_VERSION_MISMATCH", severity: "error",
+			message: expect.stringContaining("0.21.0"),
+		}));
+	});
+
+	it("accepts an isolated service at the resolved version", () => {
+		const home = piHome(["npm:fakedaemon"]);
+		installDaemonPackage(home, "fakedaemon");
+		const report = checkServiceUnitPaths(home, undefined, fakeDeps({ vehicles: [{
+			name: "fakedaemon", executable: "/managed/isolated/cli.ts", version: "1.0.0",
+			nativeStatus: "running", ready: true,
+		}] }));
+		expect(report).toEqual({ ok: true, diagnostics: [], checked: 1 });
+	});
+
+	it("reports missing registration rather than claiming a healthy deployment", () => {
+		const home = piHome(["npm:fakedaemon"]);
+		installDaemonPackage(home, "fakedaemon");
+		const report = checkServiceUnitPaths(home, undefined, fakeDeps({ vehicles: [] }));
+		expect(report.ok).toBe(false);
+		expect(report.diagnostics[0]?.code).toBe("SERVICE_NOT_REGISTERED");
+	});
+
+	it("reports native descriptor drift independently of version equality", () => {
+		const home = piHome(["npm:fakedaemon"]);
+		installDaemonPackage(home, "fakedaemon");
+		const report = checkServiceUnitPaths(home, undefined, fakeDeps({ vehicles: [{
+			name: "fakedaemon", executable: "/managed/cli.ts", version: "1.0.0", descriptorDrift: true,
+		}] }));
+		expect(report.diagnostics).toContainEqual(expect.objectContaining({ code: "SERVICE_DESCRIPTOR_DRIFT" }));
+	});
+
 	it("skips packages with no Armada-managed Vehicle", () => {
 		const home = piHome(["npm:not-a-daemon"]);
 		const dir = join(home, "npm", "node_modules", "not-a-daemon");

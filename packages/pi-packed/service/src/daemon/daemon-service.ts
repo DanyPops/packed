@@ -30,6 +30,7 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { satisfies, validRange } from "semver";
 import { createVehicleRegistrar, type VehicleRegistrar, type VehicleRegistrationOutcome, type VehicleSpec } from "@danypops/armada";
 import { resolveDaemonPaths } from "@danypops/vehicle-server/paths";
 import {
@@ -208,12 +209,18 @@ function resolveDependencyNameCandidate(
 	packageDir: string,
 	depName: string,
 	hoistedNodeModulesDir: string | undefined,
+	requiredRange: string,
 ): ResolvedDaemonEntrypoint | undefined {
 	const candidateDirs = [join(packageDir, "node_modules", depName), ...(hoistedNodeModulesDir ? [join(hoistedNodeModulesDir, depName)] : [])];
-	const resolved = candidateDirs
+	const installed = candidateDirs
 		.map((depDir) => resolveDependencyCandidate(depDir, depName))
 		.filter((entry): entry is ResolvedDaemonEntrypoint => entry !== undefined);
-	if (resolved.length === 0) return undefined;
+	if (installed.length === 0) return undefined;
+	if (!validRange(requiredRange)) throw new Error(`cannot verify daemon requirement ${depName}@${requiredRange}`);
+	const resolved = installed.filter((entry) => satisfies(entry.version, requiredRange));
+	if (resolved.length === 0) {
+		throw new Error(`daemon ${depName} requires ${requiredRange}; installed candidates: ${installed.map((entry) => entry.version).join(", ")}`);
+	}
 	if (resolved.length === 1) return resolved[0];
 	// Nested and hoisted both resolved for the same dependency (the real jittor incident:
 	// a stale nested copy always won just because it's checked first). Prefer the newer
@@ -255,8 +262,8 @@ export function detectVehicleDaemonService(
 	const byName = unscopedName(own.name ?? fallbackName);
 	const wantedNamesake = namesakeDaemonName(byName);
 	const candidates: ResolvedDaemonEntrypoint[] = [];
-	for (const depName of Object.keys(own.dependencies ?? {})) {
-		const resolved = resolveDependencyNameCandidate(packageDir, depName, hoistedNodeModulesDir);
+	for (const [depName, requiredRange] of Object.entries(own.dependencies ?? {})) {
+		const resolved = resolveDependencyNameCandidate(packageDir, depName, hoistedNodeModulesDir, requiredRange);
 		if (!resolved) continue;
 		if (wantedNamesake !== undefined && resolved.name === wantedNamesake) return resolved;
 		candidates.push(resolved);
@@ -335,8 +342,12 @@ export function resolveDaemonServiceSpec(piHome: string, source: string): Resolv
 		};
 	}
 
-	const detected = detectVehicleDaemonService(packageDir, packageName, join(piHome, "npm", "node_modules"));
-	if (detected) return { ok: true, spec: buildSpec(detected) };
+	try {
+		const detected = detectVehicleDaemonService(packageDir, packageName, join(piHome, "npm", "node_modules"));
+		if (detected) return { ok: true, spec: buildSpec(detected) };
+	} catch (error) {
+		return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+	}
 
 	return {
 		ok: false,

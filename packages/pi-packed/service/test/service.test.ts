@@ -531,6 +531,21 @@ describe("service app", () => {
 		expect(inst.updated).toBe("npm:pi-lsp");
 	});
 
+	it("POST /update reports package success separately from pending daemon adoption", async () => {
+		const svc = new FakeDaemonServiceInstaller();
+		svc.restarted = false;
+		svc.restartReason = "no persistent service is registered for probe";
+		const app = createApp(deps({ daemonServiceInstaller: svc }));
+		const response = await app.fetch(new Request("http://x/update", {
+			method: "POST", headers: { ...auth, "content-type": "application/json" },
+			body: JSON.stringify({ source: "npm:probe", approved: true }),
+		}));
+		expect(await response.json()).toMatchObject({
+			ok: false, packageUpdated: true, serviceReconciled: false,
+			output: expect.stringContaining("Daemon adoption required"),
+		});
+	});
+
 	it("POST /update reconciles an installed Vehicle after a real package change", async () => {
 		const svc = new FakeDaemonServiceInstaller();
 		const piHome = track(mkdtempSync(join(tmpdir(), "packed-update-vehicle-")));
